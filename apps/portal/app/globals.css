@@ -383,3 +383,31 @@ select {
   border-radius: 8px;
   padding: 6px 10px;
 }
+
+input[type="text"] {
+  background: #121a22;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  min-width: 12rem;
+}
+
+.subhead {
+  margin: 16px 0 8px;
+  font-size: 0.95rem;
+}
+
+.sql-preview {
+  margin: 0;
+  padding: 12px;
+  max-height: min(50vh, 420px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0c1218;
+  color: #d7e2ee;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+}

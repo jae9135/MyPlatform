@@ -1,4 +1,4 @@
-"""MyPlatform API — 업로드 → 점검 → 결과(JSON/xlsx). 서버에 결과 미보관."""
+"""MyPlatform API — 업로드 → 처리 → 결과 반환. 서버에 결과 미보관."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import io
 import os
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -14,7 +15,11 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_CHK_DIR = Path(os.getenv("CHKDBSTD_DIR", str(APP_DIR / "chkdbstd")))
+DEFAULT_DBMANAGER_DIR = Path(
+    os.getenv("DBMANAGER_DIR", str(APP_DIR / "dbmanager"))
+)
 SAMPLES_DIR = APP_DIR / "samples"
+DBMANAGER_SAMPLES_DIR = SAMPLES_DIR / "dbmanager"
 
 SAMPLE_CATALOG = [
     {
@@ -33,7 +38,16 @@ SAMPLE_CATALOG = [
     },
 ]
 
-app = FastAPI(title="MyPlatform API", version="0.2.0")
+DBMANAGER_SAMPLE_CATALOG = [
+    {
+        "id": "design",
+        "title": "샘플 테이블정의서",
+        "filename": "design.sample.xlsx",
+        "description": "PostgreSQL DDL 생성용 테이블정의서 샘플",
+    },
+]
+
+app = FastAPI(title="MyPlatform API", version="0.3.0")
 
 origins = [
     o.strip()
@@ -58,8 +72,15 @@ def health() -> dict:
         "ok": True,
         "chkdbstd_dir": str(DEFAULT_CHK_DIR),
         "chkdbstd_found": (DEFAULT_CHK_DIR / "chk_std_word.py").exists(),
+        "dbmanager_dir": str(DEFAULT_DBMANAGER_DIR),
+        "dbmanager_found": (DEFAULT_DBMANAGER_DIR / "service.py").exists(),
         "samples": sum(
             1 for s in SAMPLE_CATALOG if (SAMPLES_DIR / s["filename"]).exists()
+        ),
+        "dbmanager_samples": sum(
+            1
+            for s in DBMANAGER_SAMPLE_CATALOG
+            if (DBMANAGER_SAMPLES_DIR / s["filename"]).exists()
         ),
     }
 
@@ -79,6 +100,24 @@ def _load_chk_module():
     import chk_std_word as m  # type: ignore
 
     return m
+
+
+def _load_dbmanager():
+    service_py = DEFAULT_DBMANAGER_DIR / "service.py"
+    if not service_py.exists():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "DBManager 소스를 찾을 수 없습니다. "
+                "apps/api/dbmanager 번들을 확인하세요."
+            ),
+        )
+    api_parent = str(APP_DIR)
+    if api_parent not in sys.path:
+        sys.path.insert(0, api_parent)
+    import dbmanager.service as svc  # type: ignore
+
+    return svc
 
 
 def _run_check(m, design_path: Path, kind: str):
@@ -200,4 +239,91 @@ async def run_chk_db_std(
         io.BytesIO(data or b""),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@app.get("/v1/db-manager/samples")
+def list_dbmanager_samples() -> dict:
+    items = []
+    for s in DBMANAGER_SAMPLE_CATALOG:
+        path = DBMANAGER_SAMPLES_DIR / s["filename"]
+        if not path.exists():
+            continue
+        items.append(
+            {
+                **s,
+                "bytes": path.stat().st_size,
+                "download_path": f"/v1/db-manager/samples/{s['id']}",
+            }
+        )
+    return {"items": items}
+
+
+@app.get("/v1/db-manager/samples/{sample_id}")
+def download_dbmanager_sample(sample_id: str):
+    meta = next((s for s in DBMANAGER_SAMPLE_CATALOG if s["id"] == sample_id), None)
+    if not meta:
+        raise HTTPException(404, detail="unknown sample id")
+    path = DBMANAGER_SAMPLES_DIR / meta["filename"]
+    if not path.exists():
+        raise HTTPException(404, detail="sample file missing on server")
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=meta["filename"],
+    )
+
+
+@app.post("/v1/db-manager/generate")
+async def generate_dbmanager_ddl(
+    design: UploadFile = File(...),
+    sheet: str = Form("테이블정의서"),
+    format: str = Form("json"),
+):
+    """테이블정의서 → PostgreSQL DDL. format=json|zip. 서버 미보관."""
+    fmt = (format or "json").lower().strip()
+    if fmt not in ("json", "zip"):
+        raise HTTPException(400, detail="format must be json|zip")
+
+    raw = await design.read()
+    if not raw:
+        raise HTTPException(400, detail="empty design file")
+
+    svc = _load_dbmanager()
+
+    with tempfile.TemporaryDirectory(prefix="myplatform_dbm_") as tmp:
+        tmp_path = Path(tmp)
+        out_dir = tmp_path / "ddl"
+        try:
+            result = svc.generate_from_upload(
+                raw, sheet_name=sheet or "테이블정의서", output_dir=out_dir
+            )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+        if fmt == "json":
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "source_filename": design.filename or "design.xlsx",
+                    "sheet": sheet or "테이블정의서",
+                    "tables": result["tables"],
+                    "scripts": result["scripts"],
+                    "grouped": result["grouped"],
+                    "db_name": result["db_name"],
+                }
+            )
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for script in result["scripts"]:
+                zf.writestr(script["name"], script["content"])
+        buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="dbmanager_ddl.zip"'
+        },
     )

@@ -23,7 +23,7 @@ export const APPS: PlatformApp[] = [
     id: "db-manager",
     name: "DBManager",
     description: "테이블정의서 → PostgreSQL DDL / 데이터 관리",
-    status: "planned",
+    status: "beta",
     href: "/apps/db-manager",
     category: "db-std",
   },
