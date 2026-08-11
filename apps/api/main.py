@@ -1,4 +1,4 @@
-"""MyPlatform API — 업로드 → 점검 → 결과 다운로드 (서버에 결과 미보관)."""
+"""MyPlatform API — 업로드 → 점검 → 결과(JSON/xlsx). 서버에 결과 미보관."""
 
 from __future__ import annotations
 
@@ -10,15 +10,30 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 APP_DIR = Path(__file__).resolve().parent
-# Bundled port under apps/api/chkdbstd. Override with CHKDBSTD_DIR if needed.
-DEFAULT_CHK_DIR = Path(
-    os.getenv("CHKDBSTD_DIR", str(APP_DIR / "chkdbstd"))
-)
+DEFAULT_CHK_DIR = Path(os.getenv("CHKDBSTD_DIR", str(APP_DIR / "chkdbstd")))
+SAMPLES_DIR = APP_DIR / "samples"
 
-app = FastAPI(title="MyPlatform API", version="0.1.0")
+SAMPLE_CATALOG = [
+    {
+        "id": "design",
+        "title": "샘플 테이블정의서",
+        "filename": "design.sample.xlsx",
+        "kinds": ["word", "term", "domain"],
+        "description": "표준단어·용어·도메인 점검용 설계서 샘플",
+    },
+    {
+        "id": "code-design",
+        "title": "샘플 코드정의서",
+        "filename": "code-design.sample.xlsx",
+        "kinds": ["code"],
+        "description": "표준코드 점검용 코드정의서 샘플",
+    },
+]
+
+app = FastAPI(title="MyPlatform API", version="0.2.0")
 
 origins = [
     o.strip()
@@ -43,6 +58,9 @@ def health() -> dict:
         "ok": True,
         "chkdbstd_dir": str(DEFAULT_CHK_DIR),
         "chkdbstd_found": (DEFAULT_CHK_DIR / "chk_std_word.py").exists(),
+        "samples": sum(
+            1 for s in SAMPLE_CATALOG if (SAMPLES_DIR / s["filename"]).exists()
+        ),
     }
 
 
@@ -63,14 +81,81 @@ def _load_chk_module():
     return m
 
 
+def _run_check(m, design_path: Path, kind: str):
+    if kind == "word":
+        match_df, review_df, unmatched_df, payload = m.run_word_match(
+            design_path, m.DEFAULT_WORDS
+        )
+        return match_df, review_df, unmatched_df, payload, m.WORD_MATCH_COLS, "tri"
+    if kind == "term":
+        match_df, review_df, unmatched_df, payload = m.run_term_match(
+            design_path, m.DEFAULT_TERMS, m.DEFAULT_WORDS
+        )
+        return match_df, review_df, unmatched_df, payload, m.TERM_MATCH_COLS, "tri"
+    if kind == "domain":
+        match_df, review_df, unmatched_df, payload = m.run_domain_check(
+            design_path, m.DEFAULT_TERMS, m.DEFAULT_DOMAINS
+        )
+        return match_df, review_df, unmatched_df, payload, None, "domain"
+    match_df, review_df, unmatched_df, payload = m.run_code_check(
+        design_path, m.DEFAULT_CODE_DIR
+    )
+    return match_df, review_df, unmatched_df, payload, None, "code"
+
+
+def _save_result_xlsx(m, kind_mode, match_df, review_df, unmatched_df, cols, out_path):
+    if kind_mode == "tri":
+        m.save_excel_tri(match_df, review_df, unmatched_df, out_path, cols)
+    elif kind_mode == "domain":
+        m.save_domain_excel(match_df, review_df, unmatched_df, out_path)
+    else:
+        m.save_code_excel(match_df, review_df, unmatched_df, out_path)
+
+
+@app.get("/v1/chk-db-std/samples")
+def list_samples() -> dict:
+    items = []
+    for s in SAMPLE_CATALOG:
+        path = SAMPLES_DIR / s["filename"]
+        if not path.exists():
+            continue
+        items.append(
+            {
+                **s,
+                "bytes": path.stat().st_size,
+                "download_path": f"/v1/chk-db-std/samples/{s['id']}",
+            }
+        )
+    return {"items": items}
+
+
+@app.get("/v1/chk-db-std/samples/{sample_id}")
+def download_sample(sample_id: str):
+    meta = next((s for s in SAMPLE_CATALOG if s["id"] == sample_id), None)
+    if not meta:
+        raise HTTPException(404, detail="unknown sample id")
+    path = SAMPLES_DIR / meta["filename"]
+    if not path.exists():
+        raise HTTPException(404, detail="sample file missing on server")
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=meta["filename"],
+    )
+
+
 @app.post("/v1/chk-db-std/run")
 async def run_chk_db_std(
     design: UploadFile = File(...),
     kind: str = Form("word"),
+    format: str = Form("json"),
 ):
-    """설계서 업로드 → 점검 → xlsx 스트리밍. 디스크에 결과 상주 저장 안 함."""
+    """설계서 업로드 → 점검. format=json|xlsx. 디스크에 결과 상주 저장 안 함."""
     if kind not in ("word", "term", "domain", "code"):
         raise HTTPException(400, detail="kind must be word|term|domain|code")
+    fmt = (format or "json").lower().strip()
+    if fmt not in ("json", "xlsx"):
+        raise HTTPException(400, detail="format must be json|xlsx")
 
     raw = await design.read()
     if not raw:
@@ -85,38 +170,34 @@ async def run_chk_db_std(
         out_path = tmp_path / "result.xlsx"
 
         try:
-            if kind == "word":
-                match_df, review_df, unmatched_df, _ = m.run_word_match(
-                    design_path, m.DEFAULT_WORDS
+            match_df, review_df, unmatched_df, payload, cols, mode = _run_check(
+                m, design_path, kind
+            )
+            if fmt == "xlsx":
+                _save_result_xlsx(
+                    m, mode, match_df, review_df, unmatched_df, cols, out_path
                 )
-                m.save_excel_tri(
-                    match_df, review_df, unmatched_df, out_path, m.WORD_MATCH_COLS
-                )
-            elif kind == "term":
-                match_df, review_df, unmatched_df, _ = m.run_term_match(
-                    design_path, m.DEFAULT_TERMS, m.DEFAULT_WORDS
-                )
-                m.save_excel_tri(
-                    match_df, review_df, unmatched_df, out_path, m.TERM_MATCH_COLS
-                )
-            elif kind == "domain":
-                match_df, review_df, unmatched_df, _ = m.run_domain_check(
-                    design_path, m.DEFAULT_TERMS, m.DEFAULT_DOMAINS
-                )
-                m.save_domain_excel(match_df, review_df, unmatched_df, out_path)
+                data = out_path.read_bytes()
             else:
-                match_df, review_df, unmatched_df, _ = m.run_code_check(
-                    design_path, m.DEFAULT_CODE_DIR
-                )
-                m.save_code_excel(match_df, review_df, unmatched_df, out_path)
+                data = None
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
-        data = out_path.read_bytes()
+        if fmt == "json":
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "kind": kind,
+                    "source_filename": design.filename or "design.xlsx",
+                    **payload,
+                }
+            )
 
     fname = f"chkdbstd_{kind}_result.xlsx"
     return StreamingResponse(
-        io.BytesIO(data),
+        io.BytesIO(data or b""),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )

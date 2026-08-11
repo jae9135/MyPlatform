@@ -22,6 +22,7 @@ build/
 **/code_download/downloads/*.zip
 **/*.xlsx
 !**/*.example.xlsx
+!**/*.sample.xlsx
 **/표준*매칭결과*
 **/.chkdbstd_tmp/
 # keep bundled code index for Render (apps/api/chkdbstd)
