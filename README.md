@@ -114,6 +114,8 @@ MyPlatform/
 
 ## 배포 체크리스트
 
+상세 절차: [docs/DEPLOY.md](docs/DEPLOY.md)
+
 - [ ] GitHub repo push
 - [ ] Supabase 프로젝트 + SQL 마이그레이션
 - [ ] Storage 버킷 + 샘플 업로드
@@ -121,3 +123,6 @@ MyPlatform/
 - [ ] Render → `apps/api` 배포
 - [ ] 포털 env에 API URL 연결
 - [ ] 모바일에서 포털 접속·샘플 점검 스모크 테스트
+
+> 이 환경에는 GitHub CLI(`gh`)·Vercel 로그인이 없어 **클라우드 배포 URL 생성까지는 계정 연동 후** 위 문서를 따라 완료하면 됩니다.  
+> 포털 빌드(`npm run build`)와 git 커밋까지는 로컬에서 완료해 두었습니다.
