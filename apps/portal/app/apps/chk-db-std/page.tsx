@@ -64,7 +64,7 @@ export default function ChkDbStdPage() {
         ← MyPlatform
       </Link>
       <section className="hero">
-        <h1>ChkDBStd</h1>
+        <h1>DB 표준 점검 도구</h1>
         <p>
           모바일/웹에서 설계서를 올려 점검을 실행하고, 결과 Excel만 기기에
           받습니다. 공통 표준 파일은 API 서버(또는 Supabase Storage)에 둡니다.
