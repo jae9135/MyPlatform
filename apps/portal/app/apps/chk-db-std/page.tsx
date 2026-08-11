@@ -262,6 +262,52 @@ export default function ChkDbStdPage() {
     }
   }, [file, kind]);
 
+  const downloadDictionary = useCallback(async () => {
+    if (!file) {
+      setMsg("설계서를 먼저 선택하세요.");
+      return;
+    }
+    if (kind !== "word" && kind !== "term") {
+      setMsg("단어집/용어집은 표준단어 또는 표준용어 점검에서만 가능합니다.");
+      return;
+    }
+    const dictFormat = kind === "word" ? "word-dict" : "term-dict";
+    const label = kind === "word" ? "단어집" : "용어집";
+    const fname =
+      kind === "word"
+        ? "chkdbstd_used_word_dictionary.xlsx"
+        : "chkdbstd_used_term_dictionary.xlsx";
+    setBusy(true);
+    setMsg(`${label} 생성 중…`);
+    try {
+      const fd = new FormData();
+      fd.append("design", file);
+      fd.append("kind", kind);
+      fd.append("format", dictFormat);
+      const res = await fetch(`${API_BASE}/v1/chk-db-std/run`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        let detail = `${label} 다운로드 실패`;
+        try {
+          const j = await res.json();
+          detail = j.detail || j.error || detail;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(detail);
+      }
+      const blob = await res.blob();
+      downloadBlob(blob, fname);
+      setMsg(`완료 — ${label}을 저장했습니다.`);
+    } catch (e) {
+      setMsg(String((e as Error).message || e));
+    } finally {
+      setBusy(false);
+    }
+  }, [file, kind]);
+
   async function downloadSample(sample: SampleItem) {
     try {
       const res = await fetch(`${API_BASE}${sample.download_path}`);
@@ -373,7 +419,21 @@ export default function ChkDbStdPage() {
           >
             결과 Excel 다운로드
           </button>
+          {kind === "word" || kind === "term" ? (
+            <button
+              className="btn ghost"
+              type="button"
+              disabled={busy || !file}
+              onClick={downloadDictionary}
+            >
+              {kind === "word" ? "단어집 다운로드" : "용어집 다운로드"}
+            </button>
+          ) : null}
         </div>
+        <p className="hint">
+          단어집/용어집: 점검에 사용된 표준단어·용어와 미등록후보를 Excel로
+          받습니다. (표준단어·표준용어 종류에서만)
+        </p>
         <p
           className={`msg ${
             msg.includes("완료") || msg.includes("샘플 저장")

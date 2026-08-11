@@ -17,7 +17,7 @@ python -m uvicorn main:app --reload --port 8000
 ```
 
 - Health: http://127.0.0.1:8000/health
-- ChkDBStd: `GET /v1/chk-db-std/samples`, `POST /v1/chk-db-std/run` (`format=json|xlsx`)
+- ChkDBStd: `GET /v1/chk-db-std/samples`, `POST /v1/chk-db-std/run` (`format=json|xlsx|word-dict|term-dict`)
 - DBManager: `GET /v1/db-manager/samples`, `POST /v1/db-manager/generate` (`format=json|zip`)
 
 ## Render

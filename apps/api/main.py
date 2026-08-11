@@ -151,6 +151,27 @@ def _save_result_xlsx(m, kind_mode, match_df, review_df, unmatched_df, cols, out
         m.save_code_excel(match_df, review_df, unmatched_df, out_path)
 
 
+def _save_dictionary_xlsx(m, kind: str, match_df, review_df, unmatched_df, out_path: Path):
+    if kind == "word":
+        m.build_word_dictionary_file(
+            match_df, review_df, unmatched_df, m.DEFAULT_WORDS, out_path
+        )
+        return "chkdbstd_used_word_dictionary.xlsx"
+    if kind == "term":
+        m.build_term_dictionary_file(
+            match_df,
+            review_df,
+            unmatched_df,
+            m.DEFAULT_TERMS,
+            m.DEFAULT_WORDS,
+            out_path,
+        )
+        return "chkdbstd_used_term_dictionary.xlsx"
+    raise HTTPException(
+        400, detail="단어집/용어집은 kind=word 또는 term 일 때만 가능합니다."
+    )
+
+
 @app.get("/v1/chk-db-std/samples")
 def list_samples() -> dict:
     items = []
@@ -189,12 +210,18 @@ async def run_chk_db_std(
     kind: str = Form("word"),
     format: str = Form("json"),
 ):
-    """설계서 업로드 → 점검. format=json|xlsx. 디스크에 결과 상주 저장 안 함."""
+    """설계서 업로드 → 점검. format=json|xlsx|word-dict|term-dict."""
     if kind not in ("word", "term", "domain", "code"):
         raise HTTPException(400, detail="kind must be word|term|domain|code")
     fmt = (format or "json").lower().strip()
-    if fmt not in ("json", "xlsx"):
-        raise HTTPException(400, detail="format must be json|xlsx")
+    if fmt not in ("json", "xlsx", "word-dict", "term-dict"):
+        raise HTTPException(
+            400, detail="format must be json|xlsx|word-dict|term-dict"
+        )
+    if fmt == "word-dict" and kind != "word":
+        raise HTTPException(400, detail="word-dict requires kind=word")
+    if fmt == "term-dict" and kind != "term":
+        raise HTTPException(400, detail="term-dict requires kind=term")
 
     raw = await design.read()
     if not raw:
@@ -212,9 +239,15 @@ async def run_chk_db_std(
             match_df, review_df, unmatched_df, payload, cols, mode = _run_check(
                 m, design_path, kind
             )
+            fname = f"chkdbstd_{kind}_result.xlsx"
             if fmt == "xlsx":
                 _save_result_xlsx(
                     m, mode, match_df, review_df, unmatched_df, cols, out_path
+                )
+                data = out_path.read_bytes()
+            elif fmt in ("word-dict", "term-dict"):
+                fname = _save_dictionary_xlsx(
+                    m, kind, match_df, review_df, unmatched_df, out_path
                 )
                 data = out_path.read_bytes()
             else:
@@ -234,7 +267,6 @@ async def run_chk_db_std(
                 }
             )
 
-    fname = f"chkdbstd_{kind}_result.xlsx"
     return StreamingResponse(
         io.BytesIO(data or b""),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
