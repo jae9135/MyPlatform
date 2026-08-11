@@ -13,12 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 APP_DIR = Path(__file__).resolve().parent
-# 기존 ChkDBStd 소스 (로컬 개발용). Render에서는 환경변수 또는 번들로 교체.
+# Bundled port under apps/api/chkdbstd. Override with CHKDBSTD_DIR if needed.
 DEFAULT_CHK_DIR = Path(
-    os.getenv(
-        "CHKDBSTD_DIR",
-        r"C:\Mywork\AI\cursor\09 독자 제공용 파일\study\ChkDBStd",
-    )
+    os.getenv("CHKDBSTD_DIR", str(APP_DIR / "chkdbstd"))
 )
 
 app = FastAPI(title="MyPlatform API", version="0.1.0")
