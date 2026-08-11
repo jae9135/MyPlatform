@@ -1,0 +1,24 @@
+# Render Blueprint
+# https://render.com/docs/blueprint-spec
+# Dashboard → New → Blueprint → 이 repo 연결
+
+services:
+  - type: web
+    name: myplatform-api
+    runtime: python
+    rootDir: apps/api
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: CORS_ORIGINS
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: KEEP_UPLOADS
+        value: "false"

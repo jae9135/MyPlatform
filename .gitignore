@@ -1,0 +1,38 @@
+# deps
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# build
+apps/portal/.next/
+apps/portal/out/
+dist/
+build/
+.turbo/
+
+# local data (never commit large standards)
+**/code_download/
+**/*.xlsx
+!**/*.example.xlsx
+**/표준*매칭결과*
+**/.chkdbstd_tmp/
+**/.std_code_index.pkl
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# vercel / supabase local
+.vercel
+supabase/.branches
+supabase/.temp
