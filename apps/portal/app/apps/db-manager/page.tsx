@@ -100,6 +100,15 @@ export default function DbManagerPage() {
     table: "",
     sample: "",
   });
+  const [syncSchemas, setSyncSchemas] = useState<string[]>([]);
+  const [syncSchema, setSyncSchema] = useState("db1");
+  const [syncTables, setSyncTables] = useState<
+    { name: string; korean_name: string; columns: number }[]
+  >([]);
+  const [syncSelected, setSyncSelected] = useState<string[]>([]);
+  const [syncDbName, setSyncDbName] = useState("dbm");
+  const [syncBaseFile, setSyncBaseFile] = useState<File | null>(null);
+  const [syncMsg, setSyncMsg] = useState("");
 
   const refreshDbStatus = useCallback(async () => {
     try {
@@ -113,6 +122,56 @@ export default function DbManagerPage() {
         target: null,
         message: "API에 연결할 수 없습니다.",
       });
+    }
+  }, []);
+
+  const loadSyncSchemas = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/v1/db-manager/schemas`);
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSyncMsg(j.detail || "스키마 목록을 가져오지 못했습니다.");
+        setSyncSchemas([]);
+        return;
+      }
+      const list: string[] = j.schemas || [];
+      setSyncSchemas(list);
+      setSyncMsg("");
+      setSyncSchema((prev) =>
+        list.length === 0 ? prev : list.includes(prev) ? prev : list[0]
+      );
+    } catch {
+      setSyncMsg("스키마 목록 API에 연결할 수 없습니다.");
+    }
+  }, []);
+
+  const loadSyncTables = useCallback(async (schema: string) => {
+    if (!schema) {
+      setSyncTables([]);
+      setSyncSelected([]);
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${API_BASE}/v1/db-manager/schemas/${encodeURIComponent(schema)}/tables`
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSyncMsg(j.detail || "테이블 목록을 가져오지 못했습니다.");
+        setSyncTables([]);
+        setSyncSelected([]);
+        return;
+      }
+      const list = j.tables || [];
+      setSyncTables(list);
+      setSyncSelected(list.map((t: { name: string }) => t.name));
+      setSyncMsg(
+        list.length
+          ? `${schema}: 테이블 ${list.length}개`
+          : `${schema}: 테이블 없음`
+      );
+    } catch {
+      setSyncMsg("테이블 목록 API에 연결할 수 없습니다.");
     }
   }, []);
 
@@ -138,6 +197,18 @@ export default function DbManagerPage() {
     setApplySql(scriptsForApply(result));
     setApplyMsg({ schema: "", table: "", sample: "" });
   }, [result]);
+
+  useEffect(() => {
+    if (dbStatus?.ok) {
+      loadSyncSchemas();
+    }
+  }, [dbStatus?.ok, loadSyncSchemas]);
+
+  useEffect(() => {
+    if (dbStatus?.ok && syncSchema) {
+      loadSyncTables(syncSchema);
+    }
+  }, [dbStatus?.ok, syncSchema, loadSyncTables]);
 
   const generate = useCallback(async () => {
     if (!file) {
@@ -254,6 +325,61 @@ export default function DbManagerPage() {
     [applySql]
   );
 
+  const exportDesign = useCallback(async () => {
+    if (!syncSchema) {
+      setSyncMsg("스키마를 선택하세요.");
+      return;
+    }
+    if (!syncSelected.length) {
+      setSyncMsg("내보낼 테이블을 하나 이상 선택하세요.");
+      return;
+    }
+    setBusy(true);
+    setSyncMsg("설계서 생성 중…");
+    try {
+      const fd = new FormData();
+      fd.append("schema", syncSchema);
+      fd.append("tables", syncSelected.join(","));
+      fd.append("db_name", syncDbName || "dbm");
+      if (syncBaseFile) {
+        fd.append("design", syncBaseFile);
+      }
+      const res = await fetch(`${API_BASE}/v1/db-manager/export-design`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        let detail = "설계서 생성 실패";
+        try {
+          const j = await res.json();
+          detail = j.detail || detail;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(detail);
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") || "";
+      const m = /filename="?([^"]+)"?/i.exec(cd);
+      const fname = m?.[1] || `design_${syncSchema}.xlsx`;
+      downloadBlob(blob, fname);
+      setSyncMsg(
+        `완료 — ${syncSelected.length}개 테이블을 설계서로 저장했습니다.`
+      );
+      setMsg(`설계서 저장: ${fname}`);
+    } catch (e) {
+      setSyncMsg(String((e as Error).message || e));
+    } finally {
+      setBusy(false);
+    }
+  }, [syncSchema, syncSelected, syncDbName, syncBaseFile]);
+
+  function toggleSyncTable(name: string) {
+    setSyncSelected((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    );
+  }
+
   async function downloadSample(sample: SampleItem) {
     try {
       const res = await fetch(`${API_BASE}${sample.download_path}`);
@@ -311,7 +437,8 @@ export default function DbManagerPage() {
         <h1>DBManager</h1>
         <p>
           테이블정의서 Excel을 PostgreSQL DDL로 변환하고, API 서버에 설정된
-          Supabase DB에 스키마·테이블·샘플을 적용할 수 있습니다.
+          Supabase DB에 스키마·테이블·샘플을 적용하거나, DB 구조를 다시
+          설계서로 받을 수 있습니다.
         </p>
       </section>
 
@@ -530,6 +657,163 @@ export default function DbManagerPage() {
             </div>
           </div>
         ))}
+      </section>
+
+      <section className="panel">
+        <h3>DB → 설계서 반영</h3>
+        <p className="hint">
+          Supabase에 있는 테이블 구조를 읽어 테이블정의서 Excel로 다운로드합니다.
+          기준 설계서를 선택하면 기존 행에 병합(한글명 유지)하고, 없으면 DB
+          내용만으로 새 양식을 만듭니다.
+        </p>
+        {!dbStatus?.ok ? (
+          <p className="hint">
+            DB 연결이 필요합니다. 위 「Supabase에 적용」에서 연결 상태를
+            확인하세요.
+          </p>
+        ) : (
+          <>
+            <div className="row">
+              <label>
+                스키마{" "}
+                <select
+                  value={syncSchema}
+                  onChange={(e) => setSyncSchema(e.target.value)}
+                  disabled={busy || syncSchemas.length === 0}
+                >
+                  {syncSchemas.length === 0 ? (
+                    <option value={syncSchema}>{syncSchema}</option>
+                  ) : (
+                    syncSchemas.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
+              <label>
+                DB명{" "}
+                <input
+                  type="text"
+                  value={syncDbName}
+                  onChange={(e) => setSyncDbName(e.target.value)}
+                  disabled={busy}
+                  style={{ width: "6rem" }}
+                />
+              </label>
+              <button
+                className="btn ghost"
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  loadSyncSchemas();
+                  if (syncSchema) loadSyncTables(syncSchema);
+                }}
+              >
+                목록 새로고침
+              </button>
+            </div>
+
+            <div className="row" style={{ marginTop: "0.75rem" }}>
+              <label>
+                기준 설계서 (선택){" "}
+                <input
+                  type="file"
+                  accept=".xlsx,.xlsm"
+                  disabled={busy}
+                  onChange={(e) =>
+                    setSyncBaseFile(e.target.files?.[0] || null)
+                  }
+                />
+              </label>
+            </div>
+
+            <h4 className="subhead">테이블 선택</h4>
+            {syncTables.length === 0 ? (
+              <p className="hint">이 스키마에 테이블이 없습니다.</p>
+            ) : (
+              <>
+                <div className="row">
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      setSyncSelected(syncTables.map((t) => t.name))
+                    }
+                  >
+                    전체 선택
+                  </button>
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setSyncSelected([])}
+                  >
+                    선택 해제
+                  </button>
+                  <span className="hint">
+                    {syncSelected.length}/{syncTables.length} 선택
+                  </span>
+                </div>
+                <ul className="sample-list">
+                  {syncTables.map((t) => (
+                    <li key={t.name}>
+                      <label
+                        style={{
+                          display: "flex",
+                          gap: "0.5rem",
+                          alignItems: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={syncSelected.includes(t.name)}
+                          disabled={busy}
+                          onChange={() => toggleSyncTable(t.name)}
+                        />
+                        <span>
+                          <strong>{t.name}</strong>
+                          <span className="hint">
+                            {" "}
+                            {t.korean_name} · 컬럼 {t.columns}
+                          </span>
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            <div className="row" style={{ marginTop: "0.75rem" }}>
+              <button
+                className="btn"
+                type="button"
+                disabled={busy || !syncSelected.length}
+                onClick={exportDesign}
+              >
+                설계서 다운로드
+              </button>
+              {syncMsg ? (
+                <span
+                  className={`msg ${
+                    syncMsg.includes("완료")
+                      ? "ok"
+                      : syncMsg.includes("생성 중") ||
+                          syncMsg.includes("테이블")
+                        ? ""
+                        : "err"
+                  }`}
+                >
+                  {syncMsg}
+                </span>
+              ) : null}
+            </div>
+          </>
+        )}
       </section>
     </main>
   );

@@ -24,6 +24,8 @@ python -m uvicorn main:app --reload --port 8000
   - `GET /v1/db-manager/samples`
   - `POST /v1/db-manager/generate` (`format=json|zip`)
   - `GET /v1/db-manager/db-status`
+  - `GET /v1/db-manager/schemas`, `GET /v1/db-manager/schemas/{schema}/tables`
+  - `POST /v1/db-manager/export-design` (DB → 테이블정의서 xlsx)
   - `POST /v1/db-manager/apply` (`step=schema|table|sample`)
 
 ## Render

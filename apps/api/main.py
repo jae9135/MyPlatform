@@ -428,6 +428,131 @@ def dbmanager_db_status() -> dict:
     }
 
 
+def _require_db_ready():
+    dbc = _load_db_client()
+    if not dbc.is_db_configured():
+        raise HTTPException(
+            503,
+            detail="DATABASE_URL이 설정되지 않았습니다.",
+        )
+    ok, message = dbc.test_connection()
+    if not ok:
+        raise HTTPException(400, detail=f"Connection failed: {message}")
+    return dbc
+
+
+def _load_schema_reader():
+    _ensure_api_path()
+    from dbmanager import schema_reader  # type: ignore
+
+    return schema_reader
+
+
+def _load_excel_writer():
+    _ensure_api_path()
+    from dbmanager import excel_writer  # type: ignore
+
+    return excel_writer
+
+
+@app.get("/v1/db-manager/schemas")
+def dbmanager_list_schemas() -> dict:
+    """사용자 스키마 목록 (시스템/Supabase 관리 스키마 제외)."""
+    dbc = _require_db_ready()
+    sr = _load_schema_reader()
+    try:
+        schemas = sr.list_schemas()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {
+        "ok": True,
+        "target": dbc.masked_target(),
+        "schemas": schemas,
+    }
+
+
+@app.get("/v1/db-manager/schemas/{schema}/tables")
+def dbmanager_list_tables(schema: str) -> dict:
+    """스키마 내 테이블 목록."""
+    dbc = _require_db_ready()
+    sr = _load_schema_reader()
+    try:
+        tables = sr.list_tables(schema)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {
+        "ok": True,
+        "target": dbc.masked_target(),
+        "schema": schema,
+        "tables": tables,
+    }
+
+
+@app.post("/v1/db-manager/export-design")
+async def dbmanager_export_design(
+    schema: str = Form(...),
+    tables: str = Form(""),
+    db_name: str = Form("dbm"),
+    design: UploadFile | None = File(None),
+):
+    """DB 스키마를 테이블정의서 Excel로 반영해 다운로드 (서버 미보관).
+
+    tables: 쉼표 구분 테이블명. 비우면 스키마 전체.
+    design: 선택. 기존 설계서에 병합. 없으면 빈 테이블정의서 양식 생성.
+    """
+    dbc = _require_db_ready()
+    sr = _load_schema_reader()
+    ew = _load_excel_writer()
+
+    schema_name = (schema or "").strip()
+    if not schema_name:
+        raise HTTPException(400, detail="schema is required")
+
+    table_list = [
+        t.strip() for t in (tables or "").split(",") if t.strip()
+    ] or None
+    db_label = (db_name or "dbm").strip() or "dbm"
+
+    template_bytes: bytes | None = None
+    if design is not None and design.filename:
+        template_bytes = await design.read()
+        if not template_bytes:
+            raise HTTPException(400, detail="empty design file")
+    # 기준 설계서 없으면 빈 양식에 DB 구조만 기록 (샘플 파일의 타 테이블과 섞이지 않음)
+
+    try:
+        db_tables = sr.read_schema(schema_name, table_names=table_list)
+        if not db_tables:
+            raise HTTPException(
+                400,
+                detail=f"No tables found in schema '{schema_name}'.",
+            )
+        template_src = io.BytesIO(template_bytes) if template_bytes else None
+        data = ew.write_schema_to_excel_bytes(
+            db_tables,
+            db_name=db_label,
+            template=template_src,
+        )
+        fname = ew.default_export_filename(schema_name)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=(
+            "application/vnd.openxmlformats-officedocument"
+            ".spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": f'attachment; filename="{fname}"',
+            "X-Table-Count": str(len(db_tables)),
+            "X-Db-Target": dbc.masked_target(),
+        },
+    )
+
+
 @app.post("/v1/db-manager/apply")
 def dbmanager_apply(body: ApplySqlBody) -> dict:
     """생성된 DDL을 서버 DATABASE_URL(Supabase)에 적용. step=schema|table|sample."""
