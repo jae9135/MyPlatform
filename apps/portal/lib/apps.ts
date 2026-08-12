@@ -13,7 +13,7 @@ export type PlatformApp = {
 export const APPS: PlatformApp[] = [
   {
     id: "chk-db-std",
-    name: "ChkDBStd",
+    name: "DB 표준 점검 도구",
     description: "행안부 공통표준 단어/용어/도메인/코드 점검",
     status: "beta",
     href: "/apps/chk-db-std",

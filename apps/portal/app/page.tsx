@@ -7,7 +7,7 @@ export default function HomePage() {
       <section className="hero">
         <h1>MyPlatform</h1>
         <p>
-          ChkDBStd · DBManager · DeliverableManager 등 로컬 도구를 웹/모바일에서
+          DB 표준 점검 도구  · DBManager · DeliverableManager 등 로컬 도구를 웹/모바일에서
           쓰기 위한 포털입니다. 공통 샘플·표준은 서버(Storage), 사용자 입력과
           결과 파일은 기기에만 둡니다.
         </p>
