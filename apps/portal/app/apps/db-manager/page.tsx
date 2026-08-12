@@ -296,7 +296,7 @@ export default function DbManagerPage() {
         {
           id: "sample" as const,
           title: "3. 샘플 데이터",
-          hint: "99_sample_data.sql",
+          hint: "99_sample_data.sql — PK는 1,2,… 자동증가(중복 방지)",
         },
       ] as const,
     []

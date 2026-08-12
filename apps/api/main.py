@@ -458,9 +458,14 @@ def dbmanager_apply(body: ApplySqlBody) -> dict:
     if not ok:
         raise HTTPException(400, detail=f"Connection failed: {message}")
 
+    allocations = None
     try:
-        # Multiple statements: use autocommit for DDL robustness on managed PG
-        dbc.execute_sql(sql, autocommit=True)
+        if step == "sample":
+            # PK를 "1","2",… 형태로 DB 마지막 번호+1부터 재부여 후 INSERT
+            allocations = dbc.execute_sample_sql_with_next_pks(sql)
+        else:
+            # Multiple statements: use autocommit for DDL robustness on managed PG
+            dbc.execute_sql(sql, autocommit=True)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -469,9 +474,19 @@ def dbmanager_apply(body: ApplySqlBody) -> dict:
         "table": "Table script executed successfully.",
         "sample": "Sample data inserted successfully.",
     }
+    message = labels[step]
+    if step == "sample" and allocations:
+        parts = [
+            f"{t} → {info.get('from')}~{info.get('to')}"
+            for t, info in allocations.items()
+        ]
+        if parts:
+            message = f"{message} (PK: {', '.join(parts)})"
+
     return {
         "ok": True,
         "step": step,
         "target": dbc.masked_target(),
-        "message": labels[step],
+        "message": message,
+        **({"pk_allocations": allocations} if allocations is not None else {}),
     }

@@ -94,3 +94,25 @@ def execute_sql(sql: str, *, autocommit: bool = False) -> None:
         raise
     finally:
         conn.close()
+
+
+def execute_sample_sql_with_next_pks(sql: str) -> dict:
+    """Rewrite sample INSERT PKs from DB max+1, then execute."""
+    text = (sql or "").strip()
+    if not text:
+        raise ValueError("SQL script is empty.")
+    if len(text) > MAX_SQL_CHARS:
+        raise ValueError(f"SQL too large (max {MAX_SQL_CHARS} characters).")
+
+    from .sample_data import rewrite_sample_sql_with_next_pks
+
+    cfg = get_connection_params()
+    conn = psycopg2.connect(**cfg)
+    conn.autocommit = True
+    try:
+        rewritten, allocations = rewrite_sample_sql_with_next_pks(conn, text)
+        with conn.cursor() as cur:
+            cur.execute(rewritten)
+        return allocations
+    finally:
+        conn.close()
