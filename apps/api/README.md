@@ -13,14 +13,25 @@ FastAPI 서비스. 포털에서 파일을 받아 처리하고 **화면용 JSON**
 cd C:\Mywork\MyPlatform\apps\api
 pip install -r requirements.txt
 $env:CORS_ORIGINS = "http://127.0.0.1:3000,http://localhost:3000"
+# DBManager Supabase 적용용 (Direct 또는 Session pooler URI)
+# $env:DATABASE_URL = "postgresql://postgres....@db.xxxx.supabase.co:5432/postgres"
 python -m uvicorn main:app --reload --port 8000
 ```
 
-- Health: http://127.0.0.1:8000/health
+- Health: http://127.0.0.1:8000/health (`db_configured`)
 - ChkDBStd: `GET /v1/chk-db-std/samples`, `POST /v1/chk-db-std/run` (`format=json|xlsx|word-dict|term-dict`)
-- DBManager: `GET /v1/db-manager/samples`, `POST /v1/db-manager/generate` (`format=json|zip`)
+- DBManager:
+  - `GET /v1/db-manager/samples`
+  - `POST /v1/db-manager/generate` (`format=json|zip`)
+  - `GET /v1/db-manager/db-status`
+  - `POST /v1/db-manager/apply` (`step=schema|table|sample`)
 
 ## Render
 
-환경변수: `CORS_ORIGINS` = Vercel URL  
-(선택) `CHKDBSTD_DIR`, `DBMANAGER_DIR`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+환경변수:
+
+- `CORS_ORIGINS` = Vercel URL
+- `DATABASE_URL` = Supabase Database URI (Session/Direct 권장, Transaction pooler는 DDL에 비권장)
+- (선택) `CHKDBSTD_DIR`, `DBMANAGER_DIR`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+비밀번호는 포털(브라우저)에 두지 않고 API 서버 env에만 둡니다.

@@ -1,4 +1,4 @@
-"""DBManager DDL generation bundle (Excel → PostgreSQL SQL)."""
+"""DBManager DDL generation + Supabase apply helpers."""
 
 from .service import generate_from_path, generate_from_upload
 

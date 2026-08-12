@@ -9,6 +9,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -47,7 +49,12 @@ DBMANAGER_SAMPLE_CATALOG = [
     },
 ]
 
-app = FastAPI(title="MyPlatform API", version="0.3.0")
+app = FastAPI(title="MyPlatform API", version="0.4.0")
+
+
+class ApplySqlBody(BaseModel):
+    step: str = Field(..., description="schema|table|sample")
+    sql: str = Field(..., description="SQL script to execute")
 
 origins = [
     o.strip()
@@ -66,6 +73,22 @@ app.add_middleware(
 )
 
 
+def _ensure_api_path() -> None:
+    api_parent = str(APP_DIR)
+    if api_parent not in sys.path:
+        sys.path.insert(0, api_parent)
+
+
+def _db_configured() -> bool:
+    try:
+        _ensure_api_path()
+        from dbmanager.db_client import is_db_configured  # type: ignore
+
+        return is_db_configured()
+    except Exception:
+        return bool((os.getenv("DATABASE_URL") or "").strip())
+
+
 @app.get("/health")
 def health() -> dict:
     return {
@@ -74,6 +97,7 @@ def health() -> dict:
         "chkdbstd_found": (DEFAULT_CHK_DIR / "chk_std_word.py").exists(),
         "dbmanager_dir": str(DEFAULT_DBMANAGER_DIR),
         "dbmanager_found": (DEFAULT_DBMANAGER_DIR / "service.py").exists(),
+        "db_configured": _db_configured(),
         "samples": sum(
             1 for s in SAMPLE_CATALOG if (SAMPLES_DIR / s["filename"]).exists()
         ),
@@ -112,12 +136,23 @@ def _load_dbmanager():
                 "apps/api/dbmanager 번들을 확인하세요."
             ),
         )
-    api_parent = str(APP_DIR)
-    if api_parent not in sys.path:
-        sys.path.insert(0, api_parent)
+    _ensure_api_path()
     import dbmanager.service as svc  # type: ignore
 
     return svc
+
+
+def _load_db_client():
+    client_py = DEFAULT_DBMANAGER_DIR / "db_client.py"
+    if not client_py.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="dbmanager/db_client.py 가 없습니다.",
+        )
+    _ensure_api_path()
+    import dbmanager.db_client as dbc  # type: ignore
+
+    return dbc
 
 
 def _run_check(m, design_path: Path, kind: str):
@@ -359,3 +394,84 @@ async def generate_dbmanager_ddl(
             "Content-Disposition": 'attachment; filename="dbmanager_ddl.zip"'
         },
     )
+
+
+@app.get("/v1/db-manager/db-status")
+def dbmanager_db_status() -> dict:
+    """Supabase/Postgres 연결 가능 여부 (비밀번호 미포함)."""
+    dbc = _load_db_client()
+    if not dbc.is_db_configured():
+        return {
+            "ok": False,
+            "configured": False,
+            "target": None,
+            "message": (
+                "DATABASE_URL(또는 POSTGRES_*) 환경변수가 없습니다. "
+                "Render/로컬 API에 Supabase DB URI를 설정하세요."
+            ),
+        }
+    try:
+        target = dbc.masked_target()
+    except Exception as e:
+        return {
+            "ok": False,
+            "configured": True,
+            "target": None,
+            "message": str(e),
+        }
+    ok, message = dbc.test_connection()
+    return {
+        "ok": ok,
+        "configured": True,
+        "target": target,
+        "message": message,
+    }
+
+
+@app.post("/v1/db-manager/apply")
+def dbmanager_apply(body: ApplySqlBody) -> dict:
+    """생성된 DDL을 서버 DATABASE_URL(Supabase)에 적용. step=schema|table|sample."""
+    step = (body.step or "").strip().lower()
+    if step == "database":
+        raise HTTPException(
+            400,
+            detail=(
+                "CREATE DATABASE 단계는 Supabase에서 생략합니다. "
+                "기존 프로젝트 DB에 schema → table → sample 순으로 적용하세요."
+            ),
+        )
+    if step not in ("schema", "table", "sample"):
+        raise HTTPException(400, detail="step must be schema|table|sample")
+
+    sql = (body.sql or "").strip()
+    if not sql:
+        raise HTTPException(400, detail="SQL script is empty.")
+
+    dbc = _load_db_client()
+    if not dbc.is_db_configured():
+        raise HTTPException(
+            503,
+            detail="DATABASE_URL이 설정되지 않았습니다.",
+        )
+
+    ok, message = dbc.test_connection()
+    if not ok:
+        raise HTTPException(400, detail=f"Connection failed: {message}")
+
+    try:
+        # Multiple statements: use autocommit for DDL robustness on managed PG
+        dbc.execute_sql(sql, autocommit=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    labels = {
+        "schema": "Schema created successfully.",
+        "table": "Table script executed successfully.",
+        "sample": "Sample data inserted successfully.",
+    }
+    return {
+        "ok": True,
+        "step": step,
+        "target": dbc.masked_target(),
+        "message": labels[step],
+    }

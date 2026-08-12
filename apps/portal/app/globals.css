@@ -411,3 +411,24 @@ input[type="text"] {
   line-height: 1.45;
   white-space: pre;
 }
+
+.apply-step {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.sql-input {
+  width: 100%;
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0c1218;
+  color: #d7e2ee;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  resize: vertical;
+  min-height: 120px;
+}

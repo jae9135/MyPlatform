@@ -10,4 +10,6 @@ Excel 테이블정의서 → PostgreSQL DDL.
 | `sample_data.py` | 샘플 INSERT |
 | `service.py` | API용 generate 헬퍼 |
 
-1차는 DDL 생성만 지원합니다 (DB 접속·실행은 미포함).
+- DDL 생성: `service.py`
+- Supabase 적용: `db_client.py` + API `DATABASE_URL` (`schema` / `table` / `sample`)
+- CREATE DATABASE 단계는 Supabase에서 사용하지 않습니다.
