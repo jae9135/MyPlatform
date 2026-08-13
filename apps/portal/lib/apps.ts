@@ -47,7 +47,7 @@ export const APPS: PlatformApp[] = [
     id: "my-gantt",
     name: "MyGantt",
     description: "일정/간트 관리",
-    status: "planned",
+    status: "beta",
     href: "/apps/my-gantt",
     category: "pm",
   },

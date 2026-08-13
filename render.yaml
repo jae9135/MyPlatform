@@ -24,3 +24,5 @@ services:
         sync: false
       - key: KEEP_UPLOADS
         value: "false"
+      - key: API_ACCESS_KEY
+        sync: false

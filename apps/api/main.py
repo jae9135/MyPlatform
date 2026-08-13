@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_CHK_DIR = Path(os.getenv("CHKDBSTD_DIR", str(APP_DIR / "chkdbstd")))
@@ -88,6 +90,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class ApiKeyMiddleware(BaseHTTPMiddleware):
+    """When API_ACCESS_KEY is set, require X-Api-Key (portal proxy sends it)."""
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path in ("/health", "/docs", "/openapi.json", "/redoc"):
+            return await call_next(request)
+        expected = (os.getenv("API_ACCESS_KEY") or "").strip()
+        if not expected:
+            return await call_next(request)
+        got = request.headers.get("x-api-key") or ""
+        if got != expected:
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        return await call_next(request)
+
+
+app.add_middleware(ApiKeyMiddleware)
 
 
 def _ensure_api_path() -> None:

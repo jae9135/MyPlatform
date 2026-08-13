@@ -214,6 +214,55 @@ footer {
   font-size: 13px;
 }
 
+.portal-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.portal-nav .back {
+  margin-bottom: 0;
+}
+
+.portal-nav .btn.ghost {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.login-panel {
+  max-width: 28rem;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.login-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  width: 100%;
+}
+
+input[type="password"] {
+  background: #121a22;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 12rem;
+  width: 100%;
+  font: inherit;
+}
+
 .sample-list {
   list-style: none;
   margin: 0;

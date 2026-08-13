@@ -1,9 +1,11 @@
 import Link from "next/link";
+import { PortalNav } from "@/lib/PortalNav";
 import { APPS } from "@/lib/apps";
 
 export default function HomePage() {
   return (
     <main>
+      <PortalNav home />
       <section className="hero">
         <h1>MyPlatform</h1>
         <p>

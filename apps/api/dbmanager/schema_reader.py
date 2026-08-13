@@ -43,6 +43,7 @@ PROTECTED_TABLES = frozenset(
         ("public", "apps"),
         ("public", "sample_assets"),
         ("public", "run_events"),
+        ("public", "gantt_projects"),
     }
 )
 

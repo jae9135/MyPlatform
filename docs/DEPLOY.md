@@ -33,6 +33,8 @@ git push -u origin main
    - `NEXT_PUBLIC_API_BASE_URL` = (Render URL, 없으면 임시로 `http://127.0.0.1:8000`)
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `PORTAL_PASSWORD` = (포털 로그인 암호, 서버 전용)
+   - `API_ACCESS_KEY` = (Render와 동일한 비밀키. 포털 프록시가 API에 전달)
 4. Deploy
 
 **방법 2 (CLI)**  
@@ -53,6 +55,7 @@ npx vercel --prod --yes
    - Start: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 3. Env:
    - `CORS_ORIGINS` = `https://<your-vercel-app>.vercel.app`
+   - `API_ACCESS_KEY` = (Vercel과 동일한 값)
    - `CHKDBSTD_DIR` = (배포 시 표준 로직 경로; 초기에는 stub/로컬 전용일 수 있음)
 
 ## E. 연결
@@ -72,7 +75,8 @@ uvicorn main:app --reload --port 8000
 cd C:\Mywork\MyPlatform\apps\portal
 copy .env.example .env.local
 # NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+# PORTAL_PASSWORD=사용할 포털 암호
 npm run dev
 ```
 
-http://127.0.0.1:3000 → ChkDBStd → 파일 선택 → 점검
+http://127.0.0.1:3000 → 포털 암호 로그인 → ChkDBStd → 파일 선택 → 점검

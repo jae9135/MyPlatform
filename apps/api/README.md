@@ -39,6 +39,8 @@ python -m uvicorn main:app --reload --port 8000
 
 - `CORS_ORIGINS` = Vercel URL
 - `DATABASE_URL` = Supabase Database URI (Session/Direct 권장, Transaction pooler는 DDL에 비권장)
+- `API_ACCESS_KEY` = 포털 `API_ACCESS_KEY`와 동일 (설정 시 `X-Api-Key` 필수, `/health`는 제외)
 - (선택) `CHKDBSTD_DIR`, `DBMANAGER_DIR`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 
+브라우저에서 API를 직접 호출하지 않습니다. 포털이 `/api/backend`로 프록시합니다.
 비밀번호는 포털(브라우저)에 두지 않고 API 서버 env에만 둡니다.

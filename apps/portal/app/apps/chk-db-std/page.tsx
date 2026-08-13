@@ -1,11 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { PortalNav } from "@/lib/PortalNav";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
-  "http://127.0.0.1:8000";
+import { API_BASE } from "@/lib/apiBase";
 
 const PAGE_SIZE = 100;
 
@@ -337,9 +335,7 @@ export default function ChkDbStdPage() {
 
   return (
     <main>
-      <Link className="back" href="/">
-        ← MyPlatform
-      </Link>
+      <PortalNav />
       <section className="hero">
         <h1>DB 표준 점검 도구</h1>
         <p>
