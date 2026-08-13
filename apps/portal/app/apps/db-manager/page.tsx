@@ -45,6 +45,52 @@ type DbStatus = {
 
 type ApplyStep = "schema" | "table" | "sample";
 
+const DATA_PAGE_SIZE = 100;
+
+type DataRows = {
+  schema: string;
+  table: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total: number;
+  limit: number;
+  offset: number;
+  pk_columns?: string[];
+  q?: string;
+};
+
+type DiffChange = {
+  kind: string;
+  severity: string;
+  schema: string;
+  table: string;
+  column: string | null;
+  detail: string;
+};
+
+type DiffResult = {
+  ok: boolean;
+  changes: DiffChange[];
+  safe_sql: string;
+  caution_sql: string;
+  summary: Record<string, number>;
+  source_filename?: string;
+};
+
+function pageNumbers(current: number, total: number): (number | "…")[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const pages: (number | "…")[] = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  if (start > 2) pages.push("…");
+  for (let p = start; p <= end; p++) pages.push(p);
+  if (end < total - 1) pages.push("…");
+  pages.push(total);
+  return pages;
+}
+
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -109,6 +155,38 @@ export default function DbManagerPage() {
   const [syncDbName, setSyncDbName] = useState("dbm");
   const [syncBaseFile, setSyncBaseFile] = useState<File | null>(null);
   const [syncMsg, setSyncMsg] = useState("");
+  const [dataSchema, setDataSchema] = useState("db1");
+  const [dataTables, setDataTables] = useState<
+    { name: string; korean_name: string; columns: number }[]
+  >([]);
+  const [dataTable, setDataTable] = useState("");
+  const [dataPage, setDataPage] = useState(1);
+  const [dataRows, setDataRows] = useState<DataRows | null>(null);
+  const [dataMsg, setDataMsg] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [conflictMode, setConflictMode] = useState("skip");
+  const [diffFile, setDiffFile] = useState<File | null>(null);
+  const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
+  const [diffMsg, setDiffMsg] = useState("");
+  const [includeCaution, setIncludeCaution] = useState(false);
+  const [alterSql, setAlterSql] = useState("");
+  const [uiTab, setUiTab] = useState<
+    "generate" | "apply" | "reverse" | "data" | "diff"
+  >("generate");
+  const [dataQ, setDataQ] = useState("");
+  const [uploadPreview, setUploadPreview] = useState<{
+    columns: string[];
+    row_count: number;
+    preview: Record<string, unknown>[];
+    skipped_headers: string[];
+  } | null>(null);
+  const [editRow, setEditRow] = useState<Record<string, unknown> | null>(null);
+  const [runEvents, setRunEvents] = useState<
+    { kind: string; ok: boolean; created_at: string | null; detail: Record<string, unknown> }[]
+  >([]);
+  const [uploadErrors, setUploadErrors] = useState<
+    { row: number; message: string }[]
+  >([]);
 
   const refreshDbStatus = useCallback(async () => {
     try {
@@ -209,6 +287,357 @@ export default function DbManagerPage() {
       loadSyncTables(syncSchema);
     }
   }, [dbStatus?.ok, syncSchema, loadSyncTables]);
+
+  useEffect(() => {
+    if (dbStatus?.ok && syncSchemas.length) {
+      setDataSchema((prev) =>
+        syncSchemas.includes(prev) ? prev : syncSchemas[0]
+      );
+    }
+  }, [dbStatus?.ok, syncSchemas]);
+
+  const loadDataTables = useCallback(async (schema: string) => {
+    if (!schema) {
+      setDataTables([]);
+      setDataTable("");
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${API_BASE}/v1/db-manager/schemas/${encodeURIComponent(schema)}/tables`
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setDataMsg(j.detail || "테이블 목록을 가져오지 못했습니다.");
+        setDataTables([]);
+        setDataTable("");
+        return;
+      }
+      const list = j.tables || [];
+      setDataTables(list);
+      setDataTable((prev) =>
+        list.some((t: { name: string }) => t.name === prev)
+          ? prev
+          : list[0]?.name || ""
+      );
+    } catch {
+      setDataMsg("테이블 목록 API에 연결할 수 없습니다.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (dbStatus?.ok && dataSchema) {
+      loadDataTables(dataSchema);
+    }
+  }, [dbStatus?.ok, dataSchema, loadDataTables]);
+
+  const loadDataRows = useCallback(
+    async (page = 1) => {
+      if (!dataSchema || !dataTable) {
+        setDataMsg("스키마와 테이블을 선택하세요.");
+        return;
+      }
+      setBusy(true);
+      setDataMsg("조회 중…");
+      try {
+        const offset = (page - 1) * DATA_PAGE_SIZE;
+        const qs = new URLSearchParams({
+          limit: String(DATA_PAGE_SIZE),
+          offset: String(offset),
+        });
+        if (dataQ.trim()) qs.set("q", dataQ.trim());
+        const res = await fetch(
+          `${API_BASE}/v1/db-manager/schemas/${encodeURIComponent(
+            dataSchema
+          )}/tables/${encodeURIComponent(dataTable)}/rows?${qs}`
+        );
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(j.detail || "조회 실패");
+        setDataRows(j as DataRows);
+        setDataPage(page);
+        setDataMsg(`완료 — 전체 ${j.total}건`);
+      } catch (e) {
+        setDataRows(null);
+        setDataMsg(String((e as Error).message || e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [dataSchema, dataTable, dataQ]
+  );
+
+  const uploadData = useCallback(async () => {
+    if (!dataSchema || !dataTable) {
+      setDataMsg("스키마와 테이블을 선택하세요.");
+      return;
+    }
+    if (!uploadFile) {
+      setDataMsg("CSV 또는 Excel 파일을 선택하세요.");
+      return;
+    }
+    setBusy(true);
+    setDataMsg("업로드 중…");
+    try {
+      const fd = new FormData();
+      fd.append("schema", dataSchema);
+      fd.append("table", dataTable);
+      fd.append("on_conflict", conflictMode);
+      fd.append("file", uploadFile);
+      const res = await fetch(`${API_BASE}/v1/db-manager/data-upload`, {
+        method: "POST",
+        body: fd,
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.detail || "업로드 실패");
+      setDataMsg(`완료 — ${j.message}`);
+      setMsg(`데이터 업로드: ${dataSchema}.${dataTable}`);
+      setUploadErrors(j.errors || []);
+      const saved = `완료 — ${j.message}`;
+      await loadDataRows(1);
+      setDataMsg(saved);
+    } catch (e) {
+      setDataMsg(String((e as Error).message || e));
+    } finally {
+      setBusy(false);
+    }
+  }, [dataSchema, dataTable, uploadFile, conflictMode, loadDataRows]);
+
+  const previewUpload = useCallback(async () => {
+    if (!dataSchema || !dataTable || !uploadFile) {
+      setDataMsg("스키마, 테이블, 파일을 선택하세요.");
+      return;
+    }
+    setBusy(true);
+    setDataMsg("미리보기 중…");
+    try {
+      const fd = new FormData();
+      fd.append("schema", dataSchema);
+      fd.append("table", dataTable);
+      fd.append("preview", "true");
+      fd.append("file", uploadFile);
+      const res = await fetch(`${API_BASE}/v1/db-manager/data-upload`, {
+        method: "POST",
+        body: fd,
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.detail || "미리보기 실패");
+      setUploadPreview(j);
+      setDataMsg(`미리보기 — ${j.row_count}행, 컬럼 ${j.columns?.length || 0}개`);
+    } catch (e) {
+      setUploadPreview(null);
+      setDataMsg(String((e as Error).message || e));
+    } finally {
+      setBusy(false);
+    }
+  }, [dataSchema, dataTable, uploadFile]);
+
+  const exportData = useCallback(
+    async (fmt: "csv" | "xlsx") => {
+      if (!dataSchema || !dataTable) return;
+      setBusy(true);
+      try {
+        const qs = new URLSearchParams({ format: fmt });
+        if (dataQ.trim()) qs.set("q", dataQ.trim());
+        const res = await fetch(
+          `${API_BASE}/v1/db-manager/schemas/${encodeURIComponent(
+            dataSchema
+          )}/tables/${encodeURIComponent(dataTable)}/rows?${qs}`
+        );
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j.detail || "다운로드 실패");
+        }
+        const blob = await res.blob();
+        downloadBlob(blob, `${dataSchema}_${dataTable}.${fmt}`);
+        setDataMsg(`완료 — ${fmt.toUpperCase()} 저장`);
+      } catch (e) {
+        setDataMsg(String((e as Error).message || e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [dataSchema, dataTable, dataQ]
+  );
+
+  const saveEditRow = useCallback(async () => {
+    if (!editRow || !dataSchema || !dataTable || !dataRows?.pk_columns?.length) {
+      setDataMsg("PK가 없어 단건 수정할 수 없습니다.");
+      return;
+    }
+    const pk: Record<string, unknown> = {};
+    for (const c of dataRows.pk_columns) pk[c] = editRow[c];
+    const values: Record<string, unknown> = {};
+    for (const c of dataRows.columns) {
+      if (!dataRows.pk_columns.includes(c)) values[c] = editRow[c];
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`${API_BASE}/v1/db-manager/data-row`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schema: dataSchema,
+          table: dataTable,
+          pk,
+          values,
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.detail || "수정 실패");
+      setEditRow(null);
+      setDataMsg("완료 — 행을 수정했습니다.");
+      await loadDataRows(dataPage);
+    } catch (e) {
+      setDataMsg(String((e as Error).message || e));
+    } finally {
+      setBusy(false);
+    }
+  }, [editRow, dataSchema, dataTable, dataRows, dataPage, loadDataRows]);
+
+  const deleteRow = useCallback(
+    async (row: Record<string, unknown>) => {
+      if (!dataRows?.pk_columns?.length) {
+        setDataMsg("PK가 없어 단건 삭제할 수 없습니다.");
+        return;
+      }
+      if (!window.confirm("이 행을 삭제할까요?")) return;
+      const pk: Record<string, unknown> = {};
+      for (const c of dataRows.pk_columns) pk[c] = row[c];
+      setBusy(true);
+      try {
+        const res = await fetch(`${API_BASE}/v1/db-manager/data-delete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ schema: dataSchema, table: dataTable, pk }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(j.detail || "삭제 실패");
+        setDataMsg("완료 — 행을 삭제했습니다.");
+        await loadDataRows(dataPage);
+      } catch (e) {
+        setDataMsg(String((e as Error).message || e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [dataRows, dataSchema, dataTable, dataPage, loadDataRows]
+  );
+
+  const loadRunEvents = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/v1/db-manager/run-events?limit=15`);
+      const j = await res.json().catch(() => ({}));
+      if (res.ok) setRunEvents(j.items || []);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const runDiff = useCallback(async () => {
+    const src = diffFile || file;
+    if (!src) {
+      setDiffMsg("비교할 테이블정의서 Excel을 선택하세요.");
+      return;
+    }
+    setBusy(true);
+    setDiffMsg("비교 중…");
+    setDiffResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("design", src);
+      fd.append("sheet", sheet || "테이블정의서");
+      const res = await fetch(`${API_BASE}/v1/db-manager/diff`, {
+        method: "POST",
+        body: fd,
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.detail || "비교 실패");
+      setDiffResult(j as DiffResult);
+      const nextSql = includeCaution
+        ? [j.safe_sql, j.caution_sql].filter(Boolean).join("\n\n")
+        : j.safe_sql || "";
+      setAlterSql(nextSql);
+      const n = (j.changes || []).length;
+      setDiffMsg(n ? `완료 — 차이 ${n}건` : "완료 — 차이 없음");
+    } catch (e) {
+      setDiffMsg(String((e as Error).message || e));
+    } finally {
+      setBusy(false);
+    }
+  }, [diffFile, file, sheet, includeCaution]);
+
+  const applyAlter = useCallback(async () => {
+    if (!alterSql.trim()) {
+      setDiffMsg("적용할 SQL이 없습니다. 먼저 비교하세요.");
+      return;
+    }
+    if (!window.confirm("ALTER를 실행할까요? 이 작업은 DB 구조를 바꿉니다.")) {
+      return;
+    }
+    setBusy(true);
+    setDiffMsg("ALTER 적용 중…");
+    try {
+      const res = await fetch(`${API_BASE}/v1/db-manager/apply-alter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sql: alterSql,
+          include_caution: includeCaution,
+          dry_run: false,
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.detail || "적용 실패");
+      setDiffMsg(j.message || "완료");
+      setMsg("완료 — ALTER 적용됨");
+    } catch (e) {
+      setDiffMsg(String((e as Error).message || e));
+    } finally {
+      setBusy(false);
+    }
+  }, [alterSql, includeCaution]);
+
+  const dryRunAlter = useCallback(async () => {
+    if (!alterSql.trim()) {
+      setDiffMsg("검증할 SQL이 없습니다.");
+      return;
+    }
+    setBusy(true);
+    setDiffMsg("검증 중…");
+    try {
+      const res = await fetch(`${API_BASE}/v1/db-manager/apply-alter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sql: alterSql,
+          include_caution: includeCaution,
+          dry_run: true,
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.detail || "검증 실패");
+      setDiffMsg(j.message || "검증 OK");
+    } catch (e) {
+      setDiffMsg(String((e as Error).message || e));
+    } finally {
+      setBusy(false);
+    }
+  }, [alterSql, includeCaution]);
+
+  useEffect(() => {
+    if (dbStatus?.ok) loadRunEvents();
+  }, [dbStatus?.ok, loadRunEvents]);
+
+  useEffect(() => {
+    if (!diffResult) return;
+    setAlterSql(
+      includeCaution
+        ? [diffResult.safe_sql, diffResult.caution_sql]
+            .filter(Boolean)
+            .join("\n\n")
+        : diffResult.safe_sql || ""
+    );
+  }, [includeCaution, diffResult]);
 
   const generate = useCallback(async () => {
     if (!file) {
@@ -313,6 +742,7 @@ export default function DbManagerPage() {
           [step]: j.message || "완료",
         }));
         setMsg(`완료 — ${step} 적용됨`);
+        loadRunEvents();
       } catch (e) {
         setApplyMsg((m) => ({
           ...m,
@@ -322,7 +752,7 @@ export default function DbManagerPage() {
         setBusy(false);
       }
     },
-    [applySql]
+    [applySql, loadRunEvents]
   );
 
   const exportDesign = useCallback(async () => {
@@ -436,12 +866,35 @@ export default function DbManagerPage() {
       <section className="hero">
         <h1>DBManager</h1>
         <p>
-          테이블정의서 Excel을 PostgreSQL DDL로 변환하고, API 서버에 설정된
-          Supabase DB에 스키마·테이블·샘플을 적용하거나, DB 구조를 다시
-          설계서로 받을 수 있습니다.
+          테이블정의서 Excel을 PostgreSQL DDL로 변환하고, Supabase에
+          스키마·테이블·샘플을 적용하거나, DB 구조·데이터를 조회하고
+          설계서와 비교할 수 있습니다.
         </p>
       </section>
 
+      <div className="page-tabs" role="tablist">
+        {(
+          [
+            ["generate", "설계서 → 스크립트"],
+            ["apply", "스크립트 → 적용"],
+            ["reverse", "DB → 설계서"],
+            ["data", "데이터 관리"],
+            ["diff", "설계서 ↔ DB"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={`tab ${uiTab === id ? "active" : ""}`}
+            onClick={() => setUiTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {uiTab === "generate" ? (
+      <>
       <section className="panel">
         <h3>샘플 데이터</h3>
         <p className="hint">샘플 설계서로 DDL 생성을 시험할 수 있습니다.</p>
@@ -588,7 +1041,10 @@ export default function DbManagerPage() {
           <pre className="sql-preview">{currentContent}</pre>
         </section>
       ) : null}
+      </>
+      ) : null}
 
+      {uiTab === "apply" ? (
       <section className="panel">
         <h3>Supabase에 적용</h3>
         <p className="hint">
@@ -657,8 +1113,37 @@ export default function DbManagerPage() {
             </div>
           </div>
         ))}
+        {runEvents.length ? (
+          <>
+            <h4 className="subhead">최근 적용 이력</h4>
+            <p className="hint">메타만 저장합니다. SQL/파일 내용은 보관하지 않습니다.</p>
+            <ul className="sample-list">
+              {runEvents.map((ev, i) => (
+                <li key={`${ev.created_at}-${i}`}>
+                  <div>
+                    <strong>{ev.kind}</strong>
+                    <span className="hint">
+                      {" "}
+                      {ev.ok ? "ok" : "fail"} · {ev.created_at || ""}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <button
+              className="btn ghost"
+              type="button"
+              disabled={busy}
+              onClick={loadRunEvents}
+            >
+              이력 새로고침
+            </button>
+          </>
+        ) : null}
       </section>
+      ) : null}
 
+      {uiTab === "reverse" ? (
       <section className="panel">
         <h3>DB → 설계서 반영</h3>
         <p className="hint">
@@ -815,6 +1300,490 @@ export default function DbManagerPage() {
           </>
         )}
       </section>
+      ) : null}
+
+      {uiTab === "data" ? (
+      <section className="panel">
+        <h3>데이터 관리</h3>
+        <p className="hint">
+          테이블 데이터를 조회하고 CSV/Excel로 넣을 수 있습니다. 임의 SQL은
+          실행하지 않으며, 플랫폼 메타 테이블에는 쓰지 않습니다.
+        </p>
+        {!dbStatus?.ok ? (
+          <p className="hint">DB 연결이 필요합니다.</p>
+        ) : (
+          <>
+            <div className="row">
+              <label>
+                스키마{" "}
+                <select
+                  value={dataSchema}
+                  onChange={(e) => {
+                    setDataSchema(e.target.value);
+                    setDataRows(null);
+                    setDataPage(1);
+                  }}
+                  disabled={busy || syncSchemas.length === 0}
+                >
+                  {(syncSchemas.length ? syncSchemas : [dataSchema]).map(
+                    (s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    )
+                  )}
+                </select>
+              </label>
+              <label>
+                테이블{" "}
+                <select
+                  value={dataTable}
+                  onChange={(e) => {
+                    setDataTable(e.target.value);
+                    setDataRows(null);
+                    setDataPage(1);
+                  }}
+                  disabled={busy || dataTables.length === 0}
+                >
+                  {dataTables.length === 0 ? (
+                    <option value="">테이블 없음</option>
+                  ) : (
+                    dataTables.map((t) => (
+                      <option key={t.name} value={t.name}>
+                        {t.name} ({t.columns})
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
+              <label>
+                검색{" "}
+                <input
+                  type="text"
+                  value={dataQ}
+                  onChange={(e) => setDataQ(e.target.value)}
+                  placeholder="부분 일치"
+                  disabled={busy}
+                />
+              </label>
+              <button
+                className="btn"
+                type="button"
+                disabled={busy || !dataTable}
+                onClick={() => loadDataRows(1)}
+              >
+                조회
+              </button>
+              <button
+                className="btn ghost"
+                type="button"
+                disabled={busy || !dataTable}
+                onClick={() => exportData("csv")}
+              >
+                CSV
+              </button>
+              <button
+                className="btn ghost"
+                type="button"
+                disabled={busy || !dataTable}
+                onClick={() => exportData("xlsx")}
+              >
+                Excel
+              </button>
+            </div>
+
+            {dataRows ? (
+              <>
+                <div className="table-wrap" style={{ marginTop: "0.75rem" }}>
+                  <table className="result-table">
+                    <thead>
+                      <tr>
+                        {dataRows.columns.map((c) => (
+                          <th key={c}>{c}</th>
+                        ))}
+                        <th>동작</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dataRows.rows.length === 0 ? (
+                        <tr>
+                          <td colSpan={Math.max(2, dataRows.columns.length + 1)}>
+                            표시할 행이 없습니다.
+                          </td>
+                        </tr>
+                      ) : (
+                        dataRows.rows.map((row, i) => {
+                          const editing =
+                            !!editRow &&
+                            (dataRows.pk_columns || []).length > 0 &&
+                            dataRows.pk_columns!.every(
+                              (c) =>
+                                String(editRow[c] ?? "") ===
+                                String(row[c] ?? "")
+                            );
+                          return (
+                          <tr key={dataRows.offset + i}>
+                            {dataRows.columns.map((c) => (
+                              <td key={c}>
+                                {editing ? (
+                                  <input
+                                    type="text"
+                                    value={String(editRow?.[c] ?? "")}
+                                    disabled={dataRows.pk_columns?.includes(c)}
+                                    onChange={(e) =>
+                                      setEditRow((prev) =>
+                                        prev
+                                          ? { ...prev, [c]: e.target.value }
+                                          : prev
+                                      )
+                                    }
+                                  />
+                                ) : (
+                                  String(row[c] ?? "")
+                                )}
+                              </td>
+                            ))}
+                            <td>
+                              {editing ? (
+                                <>
+                                  <button
+                                    className="btn"
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={saveEditRow}
+                                  >
+                                    저장
+                                  </button>
+                                  <button
+                                    className="btn ghost"
+                                    type="button"
+                                    onClick={() => setEditRow(null)}
+                                  >
+                                    취소
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    className="btn ghost"
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => setEditRow({ ...row })}
+                                  >
+                                    수정
+                                  </button>
+                                  <button
+                                    className="btn ghost"
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => deleteRow(row)}
+                                  >
+                                    삭제
+                                  </button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="pager">
+                  <span className="hint">
+                    전체 {dataRows.total}건 ·{" "}
+                    {dataRows.total === 0
+                      ? "0"
+                      : `${dataRows.offset + 1}–${
+                          dataRows.offset + dataRows.rows.length
+                        }`}{" "}
+                    표시
+                  </span>
+                  {Math.ceil(dataRows.total / DATA_PAGE_SIZE) > 1 ? (
+                    <div className="pager-controls">
+                      <button
+                        type="button"
+                        className="pager-btn"
+                        disabled={busy || dataPage <= 1}
+                        onClick={() => loadDataRows(dataPage - 1)}
+                      >
+                        이전
+                      </button>
+                      {pageNumbers(
+                        dataPage,
+                        Math.max(1, Math.ceil(dataRows.total / DATA_PAGE_SIZE))
+                      ).map((p, i) =>
+                        p === "…" ? (
+                          <span key={`e-${i}`} className="pager-ellipsis">
+                            …
+                          </span>
+                        ) : (
+                          <button
+                            key={p}
+                            type="button"
+                            className={`pager-btn ${
+                              dataPage === p ? "active" : ""
+                            }`}
+                            disabled={busy}
+                            onClick={() => loadDataRows(p)}
+                          >
+                            {p}
+                          </button>
+                        )
+                      )}
+                      <button
+                        type="button"
+                        className="pager-btn"
+                        disabled={
+                          busy ||
+                          dataPage >=
+                            Math.ceil(dataRows.total / DATA_PAGE_SIZE)
+                        }
+                        onClick={() => loadDataRows(dataPage + 1)}
+                      >
+                        다음
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+
+            <h4 className="subhead">CSV / Excel 업로드</h4>
+            <p className="hint">
+              첫 행이 컬럼명이어야 합니다. PK 충돌:
+              skip(건너뛰기), update(갱신), renumber(번호 +1), insert(오류).
+            </p>
+            <div className="row">
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xlsm"
+                disabled={busy}
+                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+              />
+              <label>
+                충돌 처리{" "}
+                <select
+                  value={conflictMode}
+                  onChange={(e) => setConflictMode(e.target.value)}
+                  disabled={busy}
+                >
+                  <option value="skip">skip</option>
+                  <option value="update">update</option>
+                  <option value="renumber">renumber</option>
+                  <option value="insert">insert</option>
+                </select>
+              </label>
+              <button
+                className="btn ghost"
+                type="button"
+                disabled={busy || !uploadFile || !dataTable}
+                onClick={previewUpload}
+              >
+                미리보기
+              </button>
+              <button
+                className="btn"
+                type="button"
+                disabled={busy || !uploadFile || !dataTable}
+                onClick={uploadData}
+              >
+                업로드
+              </button>
+            </div>
+            {uploadPreview ? (
+              <p className="hint">
+                미리보기 {uploadPreview.row_count}행 · 컬럼{" "}
+                {uploadPreview.columns.join(", ")}
+                {uploadPreview.skipped_headers.length
+                  ? ` · 무시: ${uploadPreview.skipped_headers.join(", ")}`
+                  : ""}
+              </p>
+            ) : null}
+            {uploadErrors.length ? (
+              <div className="row">
+                <span className="msg err">
+                  오류 {uploadErrors.length}건
+                </span>
+                <button
+                  className="btn ghost"
+                  type="button"
+                  onClick={() =>
+                    downloadBlob(
+                      new Blob(
+                        [
+                          "row,message\n" +
+                            uploadErrors
+                              .map((e) => `${e.row},"${String(e.message).replace(/"/g, '""')}"`)
+                              .join("\n"),
+                        ],
+                        { type: "text/csv;charset=utf-8" }
+                      ),
+                      "upload_errors.csv"
+                    )
+                  }
+                >
+                  오류 CSV
+                </button>
+              </div>
+            ) : null}
+            {dataMsg ? (
+              <p
+                className={`msg ${
+                  dataMsg.includes("완료")
+                    ? "ok"
+                    : dataMsg.includes("중…")
+                      ? ""
+                      : "err"
+                }`}
+              >
+                {dataMsg}
+              </p>
+            ) : null}
+          </>
+        )}
+      </section>
+      ) : null}
+
+      {uiTab === "diff" ? (
+      <section className="panel">
+        <h3>설계서 ↔ DB 비교</h3>
+        <p className="hint">
+          설계서와 현재 DB를 비교해 ALTER 초안을 만듭니다. DROP은 만들지
+          않습니다. 컬럼 타입 변경·NOT NULL은 주의(caution)로 표시됩니다.
+        </p>
+        {!dbStatus?.ok ? (
+          <p className="hint">DB 연결이 필요합니다.</p>
+        ) : (
+          <>
+            <div className="row">
+              <label>
+                비교할 설계서 (비우면 위 DDL 생성 파일 사용){" "}
+                <input
+                  type="file"
+                  accept=".xlsx,.xlsm"
+                  disabled={busy}
+                  onChange={(e) => setDiffFile(e.target.files?.[0] || null)}
+                />
+              </label>
+              <button
+                className="btn"
+                type="button"
+                disabled={busy || (!diffFile && !file)}
+                onClick={runDiff}
+              >
+                비교
+              </button>
+            </div>
+            {diffResult ? (
+              <>
+                <div className="stats-grid">
+                  <div className="stat-card">
+                    <div className="stat-label">new tables</div>
+                    <div className="stat-value">
+                      {diffResult.summary.new_tables ?? 0}
+                    </div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">add columns</div>
+                    <div className="stat-value">
+                      {diffResult.summary.add_columns ?? 0}
+                    </div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">type changes</div>
+                    <div className="stat-value">
+                      {diffResult.summary.type_changes ?? 0}
+                    </div>
+                  </div>
+                </div>
+                {diffResult.changes.length ? (
+                  <div className="table-wrap">
+                    <table className="result-table">
+                      <thead>
+                        <tr>
+                          <th>구분</th>
+                          <th>심각도</th>
+                          <th>테이블</th>
+                          <th>컬럼</th>
+                          <th>내용</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {diffResult.changes.map((c, i) => (
+                          <tr key={`${c.kind}-${c.table}-${c.column}-${i}`}>
+                            <td>{c.kind}</td>
+                            <td>{c.severity}</td>
+                            <td>
+                              {c.schema}.{c.table}
+                            </td>
+                            <td>{c.column || "-"}</td>
+                            <td>{c.detail}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="hint">적용할 구조 차이가 없습니다.</p>
+                )}
+                <label className="row" style={{ marginTop: "0.75rem" }}>
+                  <input
+                    type="checkbox"
+                    checked={includeCaution}
+                    disabled={busy}
+                    onChange={(e) => setIncludeCaution(e.target.checked)}
+                  />
+                  <span className="hint">
+                    caution 변경(타입/NOT NULL)도 SQL에 포함
+                  </span>
+                </label>
+                <textarea
+                  className="sql-input"
+                  rows={8}
+                  value={alterSql}
+                  onChange={(e) => setAlterSql(e.target.value)}
+                  placeholder="비교 후 ALTER 초안이 채워집니다"
+                />
+                <div className="row">
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    disabled={busy || !alterSql.trim()}
+                    onClick={dryRunAlter}
+                  >
+                    검증만 (실행 안 함)
+                  </button>
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={busy || !alterSql.trim()}
+                    onClick={applyAlter}
+                  >
+                    ALTER 적용
+                  </button>
+                </div>
+              </>
+            ) : null}
+            {diffMsg ? (
+              <p
+                className={`msg ${
+                  diffMsg.includes("완료") ||
+                  diffMsg.includes("successfully")
+                    ? "ok"
+                    : diffMsg.includes("중…")
+                      ? ""
+                      : "err"
+                }`}
+              >
+                {diffMsg}
+              </p>
+            ) : null}
+          </>
+        )}
+      </section>
+      ) : null}
     </main>
   );
 }

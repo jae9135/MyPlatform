@@ -26,6 +26,11 @@ python -m uvicorn main:app --reload --port 8000
   - `GET /v1/db-manager/db-status`
   - `GET /v1/db-manager/schemas`, `GET /v1/db-manager/schemas/{schema}/tables`
   - `POST /v1/db-manager/export-design` (DB → 테이블정의서 xlsx)
+  - `GET /v1/db-manager/schemas/{schema}/tables/{table}/rows` (`q`, `format=json|csv|xlsx`)
+  - `POST /v1/db-manager/data-upload` (`preview=true` 가능)
+  - `POST /v1/db-manager/data-row`, `POST /v1/db-manager/data-delete`
+  - `POST /v1/db-manager/diff`, `POST /v1/db-manager/apply-alter` (`dry_run`)
+  - `GET /v1/db-manager/run-events`
   - `POST /v1/db-manager/apply` (`step=schema|table|sample`)
 
 ## Render

@@ -87,23 +87,23 @@ def write_schema_to_excel_bytes(
             ws.cell(row, COL_SCHEMA).value = table.schema.upper()
             ws.cell(row, COL_TABLE_KO).value = table.korean_name
             ws.cell(row, COL_TABLE_EN).value = table.name.upper()
-            ws.cell(row, COL_COLUMN_KO).value = col.column_comment or col.column_name
+            ws.cell(row, COL_COLUMN_KO).value = col.korean_name or col.column_name
             ws.cell(row, COL_COLUMN_EN).value = col.column_name.upper()
             ws.cell(row, COL_DATA_TYPE).value = excel_type
             ws.cell(row, COL_DATA_LENGTH).value = length
             ws.cell(row, COL_NOT_NULL).value = "N" if col.is_nullable else "Y"
             ws.cell(row, COL_PK).value = "Y" if col.is_pk else "N"
-            ws.cell(row, 12).value = "-"
+            ws.cell(row, 12).value = col.fk_ref or ("Y" if col.is_fk else "-")
             ws.cell(row, 13).value = "-"
-            # Preserve Index Key / 개인정보 if template had values; set defaults for new rows
-            if ws.cell(row, 14).value is None:
+            if col.is_pk:
                 ws.cell(row, 14).value = (
                     f"PK_{table.name.upper()}({col.column_name.upper()})"
-                    if col.is_pk
-                    else "-"
                 )
-            if ws.cell(row, 16).value is None and col.column_comment:
-                ws.cell(row, 16).value = col.column_comment
+            elif col.index_key:
+                ws.cell(row, 14).value = col.index_key
+            elif ws.cell(row, 14).value is None:
+                ws.cell(row, 14).value = "-"
+            ws.cell(row, 16).value = col.extra_comment or None
 
     buf = BytesIO()
     wb.save(buf)

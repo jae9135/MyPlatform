@@ -294,11 +294,41 @@ footer {
   color: #fff;
 }
 
+.page-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 18px;
+}
+
+.page-tabs .tab {
+  font-size: 14px;
+  padding: 10px 14px;
+}
+
 .table-wrap {
   overflow: auto;
   max-height: min(60vh, 520px);
   border: 1px solid var(--line);
   border-radius: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 720px) {
+  main {
+    width: min(1100px, calc(100% - 20px));
+  }
+
+  .page-tabs .tab {
+    flex: 1 1 auto;
+    text-align: center;
+    font-size: 13px;
+    padding: 8px 10px;
+  }
+
+  .result-table {
+    min-width: 640px;
+  }
 }
 
 .result-table {

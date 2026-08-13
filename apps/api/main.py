@@ -11,7 +11,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
@@ -55,6 +55,23 @@ app = FastAPI(title="MyPlatform API", version="0.4.0")
 class ApplySqlBody(BaseModel):
     step: str = Field(..., description="schema|table|sample")
     sql: str = Field(..., description="SQL script to execute")
+
+
+class ApplyAlterBody(BaseModel):
+    sql: str = Field(..., description="ALTER/COMMENT/CREATE TABLE script")
+    include_caution: bool = Field(
+        False, description="Allow ALTER COLUMN / ADD COLUMN NOT NULL"
+    )
+    dry_run: bool = Field(False, description="Validate only; do not execute")
+
+
+class DataRowBody(BaseModel):
+    schema_name: str = Field(..., alias="schema")
+    table: str
+    pk: dict = Field(default_factory=dict)
+    values: dict = Field(default_factory=dict)
+
+    model_config = {"populate_by_name": True}
 
 origins = [
     o.strip()
@@ -428,6 +445,19 @@ def dbmanager_db_status() -> dict:
     }
 
 
+@app.get("/v1/db-manager/run-events")
+def dbmanager_run_events(limit: int = Query(20, ge=1, le=100)) -> dict:
+    dbc = _require_db_ready()
+    _ensure_api_path()
+    from dbmanager.events import list_run_events  # type: ignore
+
+    try:
+        items = list_run_events(limit)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "target": dbc.masked_target(), "items": items}
+
+
 def _require_db_ready():
     dbc = _load_db_client()
     if not dbc.is_db_configured():
@@ -453,6 +483,30 @@ def _load_excel_writer():
     from dbmanager import excel_writer  # type: ignore
 
     return excel_writer
+
+
+def _load_data_manager():
+    _ensure_api_path()
+    from dbmanager import data_manager  # type: ignore
+
+    return data_manager
+
+
+def _log_event(kind: str, ok: bool, detail: dict | None = None) -> None:
+    try:
+        _ensure_api_path()
+        from dbmanager.events import log_run_event  # type: ignore
+
+        log_run_event(kind, ok=ok, detail=detail or {})
+    except Exception:
+        return
+
+
+def _load_schema_diff():
+    _ensure_api_path()
+    from dbmanager import schema_diff  # type: ignore
+
+    return schema_diff
 
 
 @app.get("/v1/db-manager/schemas")
@@ -553,6 +607,191 @@ async def dbmanager_export_design(
     )
 
 
+@app.get("/v1/db-manager/schemas/{schema}/tables/{table}/rows")
+def dbmanager_table_rows(
+    schema: str,
+    table: str,
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    q: str = Query("", description="text search"),
+    format: str = Query("json", description="json|csv|xlsx"),
+):
+    """테이블 데이터 조회 (SELECT만). format=csv|xlsx 이면 파일 다운로드."""
+    dbc = _require_db_ready()
+    dm = _load_data_manager()
+    fmt = (format or "json").lower().strip()
+    try:
+        if fmt in ("csv", "xlsx"):
+            data, fname, media = dm.export_table_data(
+                schema, table, q=q, fmt=fmt
+            )
+            return StreamingResponse(
+                io.BytesIO(data),
+                media_type=media,
+                headers={
+                    "Content-Disposition": f'attachment; filename="{fname}"'
+                },
+            )
+        payload = dm.query_table_data(
+            schema, table, limit=limit, offset=offset, q=q
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "target": dbc.masked_target(), **payload}
+
+
+@app.post("/v1/db-manager/data-upload")
+async def dbmanager_data_upload(
+    schema: str = Form(...),
+    table: str = Form(...),
+    on_conflict: str = Form("skip"),
+    preview: str = Form("false"),
+    file: UploadFile = File(...),
+) -> dict:
+    """CSV/Excel 행 INSERT. preview=true 이면 미리보기만."""
+    dbc = _require_db_ready()
+    dm = _load_data_manager()
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, detail="empty upload file")
+    is_preview = str(preview).strip().lower() in ("1", "true", "yes")
+    try:
+        if is_preview:
+            result = dm.preview_upload(
+                schema, table, raw, file.filename or ""
+            )
+            return {"ok": True, "preview": True, "target": dbc.masked_target(), **result}
+        result = dm.upload_table_data(
+            schema,
+            table,
+            raw,
+            file.filename or "",
+            on_conflict=on_conflict,
+        )
+    except Exception as e:
+        _log_event("data-upload", False, {"schema": schema, "table": table})
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    _log_event(
+        "data-upload",
+        True,
+        {
+            "schema": schema,
+            "table": table,
+            "inserted": result.get("inserted"),
+            "updated": result.get("updated"),
+            "skipped": result.get("skipped"),
+            "errors": len(result.get("errors") or []),
+        },
+    )
+    return {
+        "ok": True,
+        "target": dbc.masked_target(),
+        "message": (
+            f"inserted {result['inserted']}, updated {result['updated']}, "
+            f"skipped {result['skipped']}"
+        ),
+        **result,
+    }
+
+
+@app.post("/v1/db-manager/data-row")
+def dbmanager_update_row(body: DataRowBody) -> dict:
+    dbc = _require_db_ready()
+    dm = _load_data_manager()
+    try:
+        result = dm.update_table_row(
+            body.schema_name, body.table, body.pk, body.values
+        )
+    except Exception as e:
+        _log_event("data-update", False, {"table": body.table})
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    _log_event("data-update", True, {"schema": body.schema_name, "table": body.table})
+    return {"ok": True, "target": dbc.masked_target(), **result}
+
+
+@app.post("/v1/db-manager/data-delete")
+def dbmanager_delete_row(body: DataRowBody) -> dict:
+    dbc = _require_db_ready()
+    dm = _load_data_manager()
+    try:
+        result = dm.delete_table_row(body.schema_name, body.table, body.pk)
+    except Exception as e:
+        _log_event("data-delete", False, {"table": body.table})
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    _log_event("data-delete", True, {"schema": body.schema_name, "table": body.table})
+    return {"ok": True, "target": dbc.masked_target(), **result}
+
+
+@app.post("/v1/db-manager/diff")
+async def dbmanager_diff(
+    design: UploadFile = File(...),
+    sheet: str = Form("테이블정의서"),
+) -> dict:
+    """설계서 vs DB 스키마 비교. DROP은 생성하지 않음."""
+    dbc = _require_db_ready()
+    _ensure_api_path()
+    from dbmanager.excel_parser import parse_excel  # type: ignore
+
+    sr = _load_schema_reader()
+    sd = _load_schema_diff()
+    raw = await design.read()
+    if not raw:
+        raise HTTPException(400, detail="empty design file")
+    try:
+        tables = parse_excel(io.BytesIO(raw), sheet or "테이블정의서")
+        if not tables:
+            raise ValueError("Excel에서 테이블 정의를 찾지 못했습니다.")
+        db_tables = []
+        for schema_name in sorted({t.schema for t in tables}):
+            db_tables.extend(sr.read_schema(schema_name))
+        payload = sd.diff_design_to_db(tables, db_tables)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    _log_event(
+        "diff",
+        True,
+        {"tables": len(tables), "changes": len(payload.get("changes") or [])},
+    )
+    return {
+        "ok": True,
+        "target": dbc.masked_target(),
+        "sheet": sheet,
+        "source_filename": design.filename or "design.xlsx",
+        "design_tables": len(tables),
+        **payload,
+    }
+
+
+@app.post("/v1/db-manager/apply-alter")
+def dbmanager_apply_alter(body: ApplyAlterBody) -> dict:
+    """diff에서 만든 ALTER/COMMENT/CREATE TABLE만 적용. DROP 금지."""
+    dbc = _require_db_ready()
+    sd = _load_schema_diff()
+    try:
+        sql = sd.validate_alter_sql(body.sql, allow_caution=body.include_caution)
+        if body.dry_run:
+            _log_event("apply-alter", True, {"dry_run": True})
+            return {
+                "ok": True,
+                "dry_run": True,
+                "target": dbc.masked_target(),
+                "message": "Validation OK (not executed).",
+                "include_caution": body.include_caution,
+            }
+        dbc.execute_sql(sql, autocommit=True)
+    except Exception as e:
+        _log_event("apply-alter", False, {"dry_run": body.dry_run})
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    _log_event("apply-alter", True, {"dry_run": False})
+    return {
+        "ok": True,
+        "dry_run": False,
+        "target": dbc.masked_target(),
+        "message": "ALTER script executed successfully.",
+        "include_caution": body.include_caution,
+    }
+
+
 @app.post("/v1/db-manager/apply")
 def dbmanager_apply(body: ApplySqlBody) -> dict:
     """생성된 DDL을 서버 DATABASE_URL(Supabase)에 적용. step=schema|table|sample."""
@@ -592,6 +831,7 @@ def dbmanager_apply(body: ApplySqlBody) -> dict:
             # Multiple statements: use autocommit for DDL robustness on managed PG
             dbc.execute_sql(sql, autocommit=True)
     except Exception as e:
+        _log_event(f"apply-{step}", False, {"step": step})
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     labels = {
@@ -608,6 +848,7 @@ def dbmanager_apply(body: ApplySqlBody) -> dict:
         if parts:
             message = f"{message} (PK: {', '.join(parts)})"
 
+    _log_event(f"apply-{step}", True, {"step": step})
     return {
         "ok": True,
         "step": step,

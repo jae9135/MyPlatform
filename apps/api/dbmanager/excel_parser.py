@@ -17,6 +17,11 @@ class ColumnDef:
     not_null: bool
     is_pk: bool
     comment: str | None = None
+    is_fk: bool = False
+    fk_ref: str | None = None
+    index_key: str | None = None
+    is_uk: bool = False
+    default_value: str | None = None
 
 
 @dataclass
@@ -43,6 +48,9 @@ COL_DATA_TYPE = 8
 COL_DATA_LENGTH = 9
 COL_NOT_NULL = 10
 COL_PK = 11
+COL_FK = 12
+COL_INDEX = 14
+COL_COMMENT = 16
 HEADER_ROW = 3
 DATA_START_ROW = 4
 
@@ -54,6 +62,7 @@ def parse_excel(source: Path | BinaryIO, sheet_name: str = "테이블정의서")
         raise ValueError(f"Sheet '{sheet_name}' not found. Available: {wb.sheetnames}")
 
     ws = wb[sheet_name]
+    default_col = _find_header_col(ws, ("기본값", "Default", "DEFAULT"))
     tables: dict[str, TableDef] = {}
 
     for row in range(DATA_START_ROW, ws.max_row + 1):
@@ -81,7 +90,14 @@ def parse_excel(source: Path | BinaryIO, sheet_name: str = "테이블정의서")
                 length=_parse_length(_cell(ws, row, COL_DATA_LENGTH)),
                 not_null=_is_yes(_cell(ws, row, COL_NOT_NULL)),
                 is_pk=_is_yes(_cell(ws, row, COL_PK)),
-                comment=_optional_str(_cell(ws, row, 16)),
+                comment=_optional_str(_cell(ws, row, COL_COMMENT)),
+                is_fk=_is_fk(_cell(ws, row, COL_FK)),
+                fk_ref=_fk_ref(_cell(ws, row, COL_FK)),
+                index_key=_index_key(_cell(ws, row, COL_INDEX)),
+                is_uk=_is_uk(_cell(ws, row, COL_INDEX)),
+                default_value=_optional_str(_cell(ws, row, default_col))
+                if default_col
+                else None,
             )
         )
 
@@ -115,3 +131,46 @@ def _optional_str(value) -> str | None:
         return None
     text = str(value).strip()
     return text if text else None
+
+
+def _blankish(value) -> bool:
+    text = str(value or "").strip().upper()
+    return text in ("", "-", "N", "NONE", "NULL")
+
+
+def _is_fk(value) -> bool:
+    return not _blankish(value)
+
+
+def _fk_ref(value) -> str | None:
+    if _blankish(value):
+        return None
+    text = str(value).strip()
+    if text.upper() in ("Y", "YES"):
+        return None
+    return text
+
+
+def _index_key(value) -> str | None:
+    if _blankish(value):
+        return None
+    text = str(value).strip()
+    if text.upper().startswith("PK_"):
+        return text
+    return text
+
+
+def _is_uk(value) -> bool:
+    text = str(value or "").strip().upper()
+    return text.startswith("UK") or "UNIQUE" in text
+
+
+def _find_header_col(ws, names: tuple[str, ...]) -> int | None:
+    lowered = tuple(n.lower() for n in names)
+    for col in range(1, 24):
+        label = str(ws.cell(HEADER_ROW, col).value or "").strip()
+        if not label:
+            continue
+        if any(n in label.lower() for n in lowered):
+            return col
+    return None
