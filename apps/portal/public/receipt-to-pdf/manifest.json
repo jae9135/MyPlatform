@@ -1,0 +1,11 @@
+{
+  "name": "ReceiptToPDF",
+  "short_name": "ReceiptToPDF",
+  "description": "모바일 영수증을 A4 PDF로 변환",
+  "start_url": "/apps/receipt-to-pdf",
+  "scope": "/receipt-to-pdf/",
+  "display": "browser",
+  "background_color": "#f8fafc",
+  "theme_color": "#2563eb",
+  "orientation": "portrait"
+}
