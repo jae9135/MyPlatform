@@ -386,17 +386,29 @@ async function handleSavePdf() {
     const { blob } = await exportToPdf(state.receipts, filename, {
       autoDownload: false,
     });
-    await savePdfRecord(filename, blob);
-    await refreshSavedPdfs();
-    scrollToSavedPdfSection();
-    showToast("이 브라우저 목록에 저장되었습니다. 「내 파일」에 넣으려면 다운로드하세요.", 4000);
+
+    try {
+      await savePdfRecord(filename, blob);
+      await refreshSavedPdfs();
+      scrollToSavedPdfSection();
+    } catch (storeErr) {
+      console.error(storeErr);
+    }
+
+    try {
+      const result = await downloadPdfBlob(blob, filename);
+      showToast(downloadResultMessage(result), 4000);
+    } catch (dlErr) {
+      console.error(dlErr);
+      showToast("브라우저 목록에는 저장됐습니다. 미리보기에서 「다운로드」를 다시 누르세요.", 4000);
+    }
     closePreview();
   } catch (err) {
     console.error(err);
     showToast("PDF 생성에 실패했습니다.");
   } finally {
     els.btnSavePdf.disabled = false;
-    els.btnSavePdf.textContent = "PDF 저장";
+    els.btnSavePdf.textContent = "저장하고 다운로드";
   }
 }
 
@@ -534,9 +546,8 @@ async function bootApp() {
     const app = getInAppBrowserName();
     els.inAppBanner.innerHTML = `
       <strong>${escapeHtml(app)} 안 브라우저</strong>
-      PDF는 앱 목록에 저장됩니다. 휴대폰 「다운로드」 폴더에 넣으려면
-      우측 상단 <strong>⋮ → 다른 브라우저로 열기</strong>(Chrome·삼성 인터넷) 후
-      「저장된 PDF」에서 다운로드하세요.
+      저장 시 다운로드가 바로 시작됩니다. 파일 이름이 바뀌거나 공유 화면이 뜨면
+      우측 상단 <strong>⋮ → 다른 브라우저로 열기</strong>(Chrome·삼성 인터넷)를 권장합니다.
     `;
     els.inAppBanner.hidden = false;
   }
