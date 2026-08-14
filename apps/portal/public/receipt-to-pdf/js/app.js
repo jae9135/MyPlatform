@@ -17,7 +17,6 @@ import {
 } from "./pdf-storage.js";
 import {
   renderPdfToContainer,
-  openPdfInNewTab,
   downloadPdfBlob,
   clearPdfViewerContainer,
 } from "./pdf-viewer.js";
@@ -61,7 +60,6 @@ const els = {
   pdfViewerPages: document.getElementById("pdf-viewer-pages"),
   pdfViewerTitle: document.getElementById("pdf-viewer-title"),
   btnClosePdfViewer: document.getElementById("btn-close-pdf-viewer"),
-  btnPdfNewtab: document.getElementById("btn-pdf-newtab"),
   btnPdfDownload: document.getElementById("btn-pdf-download"),
   savedPdfPickerModal: document.getElementById("saved-pdf-picker-modal"),
   savedPdfPickerList: document.getElementById("saved-pdf-picker-list"),
@@ -74,10 +72,13 @@ const els = {
   captureModeInputs: document.querySelectorAll('input[name="capture-mode"]'),
 };
 
+let toastTimer = 0;
+
 function showToast(message, duration = 2500) {
   els.toast.textContent = message;
   els.toast.hidden = false;
-  setTimeout(() => {
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
     els.toast.hidden = true;
   }, duration);
 }
@@ -259,38 +260,62 @@ function updateCaptureLabel() {
     : "+ 영수증 촬영 (개별)";
 }
 
+function fileSelectErrorMessage(err) {
+  if (err?.message === "Empty file") {
+    return "사진 파일이 비어 있습니다. 다시 촬영해 주세요.";
+  }
+  if (err?.message === "Image decode failed") {
+    return "사진 형식을 읽을 수 없습니다. 갤러리에서 JPEG로 선택해 보세요.";
+  }
+  if (err?.message?.includes("memory") || err?.name === "SecurityError") {
+    return "사진이 너무 큽니다. 갤러리에서 선택해 보세요.";
+  }
+  return "이미지를 불러올 수 없습니다.";
+}
+
 async function handleFileSelect(e) {
-  const file = e.target.files?.[0];
-  if (!file) return;
+  const files = Array.from(e.target.files || []).filter(Boolean);
+  if (files.length === 0) return;
+
+  const whitenBg = els.whitenToggle.checked;
+  const fullPage = isBatchCaptureMode();
+  let added = 0;
+  let lastError = null;
 
   try {
-    showToast("이미지 처리 중...");
-    const receipt = await processImageFile(file, {
-      whitenBg: els.whitenToggle.checked,
-      fullPage: isBatchCaptureMode(),
-    });
-    if (!receipt?.dataUrl?.startsWith("data:image/")) {
-      throw new Error("Image decode failed");
+    for (let i = 0; i < files.length; i += 1) {
+      showToast(
+        files.length === 1 ? "이미지 처리 중..." : `${i + 1} / ${files.length} 처리 중...`,
+        8000
+      );
+      try {
+        const receipt = await processImageFile(files[i], { whitenBg, fullPage });
+        if (!receipt?.dataUrl?.startsWith("data:image/")) {
+          throw new Error("Image decode failed");
+        }
+        state.receipts.push(receipt);
+        added += 1;
+        await persist();
+        renderList();
+      } catch (err) {
+        console.error(err);
+        lastError = err;
+      }
     }
-    state.receipts.push(receipt);
-    await persist();
-    renderList();
-    showToast(
-      receipt.fullPage
-        ? "한번에 촬영 사진이 추가되었습니다. (휴대폰에 저장됨)"
-        : "영수증이 추가되었습니다. (휴대폰에 저장됨)"
-    );
-  } catch (err) {
-    console.error(err);
-    let msg = "이미지를 불러올 수 없습니다.";
-    if (err?.message === "Empty file") {
-      msg = "사진 파일이 비어 있습니다. 다시 촬영해 주세요.";
-    } else if (err?.message === "Image decode failed") {
-      msg = "사진 형식을 읽을 수 없습니다. 갤러리에서 JPEG로 선택해 보세요.";
-    } else if (err?.message?.includes("memory") || err?.name === "SecurityError") {
-      msg = "사진이 너무 큽니다. 갤러리에서 선택해 보세요.";
+
+    if (added === files.length) {
+      showToast(
+        added === 1
+          ? fullPage
+            ? "한번에 촬영 사진이 추가되었습니다."
+            : "영수증이 추가되었습니다."
+          : `${added}장이 추가되었습니다.`
+      );
+    } else if (added > 0) {
+      showToast(`${added}장 추가, ${files.length - added}장은 건너뛰었습니다.`, 4000);
+    } else {
+      showToast(fileSelectErrorMessage(lastError));
     }
-    showToast(msg);
   } finally {
     els.fileInput.value = "";
     if (els.galleryInput) els.galleryInput.value = "";
@@ -345,7 +370,7 @@ async function viewPdfBlob(blob, title) {
     console.error(err);
     els.pdfViewerPages.innerHTML = `
       <p class="pdf-error">PDF를 화면에 표시할 수 없습니다.</p>
-      <p class="pdf-error-hint">아래 버튼으로 새 탭에서 열거나 다운로드하세요.</p>
+      <p class="pdf-error-hint">아래 「다운로드」로 파일을 저장하세요.</p>
     `;
   }
 }
@@ -357,15 +382,14 @@ async function handleSavePdf() {
   els.btnSavePdf.textContent = "생성 중...";
 
   try {
-    const filename = defaultFilename();
-    const { blob, downloadResult } = await exportToPdf(state.receipts, filename, {
-      autoDownload: !isInAppBrowser(),
+    const filename = defaultFilename(state.receipts.length);
+    const { blob } = await exportToPdf(state.receipts, filename, {
+      autoDownload: false,
     });
     await savePdfRecord(filename, blob);
     await refreshSavedPdfs();
     scrollToSavedPdfSection();
-    const deviceHint = downloadResultMessage(downloadResult);
-    showToast(`앱 목록에 저장됨. ${deviceHint}`, 5500);
+    showToast("이 브라우저 목록에 저장되었습니다. 「내 파일」에 넣으려면 다운로드하세요.", 4000);
     closePreview();
   } catch (err) {
     console.error(err);
@@ -418,26 +442,20 @@ function handleWhitenToggle() {
   setWhitenEnabled(els.whitenToggle.checked);
 }
 
-function handlePdfNewTab() {
-  if (!state.currentPdfBlob) return;
-  const opened = openPdfInNewTab(state.currentPdfBlob);
-  if (!opened) showToast("팝업이 차단되었습니다. 다운로드를 이용하세요.");
-}
-
-async function handlePdfDownload() {
+function handlePdfDownload() {
   if (!state.currentPdfBlob || state.currentPdfBlob.size === 0) {
     showToast("PDF가 준비되지 않았습니다.");
     return;
   }
-  try {
-    const result = await downloadPdfBlob(state.currentPdfBlob, state.currentPdfName);
-    showToast(downloadResultMessage(result), 5000);
-  } catch (err) {
-    if (err?.name === "AbortError") return;
-    console.error(err);
-    openPdfInNewTab(state.currentPdfBlob);
-    showToast("새 탭에서 PDF를 연 뒤 공유 → 파일에 저장 하세요.", 5000);
-  }
+  const name = state.currentPdfName || defaultFilename();
+  downloadPdfBlob(state.currentPdfBlob, name)
+    .then((result) => {
+      showToast(downloadResultMessage(result), 4000);
+    })
+    .catch((err) => {
+      console.error(err);
+      showToast("다운로드에 실패했습니다.");
+    });
 }
 
 els.fileInput.addEventListener("change", handleFileSelect);
@@ -507,7 +525,6 @@ els.btnSavePdf.addEventListener("click", handleSavePdf);
 
 els.btnClosePdfViewer.addEventListener("click", closePdfViewer);
 els.pdfViewerModal.querySelector(".modal-backdrop").addEventListener("click", closePdfViewer);
-els.btnPdfNewtab.addEventListener("click", handlePdfNewTab);
 els.btnPdfDownload.addEventListener("click", handlePdfDownload);
 
 els.whitenToggle.checked = isWhitenEnabled();

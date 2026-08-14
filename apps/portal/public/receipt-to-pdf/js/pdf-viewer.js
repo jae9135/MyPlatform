@@ -32,7 +32,7 @@ function renderPdfEmbedFallback(blob, container) {
 
   const hint = document.createElement("p");
   hint.className = "pdf-error-hint";
-  hint.textContent = "위에 PDF가 안 보이면 아래 「새 탭에서 열기」 또는 「다운로드」를 누르세요.";
+  hint.textContent = "위에 PDF가 안 보이면 「다운로드」를 누르세요.";
   container.appendChild(hint);
 
   container._pdfObjectUrl = url;

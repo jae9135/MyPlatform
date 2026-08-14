@@ -52,7 +52,7 @@ export async function buildPdfBytes(receipts) {
 /**
  * Build PDF bytes and save to the mobile device.
  */
-export async function exportToPdf(receipts, filename, { autoDownload = true } = {}) {
+export async function exportToPdf(receipts, filename, { autoDownload = false } = {}) {
   const pdfBytes = await buildPdfBytes(receipts);
   const blob = new Blob([pdfBytes], { type: "application/pdf" });
   if (!autoDownload) {
@@ -62,14 +62,18 @@ export async function exportToPdf(receipts, filename, { autoDownload = true } = 
   return { blob, downloadResult: result };
 }
 
-export function defaultFilename() {
+export function defaultFilename(receiptCount = 0) {
   const now = new Date();
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, "0");
   const d = String(now.getDate()).padStart(2, "0");
+  const count = Number(receiptCount);
+  if (count > 0) {
+    return `영수증_${y}${m}${d}_${count}장.pdf`;
+  }
   const h = String(now.getHours()).padStart(2, "0");
   const min = String(now.getMinutes()).padStart(2, "0");
-  return `receipts_${y}${m}${d}_${h}${min}.pdf`;
+  return `영수증_${y}${m}${d}_${h}${min}.pdf`;
 }
 
 export function openPdfBlob(blob) {

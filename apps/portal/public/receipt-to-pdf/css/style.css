@@ -34,6 +34,35 @@ body {
   padding-bottom: calc(var(--footer-h) + env(safe-area-inset-bottom));
 }
 
+.portal-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #0f1419;
+  color: #e8eef4;
+  border-bottom: 1px solid #2a3542;
+}
+
+.portal-bar a {
+  color: #8b9aab;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.portal-bar-logout {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid #2a3542;
+  color: #e8eef4;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
 .header {
   background: var(--surface);
   padding: 1rem 1.25rem;

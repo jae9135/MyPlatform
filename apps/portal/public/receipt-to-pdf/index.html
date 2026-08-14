@@ -15,10 +15,16 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+  <nav class="portal-bar" aria-label="포털 이동">
+    <a href="/">← MyPlatform</a>
+    <form action="/api/logout" method="post">
+      <button class="portal-bar-logout" type="submit">로그아웃</button>
+    </form>
+  </nav>
   <header class="header">
     <h1>ReceiptToPDF</h1>
     <p class="subtitle">영수증을 A4 PDF로 변환</p>
-    <p class="access-hint">촬영·변환은 이 기기에서만 이뤄집니다. PDF는 앱 목록에 저장되며, 「내 파일」에는 다운로드로 저장하세요.</p>
+    <p class="access-hint">촬영·변환·저장은 이 기기·이 브라우저에서만 이뤄집니다. 서버에 올라가지 않으며, 브라우저 데이터를 지우면 사라집니다. 휴대폰 「내 파일」에 남기려면 다운로드하세요.</p>
   </header>
 
   <div id="in-app-banner" class="in-app-banner" hidden></div>
@@ -40,12 +46,12 @@
 
     <section id="saved-pdf-section" class="saved-pdf-section" hidden>
       <h2 class="section-title">저장된 PDF</h2>
-      <p class="section-hint">앱 안에 저장된 PDF입니다. 「내 파일」에 넣으려면 항목 탭 → 「다운로드」</p>
+      <p class="section-hint">이 브라우저에만 있는 목록입니다. 다른 휴대폰·PC·시크릿 창에는 보이지 않습니다. 「내 파일」에 넣으려면 항목을 연 뒤 「다운로드」</p>
       <ul id="saved-pdf-list" class="pdf-list"></ul>
     </section>
 
     <div id="empty-state" class="empty-state">
-      <p>아래 버튼으로 영수증을 촬영하세요.</p>
+      <p>카메라로 찍거나, 갤러리에서 여러 장을 한 번에 고르세요.</p>
       <p class="hint">개별: 2~4장씩 한 PDF 페이지 / 여러 장 한번에: 사진 1장 = PDF 1페이지</p>
     </div>
 
@@ -68,7 +74,7 @@
       <label for="file-input" class="btn btn-capture" id="capture-label">
         + 영수증 촬영 (개별)
       </label>
-      <label for="gallery-input" class="btn btn-secondary btn-gallery-pick">갤러리</label>
+      <label for="gallery-input" class="btn btn-secondary btn-gallery-pick">갤러리 (여러 장)</label>
     </div>
     <input
       id="file-input"
@@ -81,6 +87,7 @@
       id="gallery-input"
       type="file"
       accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+      multiple
       hidden
     >
     <input
@@ -140,7 +147,7 @@
         <h2>저장된 PDF</h2>
         <button id="btn-close-saved-pdf-picker" class="btn-icon" aria-label="닫기">&times;</button>
       </div>
-      <p class="picker-hint">아래 목록은 이 앱에서 만든 PDF입니다. 휴대폰 「내 파일」에는 다운로드 버튼으로 저장하세요.</p>
+      <p class="picker-hint">아래 목록은 이 브라우저에만 있습니다. 휴대폰 「내 파일」에 넣으려면 미리보기에서 「다운로드」를 누르세요.</p>
       <ul id="saved-pdf-picker-list" class="pdf-list"></ul>
       <p id="saved-pdf-picker-empty" class="picker-empty" hidden>저장된 PDF가 없습니다. 먼저 「PDF 만들기」로 저장하세요.</p>
       <div class="modal-footer modal-footer-actions">
@@ -158,7 +165,6 @@
       </div>
       <div id="pdf-viewer-pages" class="pdf-viewer-pages"></div>
       <div class="modal-footer pdf-viewer-actions">
-        <button id="btn-pdf-newtab" class="btn btn-secondary" type="button">새 탭에서 열기</button>
         <button id="btn-pdf-download" class="btn btn-primary" type="button">다운로드</button>
       </div>
     </div>

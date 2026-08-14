@@ -38,7 +38,7 @@ export const APPS: PlatformApp[] = [
   {
     id: "receipt-to-pdf",
     name: "ReceiptToPDF",
-    description: "영수증 촬영 → A4 PDF (PWA)",
+    description: "영수증 촬영·갤러리 → A4 PDF",
     status: "beta",
     href: "/apps/receipt-to-pdf",
     category: "mobile",

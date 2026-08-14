@@ -1,7 +1,14 @@
 /**
- * Mobile-friendly PDF save to device.
- * In-app browsers (KakaoTalk etc.) cannot save to the user's Downloads folder reliably.
+ * Save PDF to the device Downloads folder with a stable filename.
+ * Do not open the system share sheet (다른 앱으로 보내기).
  */
+
+function ensurePdfFilename(filename) {
+  let name = (filename || "receipts.pdf").trim();
+  name = name.replace(/[/\\?%*:|"<>]/g, "_");
+  if (!name.toLowerCase().endsWith(".pdf")) name = `${name}.pdf`;
+  return name;
+}
 
 function isIOS() {
   return (
@@ -10,7 +17,6 @@ function isIOS() {
   );
 }
 
-/** KakaoTalk, Line, Instagram, etc. — downloads often stay inside the app. */
 export function isInAppBrowser() {
   const ua = navigator.userAgent || "";
   return /KAKAOTALK|Instagram|FBAN|FBAV|Line\/|NAVER\(inapp|DaumApps|EverytimeApp|WhatsApp|Twitter/i.test(
@@ -28,12 +34,44 @@ export function getInAppBrowserName() {
   return "앱 안 브라우저";
 }
 
-function ensurePdfFilename(filename) {
-  const name = (filename || "receipts.pdf").trim();
-  return name.toLowerCase().endsWith(".pdf") ? name : `${name}.pdf`;
+function namedPdfFile(blob, name) {
+  return new File([blob], name, { type: "application/pdf" });
 }
 
-function openBlobInNewTab(blob) {
+export async function downloadBlobToDevice(blob, filename) {
+  const name = ensurePdfFilename(filename);
+
+  if (!blob || blob.size === 0) {
+    throw new Error("Empty PDF");
+  }
+
+  const file = namedPdfFile(blob, name);
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 15000);
+
+  if (isIOS() || isInAppBrowser()) {
+    return "download-limited";
+  }
+  return "download";
+}
+
+export function downloadResultMessage(result) {
+  if (result === "download-limited") {
+    const app = isInAppBrowser() ? getInAppBrowserName() : "이 브라우저";
+    return `${app}에서는 파일 이름이 바뀌거나 공유 화면이 열릴 수 있습니다. Chrome에서 열면 이름이 유지됩니다.`;
+  }
+  return "다운로드 폴더에 저장되었습니다.";
+}
+
+export function openBlobInNewTab(blob) {
   const url = URL.createObjectURL(blob);
   const opened = window.open(url, "_blank", "noopener");
   if (!opened) {
@@ -47,72 +85,3 @@ function openBlobInNewTab(blob) {
   }
   setTimeout(() => URL.revokeObjectURL(url), 120000);
 }
-
-async function trySharePdf(blob, name) {
-  if (!navigator.share || !navigator.canShare) return false;
-  try {
-    const file = new File([blob], name, { type: "application/pdf" });
-    if (!navigator.canShare({ files: [file] })) return false;
-    await navigator.share({ title: name, files: [file] });
-    return true;
-  } catch (err) {
-    if (err.name === "AbortError") throw err;
-    return false;
-  }
-}
-
-export async function downloadBlobToDevice(blob, filename) {
-  const name = ensurePdfFilename(filename);
-
-  if (!blob || blob.size === 0) {
-    throw new Error("Empty PDF");
-  }
-
-  if (isIOS()) {
-    openBlobInNewTab(blob);
-    return "ios-open";
-  }
-
-  if (isInAppBrowser()) {
-    const shared = await trySharePdf(blob, name);
-    if (shared) return "share";
-
-    openBlobInNewTab(blob);
-    return "in-app-open";
-  }
-
-  const shared = await trySharePdf(blob, name);
-  if (shared) return "share";
-
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.rel = "noopener";
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
-  return "download";
-}
-
-export function downloadResultMessage(result) {
-  if (result === "app-only") {
-    const app = getInAppBrowserName();
-    return `${app} 안에서는 Chrome(삼성 인터넷)으로 열어 다운로드하세요.`;
-  }
-  if (result === "ios-open") {
-    return "새 탭에서 PDF를 연 뒤 공유(↑) → 「파일에 저장」을 선택하세요.";
-  }
-  if (result === "in-app-open") {
-    const app = getInAppBrowserName();
-    return `${app} 안에서는 「다른 브라우저로 열기」(Chrome) 후 다운로드하거나, 공유 메뉴에서 저장하세요.`;
-  }
-  if (result === "share") {
-    return "공유 메뉴에서 「다운로드」 또는 「Drive/내 파일에 저장」을 선택하세요.";
-  }
-  return "다운로드 폴더에 저장되었습니다.";
-}
-
-export { openBlobInNewTab };

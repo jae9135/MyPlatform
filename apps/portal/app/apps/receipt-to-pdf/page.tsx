@@ -1,20 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { PortalNav } from "@/lib/PortalNav";
-import "./receipt.css";
-
+/** iframe 없이 최상위 문서로 열어 휴대폰 카메라 권한을 안정적으로 요청한다. */
 export default function ReceiptToPdfPage() {
-  return (
-    <div className="receipt-shell">
-      <div className="receipt-shell-bar">
-        <PortalNav />
-      </div>
-      <iframe
-        className="receipt-shell-frame"
-        src="/receipt-to-pdf/index.html"
-        title="ReceiptToPDF"
-        allow="camera; fullscreen"
-      />
-    </div>
-  );
+  redirect("/receipt-to-pdf/index.html");
 }
