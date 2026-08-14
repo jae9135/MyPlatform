@@ -19,11 +19,13 @@ python -m uvicorn main:app --reload --port 8000
 ```
 
 - Health: http://127.0.0.1:8000/health (`db_configured`)
+- DDL 생성: 테이블 + 샘플 INSERT만 (Database/스키마 스크립트 없음)
 - ChkDBStd: `GET /v1/chk-db-std/samples`, `POST /v1/chk-db-std/run` (`format=json|xlsx|word-dict|term-dict`)
 - DBManager:
   - `GET /v1/db-manager/samples`
+  - `POST /v1/db-manager/validate` (설계서 파싱 가능 여부)
   - `POST /v1/db-manager/generate` (`format=json|zip`)
-  - `GET /v1/db-manager/db-status`
+  - `GET /v1/db-manager/db-status` (`database_name` 포함)
   - `GET /v1/db-manager/schemas`, `GET /v1/db-manager/schemas/{schema}/tables`
   - `POST /v1/db-manager/export-design` (DB → 테이블정의서 xlsx)
   - `GET /v1/db-manager/schemas/{schema}/tables/{table}/rows` (`q`, `format=json|csv|xlsx`)

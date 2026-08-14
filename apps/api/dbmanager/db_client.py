@@ -58,6 +58,11 @@ def get_connection_params() -> dict[str, Any]:
     }
 
 
+def connected_database_name() -> str:
+    """Postgres database name from DATABASE_URL (e.g. postgres on Supabase)."""
+    return str(get_connection_params().get("dbname") or "postgres")
+
+
 def masked_target(params: dict[str, Any] | None = None) -> str:
     cfg = params or get_connection_params()
     return f"{cfg['user']}@{cfg['host']}:{cfg['port']}/{cfg['dbname']}"

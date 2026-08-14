@@ -335,33 +335,93 @@ def _read_unique_columns(conn: Any, schema: str) -> dict[str, set[str]]:
 
 
 def _read_index_keys(conn: Any, schema: str) -> dict[tuple[str, str], str]:
+    """Map (table, column) to Index Key text from DB constraints/indexes."""
     result: dict[tuple[str, str], str] = {}
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT tablename, indexname, indexdef
-            FROM pg_indexes
-            WHERE schemaname = %s
-            """,
-            (schema,),
-        )
-        for table_name, index_name, indexdef in cur.fetchall():
-            name = (index_name or "").lower()
-            if name.startswith("pk_"):
-                continue
-            cols = _index_cols_from_def(indexdef or "")
-            for col in cols:
-                key = (table_name.lower(), col.lower())
-                label = f"{index_name}({','.join(c.upper() for c in cols)})"
-                result.setdefault(key, label)
+    _read_key_constraint_index_keys(conn, schema, result)
+    _read_standalone_index_keys(conn, schema, result)
     return result
 
 
-def _index_cols_from_def(indexdef: str) -> list[str]:
-    if "(" not in indexdef or not indexdef.endswith(")"):
-        return []
-    inner = indexdef[indexdef.rfind("(") + 1 : -1]
-    return [c.strip().strip('"') for c in inner.split(",") if c.strip()]
+def _constraint_index_label(constraint_name: str, columns: list[str]) -> str:
+    cols = ",".join(c.upper() for c in columns)
+    return f"{constraint_name}({cols})"
+
+
+def _read_key_constraint_index_keys(
+    conn: Any, schema: str, result: dict[tuple[str, str], str]
+) -> None:
+    grouped: dict[tuple[str, str], list[tuple[int, str]]] = {}
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                tc.table_name,
+                tc.constraint_name,
+                kcu.column_name,
+                kcu.ordinal_position
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+            WHERE tc.table_schema = %s
+              AND tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
+            ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
+            """,
+            (schema,),
+        )
+        for table_name, constraint_name, column_name, ordinal in cur.fetchall():
+            grouped.setdefault(
+                (table_name.lower(), constraint_name),
+                [],
+            ).append((int(ordinal or 0), column_name.lower()))
+
+    for (table_name, constraint_name), cols in grouped.items():
+        ordered = [name for _, name in sorted(cols, key=lambda item: item[0])]
+        label = _constraint_index_label(constraint_name, ordered)
+        for col in ordered:
+            result[(table_name, col)] = label
+
+
+def _read_standalone_index_keys(
+    conn: Any, schema: str, result: dict[tuple[str, str], str]
+) -> None:
+    """Indexes that are not backing PRIMARY KEY / UNIQUE constraints."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                t.relname AS table_name,
+                i.relname AS index_name,
+                array_agg(a.attname ORDER BY u.ordinality) AS column_names
+            FROM pg_index ix
+            JOIN pg_class t ON t.oid = ix.indrelid
+            JOIN pg_class i ON i.oid = ix.indexrelid
+            JOIN pg_namespace n ON n.oid = t.relnamespace
+            LEFT JOIN pg_constraint c ON c.conindid = ix.indexrelid
+            JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS u(attnum, ordinality)
+              ON true
+            JOIN pg_attribute a
+              ON a.attrelid = t.oid
+             AND a.attnum = u.attnum
+            WHERE n.nspname = %s
+              AND c.oid IS NULL
+              AND a.attnum > 0
+            GROUP BY t.relname, i.relname
+            ORDER BY t.relname, i.relname
+            """,
+            (schema,),
+        )
+        for table_name, index_name, column_names in cur.fetchall():
+            cols = [str(name).lower() for name in (column_names or []) if name]
+            if not cols:
+                continue
+            label = _constraint_index_label(index_name, cols)
+            table_key = table_name.lower()
+            for col in cols:
+                col_key = (table_key, col)
+                if col_key in result:
+                    continue
+                result[col_key] = label
 
 
 def _clean_default(value) -> str | None:

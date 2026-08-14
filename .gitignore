@@ -39,3 +39,4 @@ Thumbs.db
 .vercel
 supabase/.branches
 supabase/.temp
+supabase/seed/deliverable-manager/out/

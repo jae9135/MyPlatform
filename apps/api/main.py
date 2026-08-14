@@ -57,6 +57,20 @@ app = FastAPI(title="MyPlatform API", version="0.4.0")
 class ApplySqlBody(BaseModel):
     step: str = Field(..., description="schema|table|sample")
     sql: str = Field(..., description="SQL script to execute")
+    target_schema: str | None = Field(
+        None, description="Apply objects under this schema (rewrites SQL)"
+    )
+    source_schemas: list[str] = Field(
+        default_factory=list,
+        description="Legacy schema names in SQL; rewritten to target_schema",
+    )
+    table_names: list[str] = Field(
+        default_factory=list,
+        description="Table names from design; used to qualify SQL at apply time",
+    )
+    target_db_name: str | None = Field(
+        None, description="Design database label (Supabase uses linked DB)"
+    )
 
 
 class ApplyAlterBody(BaseModel):
@@ -193,24 +207,52 @@ def _load_db_client():
     return dbc
 
 
-def _run_check(m, design_path: Path, kind: str):
+async def _save_optional_upload(
+    upload: UploadFile | None, tmp_path: Path, default_name: str
+) -> Path | None:
+    if upload is None or not upload.filename:
+        return None
+    raw = await upload.read()
+    if not raw:
+        return None
+    path = tmp_path / (upload.filename or default_name)
+    path.write_bytes(raw)
+    return path
+
+
+def _run_check(
+    m,
+    design_path: Path,
+    kind: str,
+    sheet_name: str | None = None,
+    *,
+    words_path: Path | None = None,
+    terms_path: Path | None = None,
+    domains_path: Path | None = None,
+):
+    words = words_path or m.DEFAULT_WORDS
+    terms = terms_path or m.DEFAULT_TERMS
+    domains = domains_path or m.DEFAULT_DOMAINS
     if kind == "word":
         match_df, review_df, unmatched_df, payload = m.run_word_match(
-            design_path, m.DEFAULT_WORDS
+            design_path, words, sheet_name=sheet_name
         )
         return match_df, review_df, unmatched_df, payload, m.WORD_MATCH_COLS, "tri"
     if kind == "term":
         match_df, review_df, unmatched_df, payload = m.run_term_match(
-            design_path, m.DEFAULT_TERMS, m.DEFAULT_WORDS
+            design_path, terms, words, sheet_name=sheet_name
         )
         return match_df, review_df, unmatched_df, payload, m.TERM_MATCH_COLS, "tri"
     if kind == "domain":
         match_df, review_df, unmatched_df, payload = m.run_domain_check(
-            design_path, m.DEFAULT_TERMS, m.DEFAULT_DOMAINS
+            design_path,
+            terms,
+            domains,
+            sheet_name=sheet_name,
         )
         return match_df, review_df, unmatched_df, payload, None, "domain"
     match_df, review_df, unmatched_df, payload = m.run_code_check(
-        design_path, m.DEFAULT_CODE_DIR
+        design_path, m.DEFAULT_CODE_DIR, sheet_name=sheet_name
     )
     return match_df, review_df, unmatched_df, payload, None, "code"
 
@@ -224,10 +266,22 @@ def _save_result_xlsx(m, kind_mode, match_df, review_df, unmatched_df, cols, out
         m.save_code_excel(match_df, review_df, unmatched_df, out_path)
 
 
-def _save_dictionary_xlsx(m, kind: str, match_df, review_df, unmatched_df, out_path: Path):
+def _save_dictionary_xlsx(
+    m,
+    kind: str,
+    match_df,
+    review_df,
+    unmatched_df,
+    out_path: Path,
+    *,
+    words_path: Path | None = None,
+    terms_path: Path | None = None,
+):
+    words = words_path or m.DEFAULT_WORDS
+    terms = terms_path or m.DEFAULT_TERMS
     if kind == "word":
         m.build_word_dictionary_file(
-            match_df, review_df, unmatched_df, m.DEFAULT_WORDS, out_path
+            match_df, review_df, unmatched_df, words, out_path
         )
         return "chkdbstd_used_word_dictionary.xlsx"
     if kind == "term":
@@ -235,8 +289,8 @@ def _save_dictionary_xlsx(m, kind: str, match_df, review_df, unmatched_df, out_p
             match_df,
             review_df,
             unmatched_df,
-            m.DEFAULT_TERMS,
-            m.DEFAULT_WORDS,
+            terms,
+            words,
             out_path,
         )
         return "chkdbstd_used_term_dictionary.xlsx"
@@ -277,11 +331,74 @@ def download_sample(sample_id: str):
     )
 
 
+@app.post("/v1/chk-db-std/validate")
+async def validate_chk_db_std(
+    design: UploadFile = File(...),
+    kind: str = Form("word"),
+    sheet: str = Form(""),
+) -> dict:
+    """설계서/코드정의서 Excel 파싱 가능 여부 확인 (점검 실행 전)."""
+    if kind not in ("word", "term", "domain", "code"):
+        raise HTTPException(400, detail="kind must be word|term|domain|code")
+
+    raw = await design.read()
+    if not raw:
+        raise HTTPException(400, detail="empty design file")
+
+    m = _load_chk_module()
+    sheet_name = sheet.strip() or None
+    with tempfile.TemporaryDirectory(prefix="myplatform_chk_val_") as tmp:
+        design_path = Path(tmp) / (design.filename or "design.xlsx")
+        design_path.write_bytes(raw)
+        try:
+            payload = m.validate_check_design(
+                design_path, kind=kind, sheet_name=sheet_name
+            )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    if not payload.get("can_check"):
+        raise HTTPException(status_code=400, detail=payload.get("message", "확인 실패"))
+    return payload
+
+
+@app.post("/v1/chk-db-std/generate-terms")
+async def generate_chk_terms(
+    names: str = Form(""),
+    terms_csv: UploadFile | None = File(None),
+    words_csv: UploadFile | None = File(None),
+) -> dict:
+    """한글명(줄 단위) → 표준용어 조회·단어조합."""
+    parsed = [n.strip() for n in names.replace("\r\n", "\n").split("\n") if n.strip()]
+    if not parsed:
+        raise HTTPException(400, detail="한글명을 한 줄에 하나씩 입력하세요.")
+
+    m = _load_chk_module()
+    with tempfile.TemporaryDirectory(prefix="myplatform_chk_gt_") as tmp:
+        tmp_path = Path(tmp)
+        words_path = await _save_optional_upload(words_csv, tmp_path, "words.csv")
+        terms_path = await _save_optional_upload(terms_csv, tmp_path, "terms.csv")
+        words = words_path or m.DEFAULT_WORDS
+        terms = terms_path or m.DEFAULT_TERMS
+        try:
+            terms_df = m.load_standard_terms(terms)
+            words_df = m.load_standard_words(words)
+            items = m.generate_standard_terms_for_names(parsed, terms_df, words_df)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return {"ok": True, "count": len(items), "items": items}
+
+
 @app.post("/v1/chk-db-std/run")
 async def run_chk_db_std(
     design: UploadFile = File(...),
     kind: str = Form("word"),
     format: str = Form("json"),
+    sheet: str = Form(""),
+    words_csv: UploadFile | None = File(None),
+    terms_csv: UploadFile | None = File(None),
+    domains_csv: UploadFile | None = File(None),
 ):
     """설계서 업로드 → 점검. format=json|xlsx|word-dict|term-dict."""
     if kind not in ("word", "term", "domain", "code"):
@@ -301,16 +418,36 @@ async def run_chk_db_std(
         raise HTTPException(400, detail="empty design file")
 
     m = _load_chk_module()
+    sheet_name = sheet.strip() or None
 
     with tempfile.TemporaryDirectory(prefix="myplatform_chk_") as tmp:
         tmp_path = Path(tmp)
         design_path = tmp_path / (design.filename or "design.xlsx")
         design_path.write_bytes(raw)
         out_path = tmp_path / "result.xlsx"
+        words_path = await _save_optional_upload(words_csv, tmp_path, "words.csv")
+        terms_path = await _save_optional_upload(terms_csv, tmp_path, "terms.csv")
+        domains_path = await _save_optional_upload(
+            domains_csv, tmp_path, "domains.csv"
+        )
 
         try:
+            check = m.validate_check_design(
+                design_path, kind=kind, sheet_name=sheet_name
+            )
+            if not check.get("can_check"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=check.get("message", "설계서 형식 확인 실패"),
+                )
             match_df, review_df, unmatched_df, payload, cols, mode = _run_check(
-                m, design_path, kind
+                m,
+                design_path,
+                kind,
+                sheet_name,
+                words_path=words_path,
+                terms_path=terms_path,
+                domains_path=domains_path,
             )
             fname = f"chkdbstd_{kind}_result.xlsx"
             if fmt == "xlsx":
@@ -320,7 +457,14 @@ async def run_chk_db_std(
                 data = out_path.read_bytes()
             elif fmt in ("word-dict", "term-dict"):
                 fname = _save_dictionary_xlsx(
-                    m, kind, match_df, review_df, unmatched_df, out_path
+                    m,
+                    kind,
+                    match_df,
+                    review_df,
+                    unmatched_df,
+                    out_path,
+                    words_path=words_path,
+                    terms_path=terms_path,
                 )
                 data = out_path.read_bytes()
             else:
@@ -379,10 +523,38 @@ def download_dbmanager_sample(sample_id: str):
     )
 
 
+@app.post("/v1/db-manager/validate")
+async def validate_dbmanager_design(
+    design: UploadFile = File(...),
+    sheet: str = Form(""),
+) -> dict:
+    """테이블정의서 Excel 파싱 가능 여부만 확인 (DDL 생성 없음)."""
+    raw = await design.read()
+    if not raw:
+        raise HTTPException(400, detail="empty design file")
+
+    svc = _load_dbmanager()
+    sheet_name = sheet.strip() or None
+    try:
+        payload = svc.validate_design_from_upload(raw, sheet_name=sheet_name)
+    except Exception as e:
+        return {
+            "ok": False,
+            "can_generate": False,
+            "source_filename": design.filename or "design.xlsx",
+            "message": str(e),
+        }
+
+    return {
+        **payload,
+        "source_filename": design.filename or "design.xlsx",
+    }
+
+
 @app.post("/v1/db-manager/generate")
 async def generate_dbmanager_ddl(
     design: UploadFile = File(...),
-    sheet: str = Form("테이블정의서"),
+    sheet: str = Form(""),
     format: str = Form("json"),
 ):
     """테이블정의서 → PostgreSQL DDL. format=json|zip. 서버 미보관."""
@@ -395,23 +567,27 @@ async def generate_dbmanager_ddl(
         raise HTTPException(400, detail="empty design file")
 
     svc = _load_dbmanager()
+    sheet_name = sheet.strip() or None
 
     with tempfile.TemporaryDirectory(prefix="myplatform_dbm_") as tmp:
         tmp_path = Path(tmp)
         out_dir = tmp_path / "ddl"
         try:
             result = svc.generate_from_upload(
-                raw, sheet_name=sheet or "테이블정의서", output_dir=out_dir
+                raw, sheet_name=sheet_name, output_dir=out_dir
             )
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
+
+        resolved_sheet = result.get("sheet") or sheet.strip() or "테이블정의서"
 
         if fmt == "json":
             return JSONResponse(
                 {
                     "ok": True,
                     "source_filename": design.filename or "design.xlsx",
-                    "sheet": sheet or "테이블정의서",
+                    "sheet": resolved_sheet,
+                    "design_format": result.get("design_format"),
                     "tables": result["tables"],
                     "scripts": result["scripts"],
                     "grouped": result["grouped"],
@@ -443,6 +619,7 @@ def dbmanager_db_status() -> dict:
             "ok": False,
             "configured": False,
             "target": None,
+            "database_name": None,
             "message": (
                 "DATABASE_URL(또는 POSTGRES_*) 환경변수가 없습니다. "
                 "Render/로컬 API에 Supabase DB URI를 설정하세요."
@@ -450,11 +627,13 @@ def dbmanager_db_status() -> dict:
         }
     try:
         target = dbc.masked_target()
+        database_name = dbc.connected_database_name()
     except Exception as e:
         return {
             "ok": False,
             "configured": True,
             "target": None,
+            "database_name": None,
             "message": str(e),
         }
     ok, message = dbc.test_connection()
@@ -462,6 +641,7 @@ def dbmanager_db_status() -> dict:
         "ok": ok,
         "configured": True,
         "target": target,
+        "database_name": database_name,
         "message": message,
     }
 
@@ -568,12 +748,14 @@ async def dbmanager_export_design(
     schema: str = Form(...),
     tables: str = Form(""),
     db_name: str = Form("dbm"),
+    sheet: str = Form(""),
     design: UploadFile | None = File(None),
 ):
     """DB 스키마를 테이블정의서 Excel로 반영해 다운로드 (서버 미보관).
 
     tables: 쉼표 구분 테이블명. 비우면 스키마 전체.
-    design: 선택. 기존 설계서에 병합. 없으면 빈 테이블정의서 양식 생성.
+    design: 필수(또는 설계서→스크립트에서 불러온 양식). 해당 양식에 병합.
+    sheet: 시트명. 비우면 양식에서 자동 감지.
     """
     dbc = _require_db_ready()
     sr = _load_schema_reader()
@@ -593,7 +775,13 @@ async def dbmanager_export_design(
         template_bytes = await design.read()
         if not template_bytes:
             raise HTTPException(400, detail="empty design file")
-    # 기준 설계서 없으면 빈 양식에 DB 구조만 기록 (샘플 파일의 타 테이블과 섞이지 않음)
+    if not template_bytes:
+        raise HTTPException(
+            400,
+            detail="설계서 양식 Excel 파일(design)이 필요합니다.",
+        )
+
+    sheet_name = (sheet or "").strip() or None
 
     try:
         db_tables = sr.read_schema(schema_name, table_names=table_list)
@@ -602,11 +790,13 @@ async def dbmanager_export_design(
                 400,
                 detail=f"No tables found in schema '{schema_name}'.",
             )
-        template_src = io.BytesIO(template_bytes) if template_bytes else None
+        template_src = io.BytesIO(template_bytes)
         data = ew.write_schema_to_excel_bytes(
             db_tables,
             db_name=db_label,
+            schema_name=schema_name,
             template=template_src,
+            sheet_name=sheet_name,
         )
         fname = ew.default_export_filename(schema_name)
     except HTTPException:
@@ -746,12 +936,12 @@ def dbmanager_delete_row(body: DataRowBody) -> dict:
 @app.post("/v1/db-manager/diff")
 async def dbmanager_diff(
     design: UploadFile = File(...),
-    sheet: str = Form("테이블정의서"),
+    sheet: str = Form(""),
 ) -> dict:
     """설계서 vs DB 스키마 비교. DROP은 생성하지 않음."""
     dbc = _require_db_ready()
     _ensure_api_path()
-    from dbmanager.excel_parser import parse_excel  # type: ignore
+    from dbmanager.excel_parser import parse_excel_with_meta  # type: ignore
 
     sr = _load_schema_reader()
     sd = _load_schema_diff()
@@ -759,7 +949,8 @@ async def dbmanager_diff(
     if not raw:
         raise HTTPException(400, detail="empty design file")
     try:
-        tables = parse_excel(io.BytesIO(raw), sheet or "테이블정의서")
+        parsed = parse_excel_with_meta(io.BytesIO(raw), sheet.strip() or None)
+        tables = parsed.tables
         if not tables:
             raise ValueError("Excel에서 테이블 정의를 찾지 못했습니다.")
         db_tables = []
@@ -776,7 +967,8 @@ async def dbmanager_diff(
     return {
         "ok": True,
         "target": dbc.masked_target(),
-        "sheet": sheet,
+        "sheet": parsed.sheet_name,
+        "design_format": parsed.format,
         "source_filename": design.filename or "design.xlsx",
         "design_tables": len(tables),
         **payload,
@@ -832,6 +1024,22 @@ def dbmanager_apply(body: ApplySqlBody) -> dict:
     if not sql:
         raise HTTPException(400, detail="SQL script is empty.")
 
+    target_schema = (body.target_schema or "").strip()
+    source_schemas = [s.strip() for s in (body.source_schemas or []) if s.strip()]
+    table_names = [s.strip() for s in (body.table_names or []) if s.strip()]
+    if target_schema:
+        from dbmanager.sql_rewrite import rewrite_sql_schema  # type: ignore
+
+        try:
+            sql = rewrite_sql_schema(
+                sql,
+                target_schema=target_schema,
+                source_schemas=source_schemas or None,
+                table_names=table_names or None,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
     dbc = _load_db_client()
     if not dbc.is_db_configured():
         raise HTTPException(
@@ -875,5 +1083,7 @@ def dbmanager_apply(body: ApplySqlBody) -> dict:
         "step": step,
         "target": dbc.masked_target(),
         "message": message,
+        "applied_schema": target_schema or None,
+        "applied_db_name": (body.target_db_name or "").strip() or None,
         **({"pk_allocations": allocations} if allocations is not None else {}),
     }

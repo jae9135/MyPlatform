@@ -173,6 +173,23 @@ main {
   margin: 0 0 12px;
 }
 
+.std-csv-guide ul {
+  margin: 8px 0 0;
+  padding-left: 1.25rem;
+}
+
+.std-csv-guide li {
+  margin-bottom: 6px;
+}
+
+.std-csv-guide li:last-child {
+  margin-bottom: 0;
+}
+
+.std-csv-guide p {
+  margin: 0;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;
@@ -317,6 +334,109 @@ input[type="password"] {
   margin-top: 4px;
   font-size: 1.25rem;
   font-weight: 700;
+}
+
+.run-progress {
+  margin: 10px 0 14px;
+}
+
+.progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+.file-field input[type="file"] {
+  max-width: min(100%, 420px);
+}
+
+.stack-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.term-gen-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 720px) {
+  .term-gen-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.term-gen-input.readonly {
+  background: #0c1218;
+  color: #d7e2ee;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  cursor: text;
+}
+
+.term-gen-input {
+  width: 100%;
+  min-height: 140px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  resize: vertical;
+  background: #121a22;
+  color: var(--text);
+  caret-color: var(--accent);
+}
+
+.term-gen-input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.term-gen-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(61, 139, 253, 0.25);
+}
+
+.term-gen-table .term-gen-eng {
+  display: inline-block;
+  min-width: 6rem;
+  min-height: 1.6rem;
+  padding: 2px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: #0c1218;
+  color: #d7e2ee;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.term-gen-table .term-gen-eng:hover {
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.term-gen-table .term-gen-eng.empty {
+  display: block;
+  min-height: 1.6rem;
+  border: none;
+  background: transparent;
+  cursor: default;
 }
 
 .tabs {

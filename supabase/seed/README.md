@@ -14,11 +14,17 @@ Dashboard → Storage 에서 버킷을 만든 뒤 업로드합니다.
 ```
 samples/chkdbstd/design.sample.xlsx
 samples/chkdbstd/code-design.sample.xlsx
+samples/deliverable-manager/catalog.json
+samples/deliverable-manager/catalog.json
+samples/deliverable-manager/{template,deliverable}/{id}.txt
+samples/deliverable-manager/reference/site-a|site-b/{id}.txt
 standards/words/mois_standard_words.csv
 standards/terms/mois_standard_terms.csv
 standards/domains/mois_standard_domains.csv
 standards/codes/index.pkl   # 또는 codes/*.xlsx (대용량은 Git 금지)
 ```
+
+DeliverableManager 공개 테스트 껍데기(실문서 아님): [deliverable-manager/README.md](deliverable-manager/README.md)
 
 업로드 후 `sample_assets` 테이블에 메타를 insert 하면 포털에서 목록을 보여줄 수 있습니다.
 

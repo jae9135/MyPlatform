@@ -10,7 +10,7 @@ from .type_mapper import map_type
 
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _INSERT_HEAD = re.compile(
-    r"INSERT\s+INTO\s+(\w+)\.(\w+)\s*\(([^)]+)\)\s*VALUES\s*\(",
+    r"INSERT\s+INTO\s+(?:(\w+)\.)?(\w+)\s*\(([^)]+)\)\s*VALUES\s*\(",
     re.IGNORECASE,
 )
 
@@ -33,19 +33,20 @@ def build_sample_data_sql(
     ]
     starts = start_by_table or {}
     for table in sorted(tables, key=lambda t: t.name):
-        key = f"{table.schema}.{table.name}"
-        start = int(starts.get(key, 1))
+        key = table.name
+        legacy_key = f"{table.schema}.{table.name}"
+        start = int(starts.get(key, starts.get(legacy_key, 1)))
         rows = _sample_rows_for_table(table, start=start)
         if not rows:
             continue
-        lines.append(f"-- Sample data: {table.schema}.{table.name} (pk from {start})")
+        lines.append(f"-- Sample data: {table.name} (pk from {start})")
         col_names = [c.name for c in table.columns]
         for row in rows:
             ordered = {c: row.get(c) for c in col_names if c in row}
             cols = ", ".join(ordered.keys())
             vals = ", ".join(_format_value(v) for v in ordered.values())
             lines.append(
-                f"INSERT INTO {table.schema}.{table.name} ({cols}) VALUES ({vals});"
+                f"INSERT INTO {table.name} ({cols}) VALUES ({vals});"
             )
         lines.append("")
     return "\n".join(lines)
@@ -71,8 +72,10 @@ def rewrite_sample_sql_with_next_pks(conn: Any, sql: str) -> tuple[str, dict[str
 
         out.append(text[pos : m.start()])
         schema, table = m.group(1), m.group(2)
-        if not _IDENT.match(schema) or not _IDENT.match(table):
-            raise ValueError(f"Invalid table identifier: {schema}.{table}")
+        if schema and not _IDENT.match(schema):
+            raise ValueError(f"Invalid schema identifier: {schema}")
+        if not _IDENT.match(table):
+            raise ValueError(f"Invalid table identifier: {table}")
 
         col_names = [c.strip() for c in m.group(3).split(",") if c.strip()]
         for c in col_names:
@@ -91,8 +94,12 @@ def rewrite_sample_sql_with_next_pks(conn: Any, sql: str) -> tuple[str, dict[str
         if stmt_end < len(text) and text[stmt_end] == ";":
             stmt_end += 1
 
-        key = f"{schema}.{table}"
+        key = f"{schema}.{table}" if schema else table
         if key not in pk_cols_cache:
+            if not schema:
+                raise ValueError(
+                    f"INSERT INTO {table} must be schema-qualified before apply"
+                )
             pk_cols_cache[key] = _query_pk_columns(conn, schema, table)
             if pk_cols_cache[key]:
                 next_start[key] = (
@@ -125,8 +132,9 @@ def rewrite_sample_sql_with_next_pks(conn: Any, sql: str) -> tuple[str, dict[str
                 info["to"] = n
                 info["count"] = int(info["count"]) + 1
 
+        insert_target = f"{schema}.{table}" if schema else table
         out.append(
-            f"INSERT INTO {schema}.{table} ({', '.join(col_names)}) "
+            f"INSERT INTO {insert_target} ({', '.join(col_names)}) "
             f"VALUES ({', '.join(values)});"
         )
         pos = stmt_end

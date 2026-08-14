@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import pickle
 import re
@@ -50,6 +51,7 @@ CODE_RESULT_COLS = [
 
 WORD_MATCH_COLS = [
     "설계서No",
+    "점검구분",
     "한글테이블명",
     "한글컬럼명",
     "영문컬럼명",
@@ -63,6 +65,7 @@ WORD_MATCH_COLS = [
 ]
 TERM_MATCH_COLS = [
     "설계서No",
+    "점검구분",
     "한글테이블명",
     "한글컬럼명",
     "영문컬럼명",
@@ -92,7 +95,8 @@ DOMAIN_RESULT_COLS = [
     "판정",
     "사유",
 ]
-UNMATCH_COLS = ["설계서No", "한글테이블명", "한글컬럼명", "영문컬럼명"]
+UNMATCH_COLS = ["설계서No", "점검구분", "한글테이블명", "한글컬럼명", "영문컬럼명"]
+TABLE_TARGET_LABEL = "(테이블명)"
 UNABLE_COLS = [
     "설계서No",
     "한글테이블명",
@@ -112,8 +116,14 @@ ORACLE_TO_DOMAIN_TYPE = {
 }
 
 
-def load_design(path: Path) -> pd.DataFrame:
-    df = pd.read_excel(path, sheet_name="테이블정의서", header=2)
+def load_design(path: Path, sheet_name: str | None = None) -> pd.DataFrame:
+    from dbmanager.excel_parser import parse_excel_with_meta, table_defs_to_dataframe_rows
+
+    parsed = parse_excel_with_meta(path, sheet_name)
+    tables = parsed.tables
+    if not tables:
+        raise ValueError("테이블정의서에서 테이블/컬럼 정의를 찾지 못했습니다.")
+    df = pd.DataFrame(table_defs_to_dataframe_rows(tables))
     required = ["No", "한글 테이블명", "영문 테이블명", "한글 컬럼명", "영문 컬럼명"]
     missing = [c for c in required if c not in df.columns]
     if missing:
@@ -132,6 +142,27 @@ def load_design(path: Path) -> pd.DataFrame:
     return df
 
 
+def unique_table_targets(design_df: pd.DataFrame) -> list[tuple[str, str]]:
+    """설계서에서 중복 없는 (한글 테이블명, 영문 테이블명) 목록."""
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[str, str]] = []
+    for _, row in design_df.iterrows():
+        ko = str(row["한글 테이블명"]).strip()
+        en = str(row["영문 테이블명"]).strip()
+        if not ko and not en:
+            continue
+        key = (ko, en)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def count_check_targets(design_df: pd.DataFrame) -> int:
+    return int(len(design_df) + len(unique_table_targets(design_df)))
+
+
 def load_standard_words(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, encoding="utf-8-sig").copy()
     df["표준단어행번호"] = df.index + 1
@@ -148,6 +179,146 @@ def load_standard_terms(path: Path) -> pd.DataFrame:
     if "공통표준도메인명" in df.columns:
         df["공통표준도메인명"] = df["공통표준도메인명"].fillna("").astype(str).str.strip()
     return df.drop_duplicates(subset=["공통표준용어명"], keep="first")
+
+
+def build_term_index(
+    terms_df: pd.DataFrame,
+) -> tuple[dict[str, pd.Series], dict[str, str]]:
+    """표준용어명 → 행, 이음동의어 → 표준용어명."""
+    by_name: dict[str, pd.Series] = {}
+    synonym_to_name: dict[str, str] = {}
+    syn_col = "용어 이음동의어 목록"
+    for _, row in terms_df.iterrows():
+        name = str(row["공통표준용어명"]).strip()
+        if not name or name == "nan":
+            continue
+        by_name[name] = row
+        if syn_col in row.index and pd.notna(row[syn_col]):
+            for part in re.split(r"[,，]", str(row[syn_col])):
+                syn = part.strip()
+                if syn and syn not in synonym_to_name:
+                    synonym_to_name[syn] = name
+    return by_name, synonym_to_name
+
+
+def term_row_to_public_dict(row: pd.Series) -> dict:
+    desc = row.get("공통표준용어설명", "")
+    if pd.isna(desc):
+        desc = ""
+    desc = str(desc).strip()
+    if len(desc) > 240:
+        desc = desc[:240] + "…"
+    return {
+        "공통표준용어명": str(row.get("공통표준용어명", "") or "").strip(),
+        "공통표준용어영문약어명": str(
+            row.get("공통표준용어영문약어명", "") or ""
+        ).strip(),
+        "공통표준도메인명": str(row.get("공통표준도메인명", "") or "").strip(),
+        "공통표준용어설명": desc,
+    }
+
+
+def recommend_similar_terms(
+    query: str, term_names: list[str], *, limit: int = 5
+) -> list[tuple[str, float]]:
+    q = query.strip()
+    if not q:
+        return []
+    scored: list[tuple[str, float]] = []
+    for name in term_names:
+        if not name or name == q:
+            continue
+        ratio = difflib.SequenceMatcher(None, q, name).ratio()
+        bonus = 0.12 if (q in name or name in q) else 0.0
+        scored.append((name, min(1.0, ratio + bonus)))
+    scored.sort(key=lambda x: (-x[1], x[0]))
+    out: list[tuple[str, float]] = []
+    for name, score in scored:
+        if score < 0.35:
+            break
+        out.append((name, round(score, 3)))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def parse_name_lines(text: str) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for line in (text or "").replace("\r\n", "\n").split("\n"):
+        name = line.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
+def generate_standard_terms_for_names(
+    names: list[str],
+    terms_df: pd.DataFrame,
+    words_df: pd.DataFrame,
+) -> list[dict]:
+    """한글명 목록 → 표준용어·표준단어 조합."""
+    by_name, synonym_to_name = build_term_index(terms_df)
+    word_lookup = build_word_lookup(words_df)
+    results: list[dict] = []
+
+    for name in names:
+        item: dict = {
+            "input": name,
+            "status": "none",
+            "term": None,
+            "matched_via": "",
+            "word_compose": None,
+            "standard_word": "",
+            "standard_word_eng": "",
+            "standard_term": "",
+            "standard_term_eng": "",
+            "recommended_eng": "",
+        }
+
+        if name in by_name:
+            term = term_row_to_public_dict(by_name[name])
+            item["status"] = "exact"
+            item["term"] = term
+            item["standard_term"] = term["공통표준용어명"]
+            item["standard_term_eng"] = term["공통표준용어영문약어명"]
+            item["recommended_eng"] = term["공통표준용어영문약어명"]
+        elif name in synonym_to_name:
+            canonical = synonym_to_name[name]
+            term = term_row_to_public_dict(by_name[canonical])
+            item["status"] = "exact"
+            item["matched_via"] = "이음동의어"
+            item["term"] = term
+            item["standard_term"] = term["공통표준용어명"]
+            item["standard_term_eng"] = term["공통표준용어영문약어명"]
+            item["recommended_eng"] = term["공통표준용어영문약어명"]
+        else:
+            segments = longest_match_segment(name, word_lookup)
+            if segments:
+                covered = sum(len(seg[0]) for seg in segments)
+                words_info = [
+                    {"단어명": seg[0], "행번호": seg[1], "약어": seg[2]}
+                    for seg in segments
+                ]
+                abbrs = [seg[2] for seg in segments]
+                suggested = recommended_eng_name(abbrs)
+                coverage = round(covered / len(name), 3) if name else 0.0
+                word_names = "+".join(w["단어명"] for w in words_info)
+                word_abbrs = "+".join(a for a in abbrs if a)
+                item["word_compose"] = {
+                    "segments": words_info,
+                    "suggested_eng": suggested,
+                    "coverage": coverage,
+                }
+                item["standard_word"] = word_names
+                item["standard_word_eng"] = word_abbrs or suggested
+                item["recommended_eng"] = suggested
+                item["status"] = "composed"
+
+        results.append(item)
+    return results
 
 
 def load_standard_domains(path: Path) -> pd.DataFrame:
@@ -364,10 +535,60 @@ def save_domain_excel(
         ).to_excel(writer, sheet_name="미매칭", index=False)
 
 
+def validate_check_design(
+    path: Path,
+    *,
+    kind: str = "word",
+    sheet_name: str | None = None,
+) -> dict:
+    """Validate uploaded workbook before running ChkDBStd checks."""
+    kind_key = (kind or "word").strip().lower()
+    if kind_key == "code":
+        sheet = (sheet_name or "").strip() or "코드정의서"
+        try:
+            df = load_code_design(path, sheet_name=sheet)
+            return {
+                "ok": True,
+                "can_check": True,
+                "message": "점검 가능",
+                "sheet": sheet,
+                "design_format": "code",
+                "rows": int(len(df)),
+            }
+        except Exception as e:
+            return {"ok": False, "can_check": False, "message": str(e)}
+
+    from dbmanager.excel_parser import parse_excel_with_meta
+
+    try:
+        parsed = parse_excel_with_meta(path, sheet_name)
+        if not parsed.tables:
+            raise ValueError("Excel에서 테이블/컬럼 정의를 찾지 못했습니다.")
+        load_design(path, sheet_name)
+        total_columns = sum(len(t.columns) for t in parsed.tables)
+        format_label = "목록형" if parsed.format == "flat" else "블록형"
+        return {
+            "ok": True,
+            "can_check": True,
+            "message": "점검 가능",
+            "sheet": parsed.sheet_name,
+            "design_format": parsed.format,
+            "design_format_label": format_label,
+            "tables": len(parsed.tables),
+            "columns": total_columns,
+        }
+    except Exception as e:
+        return {"ok": False, "can_check": False, "message": str(e)}
+
+
 def run_domain_check(
-    design_path: Path, terms_path: Path, domains_path: Path
+    design_path: Path,
+    terms_path: Path,
+    domains_path: Path,
+    *,
+    sheet_name: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
-    design_df = load_design(design_path)
+    design_df = load_design(design_path, sheet_name)
     terms_df = load_standard_terms(terms_path)
     domains_df = load_standard_domains(domains_path)
     match_df, review_df, unmatched_df = check_domains(
@@ -456,46 +677,145 @@ def longest_match_segment(
     return matches
 
 
+def _append_word_match_rows(
+    kor_name: str,
+    eng_name: str,
+    base: dict,
+    word_lookup: list[tuple[str, int, str]],
+    match_rows: list[dict],
+    review_rows: list[dict],
+    unmatched_rows: list[dict],
+) -> None:
+    kor = str(kor_name or "").strip()
+    eng = str(eng_name or "").strip()
+    segments = longest_match_segment(kor, word_lookup)
+    if not segments:
+        unmatched_rows.append(base)
+        return
+    abbrs = [abbr for _, _, abbr in segments]
+    recommended = recommended_eng_name(abbrs)
+    eng_ok = eng_abbr_sequence_matches(eng, abbrs)
+    reason = "" if eng_ok else "영문약어불일치"
+    target = match_rows if eng_ok else review_rows
+    for order, (name, row_no, abbr) in enumerate(segments, start=1):
+        target.append(
+            {
+                **base,
+                "표준단어행번호": row_no,
+                "매칭표준단어명": name,
+                "표준단어영문약어명": abbr,
+                "매칭순서": order,
+                "권장영문명": recommended,
+                "영문일치": "Y" if eng_ok else "N",
+                "사유": reason,
+            }
+        )
+
+
 def match_words(
     design_df: pd.DataFrame, word_lookup: list[tuple[str, int, str]]
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """한글 최장일치 후 영문약어 시퀀스 비교 → 매칭/확인필요/미매칭."""
+    """한글 최장일치 후 영문약어 시퀀스 비교 → 매칭/확인필요/미매칭 (컬럼 + 테이블명)."""
     match_rows: list[dict] = []
     review_rows: list[dict] = []
     unmatched_rows: list[dict] = []
     for _, row in design_df.iterrows():
-        kor_col = row["한글 컬럼명"]
-        eng_col = row["영문 컬럼명"]
         base = {
             "설계서No": row["No"],
+            "점검구분": "컬럼",
             "한글테이블명": row["한글 테이블명"],
             "영문테이블명": row["영문 테이블명"],
-            "한글컬럼명": kor_col,
-            "영문컬럼명": eng_col,
+            "한글컬럼명": row["한글 컬럼명"],
+            "영문컬럼명": row["영문 컬럼명"],
         }
-        segments = longest_match_segment(kor_col, word_lookup)
-        if not segments:
-            unmatched_rows.append(base)
-            continue
-        abbrs = [abbr for _, _, abbr in segments]
+        _append_word_match_rows(
+            row["한글 컬럼명"],
+            row["영문 컬럼명"],
+            base,
+            word_lookup,
+            match_rows,
+            review_rows,
+            unmatched_rows,
+        )
+
+    for t_idx, (table_ko, table_en) in enumerate(unique_table_targets(design_df), start=1):
+        base = {
+            "설계서No": f"T{t_idx}",
+            "점검구분": "테이블",
+            "한글테이블명": table_ko,
+            "영문테이블명": table_en,
+            "한글컬럼명": TABLE_TARGET_LABEL,
+            "영문컬럼명": table_en,
+        }
+        _append_word_match_rows(
+            table_ko,
+            table_en,
+            base,
+            word_lookup,
+            match_rows,
+            review_rows,
+            unmatched_rows,
+        )
+    return pd.DataFrame(match_rows), pd.DataFrame(review_rows), pd.DataFrame(unmatched_rows)
+
+
+def _append_term_match_rows(
+    kor_name: str,
+    eng_name: str,
+    base: dict,
+    term_lookup: dict[str, tuple[int, str]],
+    word_lookup: list[tuple[str, int, str]],
+    match_rows: list[dict],
+    review_rows: list[dict],
+    unmatched_rows: list[dict],
+) -> None:
+    kor = str(kor_name or "").strip()
+    eng = str(eng_name or "").strip()
+    term_hit = term_lookup.get(kor)
+    if term_hit:
+        row_no, abbr = term_hit
+        abbrs = [abbr]
         recommended = recommended_eng_name(abbrs)
-        eng_ok = eng_abbr_sequence_matches(eng_col, abbrs)
-        reason = "" if eng_ok else "영문약어불일치"
+        eng_ok = eng_abbr_sequence_matches(eng, abbrs)
+        target = match_rows if eng_ok else review_rows
+        target.append(
+            {
+                **base,
+                "출처": "표준용어",
+                "표준행번호": row_no,
+                "매칭표준명": kor,
+                "표준영문약어명": abbr,
+                "매칭순서": 1,
+                "권장영문명": recommended,
+                "영문일치": "Y" if eng_ok else "N",
+                "사유": "" if eng_ok else "영문약어불일치",
+            }
+        )
+        return
+
+    segments = longest_match_segment(kor, word_lookup)
+    if segments:
+        abbrs = [a for _, _, a in segments]
+        recommended = recommended_eng_name(abbrs)
+        eng_ok = eng_abbr_sequence_matches(eng, abbrs)
         target = match_rows if eng_ok else review_rows
         for order, (name, row_no, abbr) in enumerate(segments, start=1):
             target.append(
                 {
                     **base,
-                    "표준단어행번호": row_no,
-                    "매칭표준단어명": name,
-                    "표준단어영문약어명": abbr,
+                    "출처": "표준단어",
+                    "표준행번호": row_no,
+                    "매칭표준명": name,
+                    "표준영문약어명": abbr,
                     "매칭순서": order,
                     "권장영문명": recommended,
                     "영문일치": "Y" if eng_ok else "N",
-                    "사유": reason,
+                    "사유": "" if eng_ok else "영문약어불일치",
                 }
             )
-    return pd.DataFrame(match_rows), pd.DataFrame(review_rows), pd.DataFrame(unmatched_rows)
+        return
+
+    unmatched_rows.append(base)
 
 
 def match_terms_with_words(
@@ -503,7 +823,7 @@ def match_terms_with_words(
     terms_df: pd.DataFrame,
     word_lookup: list[tuple[str, int, str]],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """표준용어 완전일치 우선, 없으면 표준단어 최장일치 + 영문약어 비교."""
+    """표준용어 완전일치 우선, 없으면 표준단어 최장일치 + 영문약어 비교 (컬럼 + 테이블명)."""
     abbr_col = "공통표준용어영문약어명"
     term_lookup: dict[str, tuple[int, str]] = {}
     for _, r in terms_df.iterrows():
@@ -517,60 +837,44 @@ def match_terms_with_words(
     review_rows: list[dict] = []
     unmatched_rows: list[dict] = []
     for _, row in design_df.iterrows():
-        kor_col = row["한글 컬럼명"]
-        eng_col = row["영문 컬럼명"]
         base = {
             "설계서No": row["No"],
+            "점검구분": "컬럼",
             "한글테이블명": row["한글 테이블명"],
             "영문테이블명": row["영문 테이블명"],
-            "한글컬럼명": kor_col,
-            "영문컬럼명": eng_col,
+            "한글컬럼명": row["한글 컬럼명"],
+            "영문컬럼명": row["영문 컬럼명"],
         }
-        term_hit = term_lookup.get(kor_col)
-        if term_hit:
-            row_no, abbr = term_hit
-            abbrs = [abbr]
-            recommended = recommended_eng_name(abbrs)
-            eng_ok = eng_abbr_sequence_matches(eng_col, abbrs)
-            target = match_rows if eng_ok else review_rows
-            target.append(
-                {
-                    **base,
-                    "출처": "표준용어",
-                    "표준행번호": row_no,
-                    "매칭표준명": kor_col,
-                    "표준영문약어명": abbr,
-                    "매칭순서": 1,
-                    "권장영문명": recommended,
-                    "영문일치": "Y" if eng_ok else "N",
-                    "사유": "" if eng_ok else "영문약어불일치",
-                }
-            )
-            continue
+        _append_term_match_rows(
+            row["한글 컬럼명"],
+            row["영문 컬럼명"],
+            base,
+            term_lookup,
+            word_lookup,
+            match_rows,
+            review_rows,
+            unmatched_rows,
+        )
 
-        segments = longest_match_segment(kor_col, word_lookup)
-        if segments:
-            abbrs = [a for _, _, a in segments]
-            recommended = recommended_eng_name(abbrs)
-            eng_ok = eng_abbr_sequence_matches(eng_col, abbrs)
-            target = match_rows if eng_ok else review_rows
-            for order, (name, row_no, abbr) in enumerate(segments, start=1):
-                target.append(
-                    {
-                        **base,
-                        "출처": "표준단어",
-                        "표준행번호": row_no,
-                        "매칭표준명": name,
-                        "표준영문약어명": abbr,
-                        "매칭순서": order,
-                        "권장영문명": recommended,
-                        "영문일치": "Y" if eng_ok else "N",
-                        "사유": "" if eng_ok else "영문약어불일치",
-                    }
-                )
-            continue
-
-        unmatched_rows.append(base)
+    for t_idx, (table_ko, table_en) in enumerate(unique_table_targets(design_df), start=1):
+        base = {
+            "설계서No": f"T{t_idx}",
+            "점검구분": "테이블",
+            "한글테이블명": table_ko,
+            "영문테이블명": table_en,
+            "한글컬럼명": TABLE_TARGET_LABEL,
+            "영문컬럼명": table_en,
+        }
+        _append_term_match_rows(
+            table_ko,
+            table_en,
+            base,
+            term_lookup,
+            word_lookup,
+            match_rows,
+            review_rows,
+            unmatched_rows,
+        )
 
     return pd.DataFrame(match_rows), pd.DataFrame(review_rows), pd.DataFrame(unmatched_rows)
 
@@ -647,30 +951,37 @@ def save_excel_tri(
 
 
 def run_word_match(
-    design_path: Path, words_path: Path
+    design_path: Path,
+    words_path: Path,
+    *,
+    sheet_name: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
-    design_df = load_design(design_path)
+    design_df = load_design(design_path, sheet_name)
     words_df = load_standard_words(words_path)
     match_df, review_df, unmatched_df = match_words(
         design_df, build_word_lookup(words_df)
     )
     payload = build_tri_payload(
-        match_df, review_df, unmatched_df, len(design_df), WORD_MATCH_COLS
+        match_df, review_df, unmatched_df, count_check_targets(design_df), WORD_MATCH_COLS
     )
     return match_df, review_df, unmatched_df, payload
 
 
 def run_term_match(
-    design_path: Path, terms_path: Path, words_path: Path
+    design_path: Path,
+    terms_path: Path,
+    words_path: Path,
+    *,
+    sheet_name: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
-    design_df = load_design(design_path)
+    design_df = load_design(design_path, sheet_name)
     terms_df = load_standard_terms(terms_path)
     words_df = load_standard_words(words_path)
     match_df, review_df, unmatched_df = match_terms_with_words(
         design_df, terms_df, build_word_lookup(words_df)
     )
     payload = build_tri_payload(
-        match_df, review_df, unmatched_df, len(design_df), TERM_MATCH_COLS
+        match_df, review_df, unmatched_df, count_check_targets(design_df), TERM_MATCH_COLS
     )
     if match_df.empty and review_df.empty:
         payload["stats"]["from_term_cols"] = 0
@@ -786,12 +1097,15 @@ def candidate_sheet_columns(std_df: pd.DataFrame, *, kind: str) -> list[str]:
 def build_unregistered_candidates(
     unmatched_df: pd.DataFrame, template_cols: list[str]
 ) -> pd.DataFrame:
-    """미매칭 컬럼 → 미등록후보 형식. 명(첫 컬럼)만 한글컬럼명, 나머지 내용은 비움."""
+    """미매칭 컬럼/테이블명 → 미등록후보 형식."""
     if unmatched_df is None or unmatched_df.empty:
         return pd.DataFrame(columns=template_cols)
     name_col = template_cols[0] if template_cols else None
     rows: list[dict] = []
-    for kor, _g in unmatched_df.groupby("한글컬럼명", dropna=False):
+    for _, urow in unmatched_df.iterrows():
+        kor = urow.get("한글컬럼명", "")
+        if str(kor).strip() == TABLE_TARGET_LABEL:
+            kor = urow.get("한글테이블명", "")
         row = {c: "" for c in template_cols}
         if name_col:
             row[name_col] = "" if pd.isna(kor) else str(kor).strip()
@@ -929,8 +1243,9 @@ def normalize_code_meaning(value) -> str:
     return re.sub(r"\s+", "", str(value).strip())
 
 
-def load_code_design(path: Path) -> pd.DataFrame:
-    df = pd.read_excel(path, sheet_name="코드정의서", header=5)
+def load_code_design(path: Path, sheet_name: str | None = None) -> pd.DataFrame:
+    sheet = (sheet_name or "").strip() or "코드정의서"
+    df = pd.read_excel(path, sheet_name=sheet, header=5)
     df.columns = [str(c).replace("\n", "").strip() for c in df.columns]
     required = ["코드명(한글)", "코드값"]
     missing = [c for c in required if c not in df.columns]
@@ -1168,9 +1483,12 @@ def save_code_excel(
 
 
 def run_code_check(
-    design_path: Path, code_dir: Path
+    design_path: Path,
+    code_dir: Path,
+    *,
+    sheet_name: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
-    design_df = load_code_design(design_path)
+    design_df = load_code_design(design_path, sheet_name)
     std_index = build_standard_code_index(code_dir)
     match_df, review_df, unmatched_df = check_standard_codes(design_df, std_index)
     matched_names = (

@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { PortalNav } from "@/lib/PortalNav";
+import { saveDesignHandoff } from "@/lib/designHandoff";
 
 import { API_BASE } from "@/lib/apiBase";
 
@@ -34,14 +36,31 @@ type GenerateResult = {
   scripts: ScriptItem[];
 };
 
+type DesignCheck = {
+  checking: boolean;
+  canGenerate: boolean;
+  message: string;
+  sheet?: string;
+  designFormat?: string;
+  tables?: number;
+  columns?: number;
+};
+
+const IDLE_DESIGN_CHECK: DesignCheck = {
+  checking: false,
+  canGenerate: false,
+  message: "설계서 Excel을 선택하면 스크립트 생성 가능 여부를 확인합니다.",
+};
+
 type DbStatus = {
   ok: boolean;
   configured: boolean;
   target: string | null;
+  database_name?: string | null;
   message: string;
 };
 
-type ApplyStep = "schema" | "table" | "sample";
+type ApplyStep = "table" | "sample";
 
 const DATA_PAGE_SIZE = 100;
 
@@ -101,15 +120,13 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 function scriptsForApply(result: GenerateResult | null): Record<ApplyStep, string> {
-  const empty = { schema: "", table: "", sample: "" };
+  const empty = { table: "", sample: "" };
   if (!result) return empty;
-  let schema = "";
   let sample = "";
   const tables: string[] = [];
   for (const s of result.scripts) {
     const name = s.name.toLowerCase();
-    if (name.startsWith("01_schema")) schema = s.content;
-    else if (name.startsWith("99_sample")) sample = s.content;
+    if (name.startsWith("99_sample")) sample = s.content;
     else if (
       !name.startsWith("00_database") &&
       !name.startsWith("01_") &&
@@ -119,15 +136,151 @@ function scriptsForApply(result: GenerateResult | null): Record<ApplyStep, strin
     }
   }
   return {
-    schema,
     table: tables.join("\n\n"),
     sample,
   };
 }
 
+function exportTemplateMessage(j: Record<string, unknown>): string {
+  if (!Boolean(j.can_generate)) {
+    return String(j.message || j.detail || "양식 확인 실패");
+  }
+  return "설계서 내보내기 가능";
+}
+
+function tableNamesFromResult(result: GenerateResult | null): string[] {
+  if (!result?.tables?.length) return [];
+  return [
+    ...new Set(
+      result.tables
+        .map((t) => t.name.trim().toLowerCase())
+        .filter((name): name is string => !!name)
+    ),
+  ];
+}
+
+function inferSourceSchemas(sql: string, tableNames: string[]): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const table of tableNames) {
+    const re = new RegExp(`(\\S+)\\.${table}\\b`, "gi");
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(sql)) !== null) {
+      const schema = match[1];
+      const key = schema.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      found.push(schema);
+    }
+  }
+  return found;
+}
+
+function rewriteSqlSchema(
+  sql: string,
+  tableNames: string[],
+  targetSchema: string,
+  sourceSchemas: string[] = []
+): string {
+  const target = targetSchema.trim();
+  if (!target || !sql.trim()) return sql;
+
+  const tables = [
+    ...new Set(
+      tableNames.map((name) => name.trim().toLowerCase()).filter(Boolean)
+    ),
+  ].sort((a, b) => b.length - a.length);
+
+  let sources = [
+    ...new Set(sourceSchemas.map((s) => s.trim()).filter(Boolean)),
+  ];
+  if (!sources.length && tables.length) {
+    sources = inferSourceSchemas(sql, tables);
+  }
+  sources.sort((a, b) => b.length - a.length);
+
+  let out = sql;
+  for (const src of sources) {
+    if (src.toLowerCase() === target.toLowerCase()) continue;
+    out = out.split(`${src}.`).join(`${target}.`);
+  }
+
+  for (const table of tables) {
+    out = out.replace(
+      new RegExp(`(\\S+)\\.${table}\\b`, "gi"),
+      (match, schema: string) =>
+        schema.toLowerCase() === target.toLowerCase()
+          ? match
+          : `${target}.${table}`
+    );
+
+    const patterns: [RegExp, string][] = [
+      [
+        new RegExp(
+          `(CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS)\\s+${table}\\b`,
+          "gi"
+        ),
+        `$1 ${target}.${table}`,
+      ],
+      [
+        new RegExp(`(COMMENT\\s+ON\\s+TABLE)\\s+${table}\\b`, "gi"),
+        `$1 ${target}.${table}`,
+      ],
+      [
+        new RegExp(
+          `(COMMENT\\s+ON\\s+COLUMN)\\s+${table}\\.(\\w+)\\b`,
+          "gi"
+        ),
+        `$1 ${target}.${table}.$2`,
+      ],
+      [
+        new RegExp(
+          `(CREATE\\s+(?:UNIQUE\\s+)?INDEX\\s+IF\\s+NOT\\s+EXISTS\\s+\\S+\\s+ON)\\s+${table}\\b`,
+          "gi"
+        ),
+        `$1 ${target}.${table}`,
+      ],
+      [
+        new RegExp(`(ALTER\\s+TABLE)\\s+${table}\\b`, "gi"),
+        `$1 ${target}.${table}`,
+      ],
+      [
+        new RegExp(`(INSERT\\s+INTO)\\s+${table}\\b`, "gi"),
+        `$1 ${target}.${table}`,
+      ],
+      [
+        new RegExp(`(REFERENCES)\\s+${table}\\b`, "gi"),
+        `$1 ${target}.${table}`,
+      ],
+    ];
+    for (const [pattern, repl] of patterns) {
+      out = out.replace(pattern, repl);
+    }
+  }
+
+  return out;
+}
+
+function rewriteApplySql(
+  base: Record<ApplyStep, string>,
+  tableNames: string[],
+  targetSchema: string,
+  sourceSchemas: string[] = []
+): Record<ApplyStep, string> {
+  return {
+    table: rewriteSqlSchema(base.table, tableNames, targetSchema, sourceSchemas),
+    sample: rewriteSqlSchema(base.sample, tableNames, targetSchema, sourceSchemas),
+  };
+}
+
 export default function DbManagerPage() {
+  const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
-  const [sheet, setSheet] = useState("테이블정의서");
+  const [sheet, setSheet] = useState("");
+  const [designCheck, setDesignCheck] = useState<DesignCheck>(IDLE_DESIGN_CHECK);
+  const sheetRef = useRef(sheet);
+  const skipSheetValidateRef = useRef(false);
+  sheetRef.current = sheet;
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [samples, setSamples] = useState<SampleItem[]>([]);
@@ -135,12 +288,17 @@ export default function DbManagerPage() {
   const [activeScript, setActiveScript] = useState<string>("");
   const [dbStatus, setDbStatus] = useState<DbStatus | null>(null);
   const [applySql, setApplySql] = useState<Record<ApplyStep, string>>({
-    schema: "",
     table: "",
     sample: "",
   });
+  const [baseApplySql, setBaseApplySql] = useState<Record<ApplyStep, string>>({
+    table: "",
+    sample: "",
+  });
+  const [designSchemas, setDesignSchemas] = useState<string[]>([]);
+  const [applyTableNames, setApplyTableNames] = useState<string[]>([]);
+  const [applySchema, setApplySchema] = useState("public");
   const [applyMsg, setApplyMsg] = useState<Record<ApplyStep, string>>({
-    schema: "",
     table: "",
     sample: "",
   });
@@ -151,7 +309,16 @@ export default function DbManagerPage() {
   >([]);
   const [syncSelected, setSyncSelected] = useState<string[]>([]);
   const [syncDbName, setSyncDbName] = useState("dbm");
-  const [syncBaseFile, setSyncBaseFile] = useState<File | null>(null);
+  const [exportTemplateFile, setExportTemplateFile] = useState<File | null>(null);
+  const [exportTemplateSheet, setExportTemplateSheet] = useState("");
+  const [exportTemplateCheck, setExportTemplateCheck] = useState<DesignCheck>({
+    checking: false,
+    canGenerate: false,
+    message: "내보낼 설계서 양식 Excel을 선택하세요.",
+  });
+  const exportTemplateSheetRef = useRef(exportTemplateSheet);
+  exportTemplateSheetRef.current = exportTemplateSheet;
+  const skipExportTemplateValidateRef = useRef(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [dataSchema, setDataSchema] = useState("db1");
   const [dataTables, setDataTables] = useState<
@@ -270,9 +437,42 @@ export default function DbManagerPage() {
   }, [refreshDbStatus]);
 
   useEffect(() => {
-    setApplySql(scriptsForApply(result));
-    setApplyMsg({ schema: "", table: "", sample: "" });
+    const base = scriptsForApply(result);
+    setBaseApplySql(base);
+    setApplyTableNames(tableNamesFromResult(result));
+    setDesignSchemas([]);
+    setApplyMsg({ table: "", sample: "" });
   }, [result]);
+
+  useEffect(() => {
+    if (!syncSchemas.length) return;
+    setApplySchema((prev) =>
+      syncSchemas.includes(prev)
+        ? prev
+        : syncSchemas.includes("public")
+          ? "public"
+          : syncSchemas[0]
+    );
+  }, [syncSchemas]);
+
+  useEffect(() => {
+    if (!result || !applySchema.trim()) return;
+    setApplySql(
+      rewriteApplySql(baseApplySql, applyTableNames, applySchema, designSchemas)
+    );
+  }, [result, baseApplySql, applyTableNames, designSchemas, applySchema]);
+
+  useEffect(() => {
+    if (applySchema.trim()) {
+      setDataSchema(applySchema.trim());
+    }
+  }, [applySchema]);
+
+  useEffect(() => {
+    if (dbStatus?.database_name) {
+      setSyncDbName(dbStatus.database_name);
+    }
+  }, [dbStatus?.database_name]);
 
   useEffect(() => {
     if (dbStatus?.ok) {
@@ -543,7 +743,7 @@ export default function DbManagerPage() {
     try {
       const fd = new FormData();
       fd.append("design", src);
-      fd.append("sheet", sheet || "테이블정의서");
+      if (sheet.trim()) fd.append("sheet", sheet.trim());
       const res = await fetch(`${API_BASE}/v1/db-manager/diff`, {
         method: "POST",
         body: fd,
@@ -551,6 +751,7 @@ export default function DbManagerPage() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.detail || "비교 실패");
       setDiffResult(j as DiffResult);
+      if (j.sheet) setSheet(String(j.sheet));
       const nextSql = includeCaution
         ? [j.safe_sql, j.caution_sql].filter(Boolean).join("\n\n")
         : j.safe_sql || "";
@@ -637,9 +838,148 @@ export default function DbManagerPage() {
     );
   }, [includeCaution, diffResult]);
 
+  const validateDesignFile = useCallback(async (target: File) => {
+    setDesignCheck({
+      checking: true,
+      canGenerate: false,
+      message: "설계서 형식 확인 중…",
+    });
+    setResult(null);
+    const sheetName = sheetRef.current.trim();
+    try {
+      const fd = new FormData();
+      fd.append("design", target);
+      if (sheetName) fd.append("sheet", sheetName);
+      const res = await fetch(`${API_BASE}/v1/db-manager/validate`, {
+        method: "POST",
+        body: fd,
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok && !j.message) {
+        throw new Error(j.detail || "형식 확인 실패");
+      }
+      const canGenerate = Boolean(j.can_generate);
+      const detectedSheet = j.sheet ? String(j.sheet) : "";
+      setDesignCheck({
+        checking: false,
+        canGenerate,
+        message: String(j.message || (canGenerate ? "DDL 생성 가능" : "확인 실패")),
+        sheet: detectedSheet || undefined,
+        designFormat: j.design_format ? String(j.design_format) : undefined,
+        tables: typeof j.tables === "number" ? j.tables : undefined,
+        columns: typeof j.columns === "number" ? j.columns : undefined,
+      });
+      if (canGenerate && detectedSheet && detectedSheet !== sheetRef.current) {
+        skipSheetValidateRef.current = true;
+        setSheet(detectedSheet);
+      }
+    } catch (e) {
+      setDesignCheck({
+        checking: false,
+        canGenerate: false,
+        message: String((e as Error).message || e),
+      });
+    }
+  }, []);
+
+  const validateExportTemplate = useCallback(async (target: File) => {
+    setExportTemplateCheck({
+      checking: true,
+      canGenerate: false,
+      message: "양식 확인 중…",
+    });
+    const sheetName = exportTemplateSheetRef.current.trim();
+    try {
+      const fd = new FormData();
+      fd.append("design", target);
+      if (sheetName) fd.append("sheet", sheetName);
+      const res = await fetch(`${API_BASE}/v1/db-manager/validate`, {
+        method: "POST",
+        body: fd,
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok && !j.message) {
+        throw new Error(j.detail || "양식 확인 실패");
+      }
+      const canGenerate = Boolean(j.can_generate);
+      const detectedSheet = j.sheet ? String(j.sheet) : "";
+      setExportTemplateCheck({
+        checking: false,
+        canGenerate,
+        message: exportTemplateMessage(j),
+        sheet: detectedSheet || undefined,
+        designFormat: j.design_format ? String(j.design_format) : undefined,
+      });
+      if (
+        canGenerate &&
+        detectedSheet &&
+        detectedSheet !== exportTemplateSheetRef.current
+      ) {
+        skipExportTemplateValidateRef.current = true;
+        setExportTemplateSheet(detectedSheet);
+      }
+    } catch (e) {
+      setExportTemplateCheck({
+        checking: false,
+        canGenerate: false,
+        message: String((e as Error).message || e),
+      });
+    }
+  }, []);
+
+  const onExportTemplateChange = useCallback((next: File | null) => {
+    setExportTemplateFile(next);
+    skipExportTemplateValidateRef.current = false;
+    if (!next) {
+      setExportTemplateCheck({
+        checking: false,
+        canGenerate: false,
+        message: "내보낼 설계서 양식 Excel을 선택하세요.",
+      });
+    }
+  }, []);
+
+  const onDesignFileChange = useCallback((next: File | null) => {
+    setFile(next);
+    setMsg("");
+    skipSheetValidateRef.current = false;
+    if (!next) {
+      setDesignCheck(IDLE_DESIGN_CHECK);
+      setResult(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!file) return;
+    if (skipSheetValidateRef.current) {
+      skipSheetValidateRef.current = false;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void validateDesignFile(file);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [sheet, file, validateDesignFile]);
+
+  useEffect(() => {
+    if (!exportTemplateFile) return;
+    if (skipExportTemplateValidateRef.current) {
+      skipExportTemplateValidateRef.current = false;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void validateExportTemplate(exportTemplateFile);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [exportTemplateFile, exportTemplateSheet, validateExportTemplate]);
+
   const generate = useCallback(async () => {
     if (!file) {
       setMsg("테이블정의서 Excel을 선택하세요.");
+      return;
+    }
+    if (!designCheck.canGenerate) {
+      setMsg(designCheck.message || "먼저 설계서 형식 확인을 통과해야 합니다.");
       return;
     }
     setBusy(true);
@@ -648,7 +988,7 @@ export default function DbManagerPage() {
     try {
       const fd = new FormData();
       fd.append("design", file);
-      fd.append("sheet", sheet || "테이블정의서");
+      if (sheet.trim()) fd.append("sheet", sheet.trim());
       fd.append("format", "json");
       const res = await fetch(`${API_BASE}/v1/db-manager/generate`, {
         method: "POST",
@@ -666,20 +1006,28 @@ export default function DbManagerPage() {
       }
       const data = (await res.json()) as GenerateResult;
       setResult(data);
+      if (data.sheet && data.sheet !== sheetRef.current) {
+        skipSheetValidateRef.current = true;
+        setSheet(data.sheet);
+      }
       setActiveScript(data.scripts[0]?.name || "");
       setMsg(
-        `완료 — 테이블 ${data.tables.length}개, 스크립트 ${data.scripts.length}개`
+        `완료 — 시트 ${data.sheet || "자동"}, 테이블 ${data.tables.length}개, 스크립트 ${data.scripts.length}개`
       );
     } catch (e) {
       setMsg(String((e as Error).message || e));
     } finally {
       setBusy(false);
     }
-  }, [file, sheet]);
+  }, [file, sheet, designCheck.canGenerate, designCheck.message]);
 
   const downloadZip = useCallback(async () => {
     if (!file) {
       setMsg("ZIP을 받으려면 설계서를 선택하세요.");
+      return;
+    }
+    if (!designCheck.canGenerate) {
+      setMsg(designCheck.message || "형식 확인 통과 후 ZIP을 받을 수 있습니다.");
       return;
     }
     setBusy(true);
@@ -687,7 +1035,7 @@ export default function DbManagerPage() {
     try {
       const fd = new FormData();
       fd.append("design", file);
-      fd.append("sheet", sheet || "테이블정의서");
+      if (sheet.trim()) fd.append("sheet", sheet.trim());
       fd.append("format", "zip");
       const res = await fetch(`${API_BASE}/v1/db-manager/generate`, {
         method: "POST",
@@ -711,10 +1059,57 @@ export default function DbManagerPage() {
     } finally {
       setBusy(false);
     }
-  }, [file, sheet]);
+  }, [file, sheet, designCheck.canGenerate, designCheck.message]);
+
+  const sendToChkDbStd = useCallback(async () => {
+    if (!file) {
+      setMsg("설계서를 선택한 뒤 DB 표준 점검으로 보낼 수 있습니다.");
+      return;
+    }
+    if (!designCheck.canGenerate) {
+      setMsg(
+        designCheck.message || "형식 확인 통과 후 DB 표준 점검으로 보낼 수 있습니다."
+      );
+      return;
+    }
+    try {
+      await saveDesignHandoff(file, {
+        filename: file.name,
+        sheet: (designCheck.sheet || sheet).trim() || undefined,
+        from: "db-manager",
+      });
+      router.push("/apps/chk-db-std?from=db-manager");
+    } catch (e) {
+      setMsg(String((e as Error).message || e));
+    }
+  }, [
+    designCheck.canGenerate,
+    designCheck.message,
+    designCheck.sheet,
+    file,
+    router,
+    sheet,
+  ]);
+
+  const connectedDbName = dbStatus?.database_name || "";
 
   const applyStep = useCallback(
     async (step: ApplyStep) => {
+      if (!dbStatus?.ok) {
+        setApplyMsg((m) => ({
+          ...m,
+          [step]: "DB 연결 후 적용할 수 있습니다.",
+        }));
+        return;
+      }
+      const targetSchema = applySchema.trim();
+      if (!targetSchema) {
+        setApplyMsg((m) => ({
+          ...m,
+          [step]: "적용할 스키마를 선택하세요.",
+        }));
+        return;
+      }
       const sql = applySql[step].trim();
       if (!sql) {
         setApplyMsg((m) => ({
@@ -729,7 +1124,14 @@ export default function DbManagerPage() {
         const res = await fetch(`${API_BASE}/v1/db-manager/apply`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ step, sql }),
+          body: JSON.stringify({
+            step,
+            sql,
+            target_schema: targetSchema,
+            table_names: applyTableNames,
+            source_schemas: designSchemas,
+            target_db_name: connectedDbName || undefined,
+          }),
         });
         const j = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -739,8 +1141,12 @@ export default function DbManagerPage() {
           ...m,
           [step]: j.message || "완료",
         }));
-        setMsg(`완료 — ${step} 적용됨`);
+        setMsg(
+          `완료 — ${connectedDbName || "DB"}.${targetSchema}에 ${step} 적용됨`
+        );
         loadRunEvents();
+        loadSyncSchemas();
+        loadSyncTables(targetSchema);
       } catch (e) {
         setApplyMsg((m) => ({
           ...m,
@@ -750,10 +1156,31 @@ export default function DbManagerPage() {
         setBusy(false);
       }
     },
-    [applySql, loadRunEvents]
+    [
+      applySql,
+      applyTableNames,
+      applySchema,
+      connectedDbName,
+      designSchemas,
+      dbStatus?.ok,
+      loadRunEvents,
+      loadSyncSchemas,
+      loadSyncTables,
+    ]
   );
 
   const exportDesign = useCallback(async () => {
+    if (!exportTemplateFile) {
+      setSyncMsg("내보낼 설계서 양식 Excel을 선택하세요.");
+      return;
+    }
+    if (!exportTemplateCheck.canGenerate) {
+      setSyncMsg(
+        exportTemplateCheck.message ||
+          "양식 확인을 통과한 Excel만 내보낼 수 있습니다."
+      );
+      return;
+    }
     if (!syncSchema) {
       setSyncMsg("스키마를 선택하세요.");
       return;
@@ -768,10 +1195,13 @@ export default function DbManagerPage() {
       const fd = new FormData();
       fd.append("schema", syncSchema);
       fd.append("tables", syncSelected.join(","));
-      fd.append("db_name", syncDbName || "dbm");
-      if (syncBaseFile) {
-        fd.append("design", syncBaseFile);
-      }
+      fd.append("db_name", syncDbName || connectedDbName || "dbm");
+      const exportSheet = (
+        exportTemplateCheck.sheet ||
+        exportTemplateSheet
+      ).trim();
+      if (exportSheet) fd.append("sheet", exportSheet);
+      fd.append("design", exportTemplateFile);
       const res = await fetch(`${API_BASE}/v1/db-manager/export-design`, {
         method: "POST",
         body: fd,
@@ -792,15 +1222,24 @@ export default function DbManagerPage() {
       const fname = m?.[1] || `design_${syncSchema}.xlsx`;
       downloadBlob(blob, fname);
       setSyncMsg(
-        `완료 — ${syncSelected.length}개 테이블을 설계서로 저장했습니다.`
+        `완료 — ${syncSelected.length}개 테이블 설계서 저장: ${fname}`
       );
-      setMsg(`설계서 저장: ${fname}`);
     } catch (e) {
       setSyncMsg(String((e as Error).message || e));
     } finally {
       setBusy(false);
     }
-  }, [syncSchema, syncSelected, syncDbName, syncBaseFile]);
+  }, [
+    connectedDbName,
+    exportTemplateCheck.canGenerate,
+    exportTemplateCheck.message,
+    exportTemplateCheck.sheet,
+    exportTemplateFile,
+    exportTemplateSheet,
+    syncDbName,
+    syncSchema,
+    syncSelected,
+  ]);
 
   function toggleSyncTable(name: string) {
     setSyncSelected((prev) =>
@@ -838,19 +1277,14 @@ export default function DbManagerPage() {
     () =>
       [
         {
-          id: "schema" as const,
-          title: "1. 스키마 생성",
-          hint: "01_schema.sql — CREATE DATABASE는 Supabase에서 생략",
-        },
-        {
           id: "table" as const,
-          title: "2. 테이블 생성",
-          hint: "테이블별 CREATE TABLE 스크립트",
+          title: "1. 테이블 생성",
+          hint: "선택한 Supabase 스키마에 CREATE TABLE 스크립트 적용",
         },
         {
           id: "sample" as const,
-          title: "3. 샘플 데이터",
-          hint: "99_sample_data.sql — PK는 1,2,… 자동증가(중복 방지)",
+          title: "2. 샘플 데이터",
+          hint: "선택한 스키마 테이블에 INSERT — PK는 1,2,… 자동증가(중복 방지)",
         },
       ] as const,
     []
@@ -920,7 +1354,8 @@ export default function DbManagerPage() {
       <section className="panel">
         <h3>DDL 생성</h3>
         <p className="hint">
-          API: <code>{API_BASE}</code>
+          API: <code>{API_BASE}</code> · Database/스키마 DDL은 생성하지 않고
+          테이블·샘플 데이터 스크립트만 만듭니다.
         </p>
         <div className="row">
           <label>
@@ -929,22 +1364,36 @@ export default function DbManagerPage() {
               type="text"
               value={sheet}
               onChange={(e) => setSheet(e.target.value)}
-              placeholder="테이블정의서"
+              placeholder="비우면 자동 감지"
             />
+            <span className="hint">목록형·블록형(테이블 정의서/테이블명세서) 모두 지원</span>
           </label>
         </div>
         <div className="row">
           <input
             type="file"
             accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            onChange={(e) => onDesignFileChange(e.target.files?.[0] || null)}
           />
         </div>
+        <p
+          className={`msg ${
+            designCheck.checking
+              ? ""
+              : designCheck.canGenerate
+                ? "ok"
+                : designCheck.message !== IDLE_DESIGN_CHECK.message
+                  ? "err"
+                  : ""
+          }`}
+        >
+          {designCheck.message}
+        </p>
         <div className="row">
           <button
             className="btn"
             type="button"
-            disabled={busy}
+            disabled={busy || designCheck.checking || !designCheck.canGenerate}
             onClick={generate}
           >
             {busy ? "실행 중…" : "DDL 생성"}
@@ -952,10 +1401,22 @@ export default function DbManagerPage() {
           <button
             className="btn ghost"
             type="button"
-            disabled={busy || !file}
+            disabled={
+              busy || designCheck.checking || !file || !designCheck.canGenerate
+            }
             onClick={downloadZip}
           >
             ZIP 다운로드
+          </button>
+          <button
+            className="btn ghost"
+            type="button"
+            disabled={
+              busy || designCheck.checking || !file || !designCheck.canGenerate
+            }
+            onClick={() => void sendToChkDbStd()}
+          >
+            DB 표준 점검으로
           </button>
         </div>
         <p
@@ -975,8 +1436,8 @@ export default function DbManagerPage() {
         <section className="panel">
           <h3>생성 결과</h3>
           <p className="hint">
-            파일: {result.source_filename} · DB: {result.db_name} · 시트:{" "}
-            {result.sheet}
+            파일: {result.source_filename} · 시트: {result.sheet} · 스크립트는
+            스키마 없이 테이블명만 생성됩니다.
           </p>
           <div className="stats-grid">
             <div className="stat-card">
@@ -995,7 +1456,6 @@ export default function DbManagerPage() {
                 <tr>
                   <th>영문명</th>
                   <th>한글명</th>
-                  <th>스키마</th>
                   <th>컬럼수</th>
                 </tr>
               </thead>
@@ -1004,7 +1464,6 @@ export default function DbManagerPage() {
                   <tr key={t.name}>
                     <td>{t.name}</td>
                     <td>{t.korean_name}</td>
-                    <td>{t.schema}</td>
                     <td>{t.columns}</td>
                   </tr>
                 ))}
@@ -1045,10 +1504,54 @@ export default function DbManagerPage() {
         <h3>Supabase에 적용</h3>
         <p className="hint">
           브라우저에 DB 비밀번호를 두지 않습니다. API 서버의{" "}
-          <code>DATABASE_URL</code>로 Supabase Postgres에 접속합니다. CREATE
-          DATABASE 단계는 생략하고, 기존 프로젝트 DB에 schema → table → sample
-          순으로 적용하세요.
+          <code>DATABASE_URL</code>로 Supabase Postgres에 접속합니다. Database/
+          스키마 생성 스크립트는 만들지 않으며, 연결된 DB의 Database명·스키마
+          목록을 불러와 테이블 → 샘플 데이터 순으로 적용합니다.
         </p>
+        <div className="row apply-target">
+          <label>
+            Database명{" "}
+            <code>{connectedDbName || "(연결 후 표시)"}</code>
+          </label>
+          <label>
+            적용 스키마{" "}
+            <select
+              value={applySchema}
+              onChange={(e) => setApplySchema(e.target.value)}
+              disabled={busy || !dbStatus?.ok || syncSchemas.length === 0}
+            >
+              {syncSchemas.length === 0 ? (
+                <option value={applySchema}>{applySchema || "—"}</option>
+              ) : (
+                syncSchemas.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+        </div>
+        {result ? (
+          <p className="hint">
+            생성 스크립트는 스키마 없이 테이블명만 포함합니다. 적용 스키마를
+            바꾸면 아래 SQL이{" "}
+            <strong>
+              {connectedDbName || "?"}.{applySchema || "?"}
+            </strong>
+            형식으로 바뀌며, 실행 시에도 동일하게 적용됩니다.
+            {dbStatus?.target ? (
+              <>
+                {" "}
+                · 연결: <code>{dbStatus.target}</code>
+              </>
+            ) : null}
+          </p>
+        ) : (
+          <p className="hint">
+            먼저 「DDL 생성」 탭에서 설계서를 올려 DDL을 만든 뒤 적용하세요.
+          </p>
+        )}
         <div className="row">
           <span
             className={`msg ${
@@ -1088,7 +1591,11 @@ export default function DbManagerPage() {
               <button
                 className="btn"
                 type="button"
-                disabled={busy || !applySql[step.id].trim()}
+                disabled={
+                  busy ||
+                  !dbStatus?.ok ||
+                  !applySql[step.id].trim()
+                }
                 onClick={() => applyStep(step.id)}
               >
                 실행
@@ -1143,18 +1650,90 @@ export default function DbManagerPage() {
       <section className="panel">
         <h3>DB → 설계서 반영</h3>
         <p className="hint">
-          Supabase에 있는 테이블 구조를 읽어 테이블정의서 Excel로 다운로드합니다.
-          기준 설계서를 선택하면 기존 행에 병합(한글명 유지)하고, 없으면 DB
-          내용만으로 새 양식을 만듭니다.
+          Supabase 테이블 구조를 읽어 아래 양식 구조대로 새 설계서 Excel을
+          생성합니다. 양식에 DB명·스키마명 열이 없으면 해당 항목은 기록하지
+          않습니다.
         </p>
+        <div className="row">
+          <label>
+            시트명{" "}
+            <input
+              type="text"
+              value={exportTemplateSheet}
+              onChange={(e) => setExportTemplateSheet(e.target.value)}
+              placeholder="비우면 자동 감지"
+              disabled={busy}
+            />
+          </label>
+        </div>
+        <div className="row">
+          <label>
+            내보낼 양식{" "}
+            <input
+              type="file"
+              accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              disabled={busy}
+              onChange={(e) =>
+                onExportTemplateChange(e.target.files?.[0] || null)
+              }
+            />
+          </label>
+        </div>
+        <p
+          className={`msg ${
+            exportTemplateCheck.checking
+              ? ""
+              : exportTemplateCheck.canGenerate
+                ? "ok"
+                : exportTemplateFile
+                  ? "err"
+                  : ""
+          }`}
+        >
+          {exportTemplateCheck.message}
+        </p>
+        {exportTemplateFile ? (
+          <p className="hint">
+            사용 양식: <strong>{exportTemplateFile.name}</strong>
+            {exportTemplateCheck.sheet ? (
+              <>
+                {" "}
+                · 시트 <code>{exportTemplateCheck.sheet}</code>
+              </>
+            ) : null}
+            {exportTemplateCheck.designFormat ? (
+              <>
+                {" "}
+                ·{" "}
+                {exportTemplateCheck.designFormat === "block"
+                  ? "블록형"
+                  : "목록형"}
+              </>
+            ) : null}
+          </p>
+        ) : null}
         {!dbStatus?.ok ? (
           <p className="hint">
-            DB 연결이 필요합니다. 위 「Supabase에 적용」에서 연결 상태를
+            DB 연결이 필요합니다. 「스크립트 → 적용」 탭에서 연결 상태를
             확인하세요.
           </p>
         ) : (
           <>
-            <div className="row">
+            <div className="row apply-target">
+              <label>
+                Database명{" "}
+                <input
+                  type="text"
+                  value={syncDbName}
+                  onChange={(e) => setSyncDbName(e.target.value)}
+                  disabled={busy}
+                  placeholder={connectedDbName || "dbm"}
+                  style={{ width: "8rem" }}
+                />
+                {connectedDbName ? (
+                  <span className="hint"> 연결 DB: {connectedDbName}</span>
+                ) : null}
+              </label>
               <label>
                 스키마{" "}
                 <select
@@ -1173,16 +1752,6 @@ export default function DbManagerPage() {
                   )}
                 </select>
               </label>
-              <label>
-                DB명{" "}
-                <input
-                  type="text"
-                  value={syncDbName}
-                  onChange={(e) => setSyncDbName(e.target.value)}
-                  disabled={busy}
-                  style={{ width: "6rem" }}
-                />
-              </label>
               <button
                 className="btn ghost"
                 type="button"
@@ -1194,20 +1763,6 @@ export default function DbManagerPage() {
               >
                 목록 새로고침
               </button>
-            </div>
-
-            <div className="row" style={{ marginTop: "0.75rem" }}>
-              <label>
-                기준 설계서 (선택){" "}
-                <input
-                  type="file"
-                  accept=".xlsx,.xlsm"
-                  disabled={busy}
-                  onChange={(e) =>
-                    setSyncBaseFile(e.target.files?.[0] || null)
-                  }
-                />
-              </label>
             </div>
 
             <h4 className="subhead">테이블 선택</h4>
@@ -1273,7 +1828,12 @@ export default function DbManagerPage() {
               <button
                 className="btn"
                 type="button"
-                disabled={busy || !syncSelected.length}
+                disabled={
+                  busy ||
+                  !syncSelected.length ||
+                  !exportTemplateFile ||
+                  !exportTemplateCheck.canGenerate
+                }
                 onClick={exportDesign}
               >
                 설계서 다운로드
@@ -1303,7 +1863,8 @@ export default function DbManagerPage() {
         <h3>데이터 관리</h3>
         <p className="hint">
           테이블 데이터를 조회하고 CSV/Excel로 넣을 수 있습니다. 임의 SQL은
-          실행하지 않으며, 플랫폼 메타 테이블에는 쓰지 않습니다.
+          실행하지 않으며, 플랫폼 메타 테이블에는 쓰지 않습니다. 「스크립트 →
+          적용」에서 선택한 스키마가 기본값으로 연동됩니다.
         </p>
         {!dbStatus?.ok ? (
           <p className="hint">DB 연결이 필요합니다.</p>
@@ -1319,15 +1880,17 @@ export default function DbManagerPage() {
                     setDataRows(null);
                     setDataPage(1);
                   }}
-                  disabled={busy || syncSchemas.length === 0}
+                  disabled={busy || (syncSchemas.length === 0 && !dataSchema)}
                 >
-                  {(syncSchemas.length ? syncSchemas : [dataSchema]).map(
-                    (s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    )
-                  )}
+                  {(
+                    syncSchemas.length
+                      ? [...new Set([...syncSchemas, dataSchema])]
+                      : [dataSchema]
+                  ).map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label>

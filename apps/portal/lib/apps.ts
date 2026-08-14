@@ -30,8 +30,8 @@ export const APPS: PlatformApp[] = [
   {
     id: "deliverable-manager",
     name: "DeliverableManager",
-    description: "산출물 목록·문서 조회",
-    status: "planned",
+    description: "산출물 목록 조회 (공개 테스트 껍데기)",
+    status: "beta",
     href: "/apps/deliverable-manager",
     category: "pm",
   },

@@ -10,19 +10,10 @@ from .type_mapper import map_type
 
 
 def generate_all_ddl(tables: list[TableDef], output_dir: Path) -> list[Path]:
-    """Write database, schema, and table SQL files. Returns created file paths."""
+    """Write table + sample SQL files. Database/schema scripts are omitted."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    db_names = sorted({table.db_name for table in tables})
-    schemas = sorted({table.schema for table in tables})
-
-    db_file = output_dir / "00_database.sql"
-    db_file.write_text(build_database_sql(db_names), encoding="utf-8")
-
-    schema_file = output_dir / "01_schema.sql"
-    schema_file.write_text(_build_schema_sql(schemas), encoding="utf-8")
-
-    created = [db_file, schema_file]
+    created: list[Path] = []
     for table in sorted(tables, key=lambda t: t.name):
         table_file = output_dir / f"{table.name.upper()}.sql"
         table_file.write_text(build_table_ddl(table), encoding="utf-8")
@@ -65,12 +56,12 @@ def _build_schema_sql(schemas: list[str]) -> str:
 
 
 def build_table_ddl(table: TableDef) -> str:
-    """Build CREATE TABLE + COMMENT + UK/FK/INDEX statements."""
+    """Build CREATE TABLE + COMMENT + UK/FK/INDEX statements (no schema prefix)."""
     lines = [
-        f"-- Table: {table.schema}.{table.name}",
+        f"-- Table: {table.name}",
         f"-- Source: {table.korean_name}",
         "",
-        f"CREATE TABLE IF NOT EXISTS {table.schema}.{table.name} (",
+        f"CREATE TABLE IF NOT EXISTS {table.name} (",
     ]
 
     column_lines = []
@@ -96,14 +87,14 @@ def build_table_ddl(table: TableDef) -> str:
     lines.append("")
 
     lines.append(
-        f"COMMENT ON TABLE {table.schema}.{table.name} "
+        f"COMMENT ON TABLE {table.name} "
         f"IS '{_escape(table.korean_name)}';"
     )
     for col in table.columns:
         encoded = encode_column_comment(col.korean_name, col.comment)
         if encoded:
             lines.append(
-                f"COMMENT ON COLUMN {table.schema}.{table.name}.{col.name} "
+                f"COMMENT ON COLUMN {table.name}.{col.name} "
                 f"IS '{_escape(encoded)}';"
             )
 
@@ -112,7 +103,7 @@ def build_table_ddl(table: TableDef) -> str:
         cols_sql = ", ".join(idx_cols)
         lines.append(
             f"CREATE {kind} IF NOT EXISTS {idx_name} "
-            f"ON {table.schema}.{table.name} ({cols_sql});"
+            f"ON {table.name} ({cols_sql});"
         )
 
     for col in table.columns:
@@ -122,7 +113,7 @@ def build_table_ddl(table: TableDef) -> str:
         ref_table, ref_col = ref
         fk_name = f"fk_{table.name}_{col.name}"[:63]
         lines.append(
-            f"ALTER TABLE {table.schema}.{table.name} "
+            f"ALTER TABLE {table.name} "
             f"ADD CONSTRAINT {fk_name} "
             f"FOREIGN KEY ({col.name}) REFERENCES {ref_table} ({ref_col});"
         )
@@ -191,7 +182,9 @@ def _parse_fk_ref(value: str | None) -> tuple[str, str] | None:
         return None
     table, rest = text.rsplit("(", 1)
     col = rest[:-1].strip()
-    table = table.strip().replace(".", ".")
+    table = table.strip()
+    if "." in table:
+        table = table.rsplit(".", 1)[-1]
     if not table or not col:
         return None
     return table.lower(), col.lower()
