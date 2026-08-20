@@ -108,11 +108,28 @@ export function getActive(state: LibraryState): LibraryItem {
 }
 
 export async function fileToBase64(file: File): Promise<string> {
+  if (typeof FileReader !== "undefined") {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result !== "string") {
+          reject(new Error("file read failed"));
+          return;
+        }
+        const comma = result.indexOf(",");
+        resolve(comma >= 0 ? result.slice(comma + 1) : result);
+      };
+      reader.onerror = () => reject(reader.error ?? new Error("file read failed"));
+      reader.readAsDataURL(file);
+    });
+  }
   const buf = await file.arrayBuffer();
   const bytes = new Uint8Array(buf);
   let binary = "";
-  for (let i = 0; i < bytes.length; i += 1) {
-    binary += String.fromCharCode(bytes[i]);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
   return btoa(binary);
 }

@@ -562,9 +562,13 @@ function validateRelations(project: ErProject): ErValidationItem[] {
     }
   }
 
-  // cycle
+  // cycle — 자기 자신 참조(member→member)는 허용
   const cycles = detectCycleEdges(project);
   for (const c of cycles) {
+    const core = c.slice(0, -1);
+    if (core.length === 1 || (core.length === 2 && core[0] === core[1])) {
+      continue;
+    }
     items.push({
       id: `cycle_${c.join("_")}`,
       severity: "error",

@@ -49,7 +49,9 @@ import {
 } from "./flow";
 import { layoutGraph, HEADER_HEIGHT, NODE_WIDTH, ROW_HEIGHT } from "./layout";
 import { ExportDialog, type ExportScope, type ScriptExportResult } from "./ExportDialog";
-import { ImportDialog, type ImportMode } from "./ImportDialog";
+import { ImportDialog, type ImportMode, type ImportProgress } from "./ImportDialog";
+import { CardinalityPicker } from "./CardinalityPicker";
+import { ValidationDialog } from "./ValidationDialog";
 import {
   ColumnEditDialog,
   RelationEditDialog,
@@ -89,6 +91,7 @@ import {
   type HandleSide,
   type ImportResponse,
   type NameDisplayMode,
+  type RelationCardinality,
 } from "./types";
 import { errorsForColumnSave, errorsTouching, formatErrorReasons, formatValidationReasons, validateErProject, validationForRelation, type ErValidationItem } from "./validation";
 
@@ -105,6 +108,16 @@ const NAME_DISPLAY_LABEL: Record<NameDisplayMode, string> = {
 };
 
 const POPOVER_WIDTH = 240;
+
+function estimateImportMs(file: File): number {
+  const mb = file.size / (1024 * 1024);
+  return Math.min(90000, Math.max(2500, 2500 + mb * 1200));
+}
+
+function estimateSqlImportMs(sql: string): number {
+  const kb = new TextEncoder().encode(sql).length / 1024;
+  return Math.min(60000, Math.max(2000, 2000 + kb * 40));
+}
 
 function cloneProject(project: ErProject): ErProject {
   return JSON.parse(JSON.stringify(project)) as ErProject;
@@ -189,6 +202,9 @@ function ErModelerInner() {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(
+    null
+  );
   const [validationOpen, setValidationOpen] = useState(false);
   const [validationItems, setValidationItems] = useState<ErValidationItem[]>([]);
   const [importOpen, setImportOpen] = useState(false);
@@ -197,6 +213,8 @@ function ErModelerInner() {
     null
   );
   const [canvasTool, setCanvasTool] = useState<CanvasTool>("select");
+  const [connectCardinality, setConnectCardinality] =
+    useState<RelationCardinality>("1:1..N");
   const [tableEditId, setTableEditId] = useState<string | null>(null);
   const [columnEdit, setColumnEdit] = useState<{
     tableId: string;
@@ -498,7 +516,7 @@ function ErModelerInner() {
       startPt?: { x: number; y: number } | null,
       endPt?: { x: number; y: number } | null
     ) => {
-      const base = connectionToRelation(conn, "1:1..N");
+      const base = connectionToRelation(conn, connectCardinality);
       if (!base) return false;
       const fromTable = project.tables.find(
         (t) => t.id === conn.source || t.name === conn.source
@@ -539,7 +557,7 @@ function ErModelerInner() {
         fromXOffset: fromOff.xOffset,
         toXOffset: toOff.xOffset,
         id: `${fromTable.name}:${EDGE_COLUMN}->${toTable.name}:${EDGE_COLUMN}`,
-        cardinality: "1:1..N",
+        cardinality: connectCardinality,
       });
 
       let next = applyMatchingFkRefs(addRelation(project, rel), rel.fromTable, rel.toTable);
@@ -567,7 +585,7 @@ function ErModelerInner() {
       );
       return true;
     },
-    [commitProject, project, screenToFlowPosition]
+    [commitProject, connectCardinality, project, screenToFlowPosition]
   );
 
   const onConnectStart = useCallback((event: MouseEvent | TouchEvent) => {
@@ -746,10 +764,8 @@ function ErModelerInner() {
         author: imported.author || current.author || "",
       };
     }
-    next = refreshFlow(
-      next,
-      !(mode === "append" && current.tables.length)
-    );
+    const shouldLayout = !(mode === "append" && current.tables.length);
+    next = refreshFlow(next, false);
     const state = upsertActive(library, next);
     setLibrary(state);
     setProject(next);
@@ -758,18 +774,39 @@ function ErModelerInner() {
     setSelectedTableIds([]);
     setImportOpen(false);
     setMsg(summary + extra);
+    if (shouldLayout) {
+      requestAnimationFrame(() => {
+        const laid = refreshFlow(projectRef.current, true);
+        setProject(laid);
+        scheduleSave(laid);
+      });
+    }
   }
 
   async function handleImport(file: File, mode: ImportMode = "replace") {
     setBusy(true);
-    setProgress("파일 준비 중…");
+    setImportProgress(null);
+    setProgress("서버에 파일 전송 중…");
     setMsg("설계서 불러오는 중…");
+    const started = Date.now();
+    const estimateMs = estimateImportMs(file);
+    let progressLabel = "파일 업로드 중";
+    const progressTimer = window.setInterval(() => {
+      const elapsedMs = Date.now() - started;
+      const pct = Math.min(88, (elapsedMs / estimateMs) * 88);
+      const elapsedSec = Math.round(elapsedMs / 1000);
+      const remainingMs = estimateMs - elapsedMs;
+      const etaSec =
+        pct >= 88 || remainingMs <= 0
+          ? 0
+          : Math.max(1, Math.round(remainingMs / 1000));
+      setImportProgress({ pct, elapsedSec, etaSec, label: progressLabel });
+    }, 250);
     try {
-      setProgress("Excel 파일 읽는 중…");
-      const templateBase64 = await fileToBase64(file);
       const fd = new FormData();
       fd.append("design", file);
       if (project.sheet) fd.append("sheet", project.sheet);
+      progressLabel = "서버에서 정의서 분석 중";
       setProgress("서버에서 정의서 분석 중…");
       const res = await fetch(`${API_BASE}/v1/er-modeler/import`, {
         method: "POST",
@@ -780,7 +817,14 @@ function ErModelerInner() {
       };
       if (!res.ok) throw new Error(j.detail || "import failed");
 
+      progressLabel = "ERD에 테이블·관계 반영 중";
       setProgress("ERD에 테이블·관계 반영 중…");
+      setImportProgress({
+        pct: 92,
+        elapsedSec: Math.round((Date.now() - started) / 1000),
+        etaSec: 1,
+        label: progressLabel,
+      });
       const imported = importResponseToProject(
         {
           source_filename: j.source_filename,
@@ -788,18 +832,36 @@ function ErModelerInner() {
           tables: j.tables,
           relations: j.relations,
         },
-        templateBase64
+        undefined
       );
       commitImported(
         imported,
         mode,
         `가져오기 완료 — 테이블 ${j.meta.tables}개 · 관계 ${j.meta.relations}개`
       );
+      setImportProgress({
+        pct: 100,
+        elapsedSec: Math.round((Date.now() - started) / 1000),
+        etaSec: 0,
+        label: "완료",
+      });
+      void fileToBase64(file).then((templateBase64) => {
+        commitProject(
+          {
+            ...projectRef.current,
+            templateBase64,
+            sourceFilename: file.name,
+          },
+          { skipFlow: true }
+        );
+      });
     } catch (e) {
       setMsg(String((e as Error).message || e));
     } finally {
+      window.clearInterval(progressTimer);
       setBusy(false);
       setProgress("");
+      window.setTimeout(() => setImportProgress(null), 500);
     }
   }
 
@@ -809,9 +871,25 @@ function ErModelerInner() {
     mode: ImportMode = "replace"
   ) {
     setBusy(true);
+    setImportProgress(null);
     setProgress("SQL 스크립트 분석 중…");
     setMsg("SQL 스크립트 분석 중…");
+    const started = Date.now();
+    const estimateMs = estimateSqlImportMs(sql);
+    let progressLabel = "SQL 분석 중";
+    const progressTimer = window.setInterval(() => {
+      const elapsedMs = Date.now() - started;
+      const pct = Math.min(88, (elapsedMs / estimateMs) * 88);
+      const elapsedSec = Math.round(elapsedMs / 1000);
+      const remainingMs = estimateMs - elapsedMs;
+      const etaSec =
+        pct >= 88 || remainingMs <= 0
+          ? 0
+          : Math.max(1, Math.round(remainingMs / 1000));
+      setImportProgress({ pct, elapsedSec, etaSec, label: progressLabel });
+    }, 250);
     try {
+      progressLabel = "서버에서 SQL 분석 중";
       setProgress("서버에서 SQL 분석 중…");
       const res = await fetch(`${API_BASE}/v1/er-modeler/import-sql`, {
         method: "POST",
@@ -828,7 +906,14 @@ function ErModelerInner() {
       };
       if (!res.ok) throw new Error(j.detail || "import-sql failed");
 
+      progressLabel = "ERD에 테이블·관계 반영 중";
       setProgress("ERD에 테이블·관계 반영 중…");
+      setImportProgress({
+        pct: 92,
+        elapsedSec: Math.round((Date.now() - started) / 1000),
+        etaSec: 1,
+        label: progressLabel,
+      });
       const imported = importResponseToProject(
         {
           source_filename: j.source_filename,
@@ -843,11 +928,19 @@ function ErModelerInner() {
         mode,
         `스크립트 가져오기 완료 — 테이블 ${j.meta.tables}개 · 관계 ${j.meta.relations}개`
       );
+      setImportProgress({
+        pct: 100,
+        elapsedSec: Math.round((Date.now() - started) / 1000),
+        etaSec: 0,
+        label: "완료",
+      });
     } catch (e) {
       setMsg(String((e as Error).message || e));
     } finally {
+      window.clearInterval(progressTimer);
       setBusy(false);
       setProgress("");
+      window.setTimeout(() => setImportProgress(null), 500);
     }
   }
 
@@ -1449,6 +1542,7 @@ function ErModelerInner() {
         open={importOpen}
         busy={busy}
         progress={progress}
+        importProgress={importProgress}
         onClose={() => setImportOpen(false)}
         onImportExcel={(file, mode) => void handleImport(file, mode)}
         onImportSql={(sql, filename, mode) =>
@@ -1534,95 +1628,11 @@ function ErModelerInner() {
       />
 
       {validationOpen ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            zIndex: 200,
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "center",
-            paddingTop: 80,
-          }}
-          onClick={() => setValidationOpen(false)}
-        >
-          <div
-            className="er-validation-panel"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 14 }}>
-                  ER 검증 결과
-                </div>
-                <div className="hint" style={{ fontSize: 12, marginTop: 2 }}>
-                  {validationItems.length}개 항목 ·{" "}
-                  {validationItems.filter((x) => x.severity === "error").length}개
-                  오류
-                </div>
-              </div>
-              <button
-                type="button"
-                className="btn ghost er-btn-sm"
-                onClick={() => setValidationOpen(false)}
-              >
-                닫기
-              </button>
-            </div>
-
-            <div
-              style={{
-                marginTop: 10,
-                maxHeight: "70vh",
-                overflow: "auto",
-                borderTop: "1px solid var(--line)",
-                paddingTop: 10,
-              }}
-            >
-              {validationItems.length === 0 ? (
-                <div className="hint">문제가 없습니다.</div>
-              ) : (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {validationItems.map((it) => (
-                    <div
-                      key={it.id}
-                      style={{
-                        border: "1px solid var(--line)",
-                        borderRadius: 10,
-                        padding: 10,
-                        background: "rgba(18,26,34,0.6)",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontWeight: 800,
-                          fontSize: 13,
-                          color:
-                            it.severity === "error" ? "#ff6b6b" : "#f2c94c",
-                        }}
-                      >
-                        {it.title}
-                      </div>
-                      {it.detail ? (
-                        <div className="hint" style={{ marginTop: 6 }}>
-                          {it.detail}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <ValidationDialog
+          open={validationOpen}
+          items={validationItems}
+          onClose={() => setValidationOpen(false)}
+        />
       ) : null}
 
       <div
@@ -1889,7 +1899,7 @@ function ErModelerInner() {
                     }
                     setMsg(
                       next === "connect"
-                        ? "연결선: 테이블을 클릭한 뒤 다른 테이블을 클릭하세요."
+                        ? "연결선: 관계 유형을 고른 뒤 테이블을 연결하세요."
                         : ""
                     );
                     return next;
@@ -1931,6 +1941,15 @@ function ErModelerInner() {
                 관계명
               </button>
             </Panel>
+            {canvasTool === "connect" ? (
+              <Panel position="bottom-left" className="er-connect-card-panel">
+                <CardinalityPicker
+                  compact
+                  value={connectCardinality}
+                  onChange={setConnectCardinality}
+                />
+              </Panel>
+            ) : null}
             <MiniMap
               nodeColor="#3d8bfd"
               maskColor="rgba(8, 12, 18, 0.75)"

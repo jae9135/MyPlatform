@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { CardinalityPicker, splitCardinalityDisplay } from "./CardinalityPicker";
 import { formatColumnType, normalizeColumn, normalizeCardinality, parseDataType, type ErColumn, type ErRelation, type RelationCardinality } from "./types";
 
 export type PopoverAnchor = { x: number; y: number };
@@ -12,6 +13,7 @@ function PopoverShell({
   anchor,
   onClose,
   error,
+  className,
   children,
 }: {
   title: string;
@@ -19,6 +21,7 @@ function PopoverShell({
   anchor: PopoverAnchor | null;
   onClose: () => void;
   error?: string | null;
+  className?: string;
   children: React.ReactNode;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -73,7 +76,7 @@ function PopoverShell({
   return (
     <div
       ref={boxRef}
-      className="er-edit-popover"
+      className={`er-edit-popover${className ? ` ${className}` : ""}`}
       role="dialog"
       aria-labelledby={titleId}
       style={{ left, top }}
@@ -348,23 +351,6 @@ export function ColumnEditDialog({
   );
 }
 
-const CARDINALITY_OPTIONS: RelationCardinality[] = [
-  "1:1",
-  "1:0..1",
-  "0..1:1",
-  "1:0..N",
-  "0..N:1",
-  "1:1..N",
-  "1..N:1",
-  "N:N",
-];
-
-function splitCardinality(card: string): [string, string] {
-  const idx = card.indexOf(":");
-  if (idx < 0) return ["1", "N"];
-  return [card.slice(0, idx), card.slice(idx + 1)];
-}
-
 export type RelationSaveResult =
   | { kind: "block"; message: string }
   | { kind: "saved"; notice?: string };
@@ -398,7 +384,7 @@ export function RelationEditDialog({
 
   if (!open || !relation) return null;
 
-  const [fromCard, toCard] = splitCardinality(cardinality);
+  const [fromCard, toCard] = splitCardinalityDisplay(cardinality);
 
   return (
     <PopoverShell
@@ -407,27 +393,16 @@ export function RelationEditDialog({
       anchor={anchor}
       onClose={onClose}
       error={saveError}
+      className="er-rel-edit-popover"
     >
       <p className="hint">
         {fromCard} {relation.fromTable} → {toCard} {relation.toTable}
       </p>
-      <div className="er-meta-fields">
-        <label>
-          관계 유형
-          <select
-            value={cardinality}
-            onChange={(e) =>
-              setCardinality(normalizeCardinality(e.target.value))
-            }
-          >
-            {CARDINALITY_OPTIONS.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <CardinalityPicker
+        label="관계 유형"
+        value={cardinality}
+        onChange={setCardinality}
+      />
       <div className="er-modal-foot">
         <button type="button" className="btn ghost er-btn-sm" onClick={onClose}>
           취소

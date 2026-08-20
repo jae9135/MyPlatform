@@ -49,19 +49,26 @@ def extract_relations(tables: list[TableDef]) -> list[dict[str, str]]:
             if not ref:
                 continue
             ref_table, ref_col = ref
-            rel_id = f"{table.name}:{col.name}->{ref_table}:{ref_col}"
+            rel_id = f"{ref_table}:{ref_col}->{table.name}:{col.name}"
             if rel_id in seen:
                 continue
             seen.add(rel_id)
+            pk_cols = table.pk_columns
+            identifying = col.is_pk and col.is_fk and len(pk_cols) == 1
+            card = (
+                "1:1"
+                if identifying
+                else ("1:0..N" if not col.not_null else "1:1..N")
+            )
             relations.append(
                 {
                     "id": rel_id,
-                    "fromTable": table.name,
-                    "fromColumn": col.name,
-                    "toTable": ref_table,
-                    "toColumn": ref_col,
-                    "cardinality": "1:0..N" if not col.not_null else "1:N",
-                    "isIdentifying": col.is_pk and col.is_fk,
+                    "fromTable": ref_table,
+                    "fromColumn": ref_col,
+                    "toTable": table.name,
+                    "toColumn": col.name,
+                    "cardinality": card,
+                    "isIdentifying": identifying,
                 }
             )
     return relations
@@ -138,12 +145,13 @@ def table_defs_from_model(model: dict[str, Any]) -> list[TableDef]:
         to_col = (rel.get("toColumn") or "").strip().lower()
         if not all([from_table, from_col, to_table, to_col]):
             continue
-        table = by_table.get(from_table)
-        if not table:
+        # Relation is stored parent(from) → child(to); FK lives on the child.
+        child = by_table.get(to_table)
+        if not child:
             continue
-        fk_ref = f"{to_table}({to_col})"
-        for col in table.columns:
-            if col.name == from_col:
+        fk_ref = f"{from_table}({from_col})"
+        for col in child.columns:
+            if col.name == to_col:
                 col.is_fk = True
                 col.fk_ref = fk_ref
                 break

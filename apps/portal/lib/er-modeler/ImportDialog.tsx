@@ -2,14 +2,24 @@
 
 import { useRef, useState } from "react";
 
+import { DraggableModal } from "./DraggableModal";
+
 type Tab = "excel" | "sql";
 
 export type ImportMode = "replace" | "append";
+
+export type ImportProgress = {
+  pct: number;
+  elapsedSec: number;
+  etaSec: number | null;
+  label: string;
+};
 
 type Props = {
   open: boolean;
   busy: boolean;
   progress?: string;
+  importProgress?: ImportProgress | null;
   onClose: () => void;
   onImportExcel: (file: File, mode: ImportMode) => void;
   onImportSql: (sql: string, filename: string, mode: ImportMode) => void;
@@ -19,6 +29,7 @@ export function ImportDialog({
   open,
   busy,
   progress,
+  importProgress,
   onClose,
   onImportExcel,
   onImportSql,
@@ -30,38 +41,53 @@ export function ImportDialog({
   const excelRef = useRef<HTMLInputElement>(null);
   const sqlFileRef = useRef<HTMLInputElement>(null);
 
-  if (!open) return null;
-
   return (
-    <div className="er-modal-backdrop" onClick={() => { if (!busy) onClose(); }}>
-      <div
-        className="er-modal er-import-modal"
-        role="dialog"
-        aria-labelledby="er-import-title"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="er-modal-head">
-          <div>
-            <h2 id="er-import-title">가져오기</h2>
-            <p className="hint">
-              Excel 정의서 또는 CREATE TABLE 스크립트로 테이블과 연결선을
-              그립니다.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="btn ghost er-btn-sm"
-            onClick={onClose}
-            disabled={busy}
-          >
-            닫기
-          </button>
-        </div>
+    <DraggableModal
+      open={open}
+      busy={busy}
+      title="가져오기"
+      titleId="er-import-title"
+      subtitle={
+        <>
+          Excel 정의서 또는 CREATE TABLE 스크립트로 테이블과 연결선을
+          그립니다.
+        </>
+      }
+      onClose={onClose}
+      className="er-import-modal"
+      width={420}
+    >
         {busy ? (
-          <div className="er-progress-inline">
-            <span className="er-progress-dot" />
-            <span>{progress || "가져오는 중…"}</span>
-          </div>
+          importProgress ? (
+            <div className="er-run-progress">
+              <div
+                className="er-progress-bar"
+                role="progressbar"
+                aria-valuenow={Math.round(importProgress.pct)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className="er-progress-fill"
+                  style={{ width: `${importProgress.pct}%` }}
+                />
+              </div>
+              <p className="hint">
+                {importProgress.label} · {Math.round(importProgress.pct)}% · 경과{" "}
+                {importProgress.elapsedSec}초
+                {importProgress.etaSec != null && importProgress.etaSec > 0
+                  ? ` · 약 ${importProgress.etaSec}초 남음`
+                  : importProgress.pct >= 95
+                    ? " · 거의 완료…"
+                    : ""}
+              </p>
+            </div>
+          ) : (
+            <div className="er-progress-inline">
+              <span className="er-progress-dot" />
+              <span>{progress || "가져오는 중…"}</span>
+            </div>
+          )
         ) : null}
 
         <div className="er-choice-group">
@@ -178,7 +204,6 @@ export function ImportDialog({
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </DraggableModal>
   );
 }

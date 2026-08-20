@@ -294,6 +294,7 @@ def _parse_flat(ws, header_row: int, col_map: dict[str, int]) -> list[TableDef]:
 
 def _parse_block(ws) -> list[TableDef]:
     tables: dict[str, TableDef] = {}
+    pending_index_keys: dict[str, list[str]] = {}
     row = 1
     max_row = ws.max_row or 0
 
@@ -404,12 +405,19 @@ def _parse_block(ws) -> list[TableDef]:
             data_row += 1
 
         if index_key_parts:
-            _apply_index_key_constraints(
-                tables[table_key], "\n".join(index_key_parts), tables
-            )
+            pending = pending_index_keys.setdefault(table_key, [])
+            pending.extend(index_key_parts)
         row = data_row
 
+    for table_key, parts in pending_index_keys.items():
+        if parts and table_key in tables:
+            _apply_index_key_constraints(
+                tables[table_key], "\n".join(parts), tables
+            )
+
     _infer_missing_fk_refs(tables)
+    _sanitize_backwards_parent_pk_fk(tables)
+    _sanitize_orphan_fk_flags(tables)
     return list(tables.values())
 
 
@@ -671,6 +679,11 @@ def _parse_constraint_line(line: str) -> tuple[str, str, list[str]] | None:
 
 def _resolve_column_name(table: TableDef, raw: str) -> str | None:
     want = raw.strip().lower()
+    want = (
+        want.replace("costomer", "customer")
+        .replace("cusmomer", "customer")
+        .replace("coustomer", "customer")
+    )
     names = [c.name for c in table.columns]
     if want in names:
         return want
@@ -681,6 +694,64 @@ def _resolve_column_name(table: TableDef, raw: str) -> str | None:
         if want in name or name in want:
             return name
     return None
+
+
+def _fk_constraint_targets_table(constraint_name: str, table: TableDef) -> bool:
+    """FK_{child}_{parent}(...) — Index Key FK는 child 테이블 블록에만 적용."""
+    body = constraint_name.strip().upper().replace("-", "_")
+    table_up = table.name.upper().replace("-", "_")
+    return body.startswith(table_up + "_")
+
+
+def _parse_fk_ref(value: str | None) -> tuple[str, str] | None:
+    text = (value or "").strip()
+    if not text or "(" not in text or not text.endswith(")"):
+        return None
+    table, rest = text.rsplit("(", 1)
+    col = rest[:-1].strip()
+    table = table.strip()
+    if "." in table:
+        table = table.rsplit(".", 1)[-1]
+    if not table or not col:
+        return None
+    return table.lower(), col.lower()
+
+
+def _sanitize_backwards_parent_pk_fk(tables: dict[str, TableDef]) -> None:
+    """부모 테이블 PK에 붙은 역방향 FK(자식 테이블 참조)를 제거합니다."""
+    by_name = {t.name: t for t in tables.values()}
+    for table in tables.values():
+        for col in table.columns:
+            if not (col.is_pk and col.is_fk and col.fk_ref):
+                continue
+            ref = _parse_fk_ref(col.fk_ref)
+            if not ref or ref[0] == table.name.lower():
+                continue
+            ref_table = by_name.get(ref[0])
+            if not ref_table:
+                continue
+            # detail/자식 테이블(member_detail 등)의 PK+FK → 부모 PK 참조는 유지
+            if (
+                table.name.startswith(f"{ref_table.name}_")
+                or ref_table.name in table.name
+            ):
+                continue
+            ref_col = next((c for c in ref_table.columns if c.name == ref[1]), None)
+            if ref_col and ref_col.is_pk:
+                if len(table.columns) <= len(ref_table.columns):
+                    col.is_fk = False
+                    col.fk_ref = None
+                    continue
+            if len(table.columns) < len(ref_table.columns):
+                col.is_fk = False
+                col.fk_ref = None
+
+
+def _sanitize_orphan_fk_flags(tables: dict[str, TableDef]) -> None:
+    for table in tables.values():
+        for col in table.columns:
+            if col.is_fk and not col.fk_ref:
+                col.is_fk = False
 
 
 def _find_table_by_token(token: str, tables: dict[str, TableDef]) -> TableDef | None:
@@ -701,10 +772,10 @@ def _infer_fk_parent_table(
     body_up = body.upper()
     if body_up.startswith(child_up + "_"):
         parent_token = body[len(child_up) + 1 :]
-        parent = _find_table_by_token(parent_token.split("_")[0], tables)
+        parent = _find_table_by_token(parent_token, tables)
         if parent:
             return parent
-        parent = _find_table_by_token(parent_token, tables)
+        parent = _find_table_by_token(parent_token.split("_")[0], tables)
         if parent:
             return parent
     if "_" in body:
@@ -745,9 +816,12 @@ def _apply_index_key_constraints(
                 if not col.index_key:
                     col.index_key = line
         elif kind == "FK":
+            if not _fk_constraint_targets_table(name, table):
+                continue
+            if not resolved_cols:
+                continue
             parent = _infer_fk_parent_table(name, table, tables)
-            target_cols = resolved_cols or list(by_name.keys())
-            for col_name in target_cols:
+            for col_name in resolved_cols:
                 col = by_name.get(col_name)
                 if not col:
                     continue

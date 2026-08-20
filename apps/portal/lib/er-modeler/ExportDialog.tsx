@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { DraggableModal } from "./DraggableModal";
+
 export type ExportKind = "excel" | "script";
 export type ExportScope = "all" | "selected";
 
@@ -129,8 +131,6 @@ export function ExportDialog({
     );
   }, [scriptResult]);
 
-  if (!open) return null;
-
   const templateLabel = picked?.name || templateName || "없음";
   const excelReady = Boolean(picked || templateName);
   const hasSelection = selectedCount > 0;
@@ -158,31 +158,20 @@ export function ExportDialog({
   }
 
   return (
-    <div className="er-modal-backdrop" onClick={() => { if (!busy) onClose(); }}>
-      <div
-        className={`er-modal er-import-modal${showPreview ? " er-export-wide" : ""}`}
-        role="dialog"
-        aria-labelledby="er-export-title"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="er-modal-head">
-          <div>
-            <h2 id="er-export-title">내보내기</h2>
-            <p className="hint">
-              {kind === "script"
-                ? "범위를 고른 뒤 생성하고, 확인 후 저장합니다."
-                : "형식과 범위를 고른 뒤 내보냅니다."}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="btn ghost er-btn-sm"
-            onClick={onClose}
-            disabled={busy}
-          >
-            닫기
-          </button>
-        </div>
+    <DraggableModal
+      open={open}
+      busy={busy}
+      title="내보내기"
+      titleId="er-export-title"
+      subtitle={
+        kind === "script"
+          ? "범위를 고른 뒤 생성하고, 확인 후 저장합니다."
+          : "형식과 범위를 고른 뒤 내보냅니다."
+      }
+      onClose={onClose}
+      className={`er-import-modal${showPreview ? " er-export-wide" : ""}`}
+      width={showPreview ? 720 : 420}
+    >
         {busy ? (
           <div className="er-progress-inline">
             <span className="er-progress-dot" />
@@ -337,7 +326,6 @@ export function ExportDialog({
             </button>
           )}
         </div>
-      </div>
-    </div>
+    </DraggableModal>
   );
 }

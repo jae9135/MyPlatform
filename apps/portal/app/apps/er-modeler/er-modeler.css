@@ -813,6 +813,10 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
+.er-edit-popover.er-rel-edit-popover {
+  width: 300px;
+}
+
 .er-edit-popover h2,
 .er-edit-popover-title {
   margin: 0 0 10px;
@@ -915,6 +919,35 @@
   padding: 72px 12px 24px;
 }
 
+.er-modal-backdrop-draggable {
+  display: block;
+  padding: 0;
+}
+
+.er-draggable-modal {
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
+
+.er-modal-drag-handle {
+  cursor: default;
+}
+
+.er-modal-drag-title {
+  cursor: grab;
+  user-select: none;
+  flex: 1;
+  min-width: 0;
+}
+
+.er-modal-drag-title:active {
+  cursor: grabbing;
+}
+
+.er-modal-drag-title h2 {
+  margin: 0;
+}
+
 .er-modal {
   width: min(980px, calc(100vw - 24px));
   background: #0f1419;
@@ -984,6 +1017,24 @@
 .er-import-modal .er-script-area {
   min-height: 200px;
   font-size: 14px;
+}
+
+.er-run-progress {
+  margin: 10px 0 6px;
+}
+
+.er-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.er-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.25s ease;
 }
 
 .er-choice-group {
@@ -1135,4 +1186,127 @@
 .er-validation-panel .hint {
   word-break: keep-all;
   overflow-wrap: break-word;
+}
+
+.er-validation-body {
+  margin-top: 10px;
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.er-validation-list {
+  display: grid;
+  gap: 10px;
+}
+
+.er-validation-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(18, 26, 34, 0.6);
+}
+
+.er-validation-item-title {
+  font-weight: 800;
+  font-size: 13px;
+  color: #f2c94c;
+}
+
+.er-validation-item-title.error {
+  color: #ff6b6b;
+}
+
+.er-validation-item .hint {
+  margin-top: 6px;
+}
+
+.er-card-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.er-card-picker-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.er-card-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.er-card-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+}
+
+.er-card-picker-item:hover {
+  background: rgba(61, 139, 253, 0.12);
+  border-color: rgba(61, 139, 253, 0.25);
+}
+
+.er-card-picker-item.active {
+  background: rgba(61, 139, 253, 0.22);
+  border-color: rgba(61, 139, 253, 0.55);
+}
+
+.er-card-diagram {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #9eb4cc;
+  flex-shrink: 0;
+}
+
+.er-card-diagram-line {
+  width: 28px;
+  height: 0;
+  border-top: 1.5px solid currentColor;
+}
+
+.er-card-mark {
+  display: block;
+  flex-shrink: 0;
+}
+
+.er-card-picker-text {
+  font-family: ui-monospace, Consolas, "Cascadia Mono", monospace;
+  font-weight: 600;
+}
+
+.er-card-picker.compact .er-card-picker-item {
+  padding: 4px 6px;
+}
+
+.er-card-picker.compact .er-card-diagram-line {
+  width: 20px;
+}
+
+.er-connect-card-panel.react-flow__panel {
+  margin-left: 42px;
+  margin-bottom: 44px;
+  padding: 6px 8px;
+  background: #121a22;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  max-height: min(320px, 42vh);
+  overflow: auto;
 }

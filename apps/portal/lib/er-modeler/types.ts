@@ -109,12 +109,13 @@ export function syncRelationsMetadata(project: ErProject): ErProject {
       const merged = { ...rel, fromColumn: cols.fromColumn, toColumn: cols.toColumn };
       const meta = inferRelationMetadata(project, merged);
       const nextId = `${rel.fromTable}:${cols.fromColumn}->${rel.toTable}:${cols.toColumn}`;
-      return normalizeRelation({
+      const oriented = orientRelation(project, {
         ...merged,
         id: nextId,
         isIdentifying: meta.isIdentifying,
-        cardinality: rel.cardinality ? normalizeCardinality(rel.cardinality) : meta.cardinality,
+        cardinality: meta.cardinality,
       });
+      return normalizeRelation(oriented);
     }),
   };
 }
@@ -335,7 +336,8 @@ export function hydrateProject(raw: ErProject): ErProject {
       })
     ),
   };
-  return syncRelationsMetadata(hydrated);
+  const synced = syncRelationsMetadata(hydrated);
+  return synced;
 }
 
 export function columnHandleId(
