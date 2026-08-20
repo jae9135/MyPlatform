@@ -1,12 +1,15 @@
 """Generate PostgreSQL DDL from table definitions."""
 
+import re
 from collections import defaultdict
 from pathlib import Path
 
 from .comments import encode_column_comment
 from .excel_parser import TableDef
 from .sample_data import build_sample_data_sql
-from .type_mapper import map_type
+from .type_mapper import format_declared_type, map_type
+
+_CONSTRAINT_LINE = re.compile(r"^(PK|FK|UK|IX)_([^(]+)\(([^)]*)\)$", re.I)
 
 
 def generate_all_ddl(tables: list[TableDef], output_dir: Path) -> list[Path]:
@@ -55,7 +58,7 @@ def _build_schema_sql(schemas: list[str]) -> str:
     return "\n".join(lines)
 
 
-def build_table_ddl(table: TableDef) -> str:
+def build_table_ddl(table: TableDef, *, declared_types: bool = False) -> str:
     """Build CREATE TABLE + COMMENT + UK/FK/INDEX statements (no schema prefix)."""
     lines = [
         f"-- Table: {table.name}",
@@ -66,15 +69,19 @@ def build_table_ddl(table: TableDef) -> str:
 
     column_lines = []
     for col in table.columns:
-        pg_type = map_type(col.data_type, col.length)
+        col_type = (
+            format_declared_type(col.data_type, col.length)
+            if declared_types
+            else map_type(col.data_type, col.length)
+        )
         nullable = "NOT NULL" if col.not_null or col.is_pk else ""
         default_sql = _default_sql(col.default_value)
-        parts = [f"    {col.name}", pg_type, nullable, default_sql]
+        parts = [f"    {col.name}", col_type, nullable, default_sql]
         column_lines.append(" ".join(p for p in parts if p))
 
-    pk_cols = table.pk_columns
-    if pk_cols:
-        pk_name = f"pk_{table.name}"
+    pk_group = _pk_group(table)
+    if pk_group:
+        pk_name, pk_cols = pk_group
         pk_cols_str = ", ".join(pk_cols)
         column_lines.append(f"    CONSTRAINT {pk_name} PRIMARY KEY ({pk_cols_str})")
 
@@ -111,7 +118,7 @@ def build_table_ddl(table: TableDef) -> str:
         if not ref:
             continue
         ref_table, ref_col = ref
-        fk_name = f"fk_{table.name}_{col.name}"[:63]
+        fk_name = _fk_constraint_name(col, table)
         lines.append(
             f"ALTER TABLE {table.name} "
             f"ADD CONSTRAINT {fk_name} "
@@ -140,6 +147,48 @@ def _default_sql(value: str | None) -> str:
     return f"DEFAULT '{_escape(text)}'"
 
 
+def _parse_index_key_line(line: str) -> tuple[str, str, list[str]] | None:
+    match = _CONSTRAINT_LINE.match(line.strip())
+    if not match:
+        return None
+    kind = match.group(1).upper()
+    name = match.group(2).strip()
+    cols = [c.strip().lower() for c in match.group(3).split(",") if c.strip()]
+    return kind, name, cols
+
+
+def _pk_group(table: TableDef) -> tuple[str, list[str]] | None:
+    pk_cols = table.pk_columns
+    if not pk_cols:
+        return None
+    name = f"pk_{table.name}"
+    for col in table.columns:
+        key = (col.index_key or "").strip()
+        if not key:
+            continue
+        parsed = _parse_index_key_line(key)
+        if parsed and parsed[0] == "PK":
+            name = _constraint_name(key, name)
+            if parsed[2]:
+                ordered = [c for c in parsed[2] if c in pk_cols]
+                if ordered:
+                    pk_cols = ordered
+            break
+    return name[:63], pk_cols
+
+
+def _fk_constraint_name(col, table: TableDef) -> str:
+    fallback = f"fk_{table.name}_{col.name}"
+    key = (col.index_key or "").strip()
+    if key:
+        parsed = _parse_index_key_line(key)
+        if parsed and parsed[0] == "FK":
+            return _constraint_name(key, fallback)
+        if key.upper().startswith("FK_"):
+            return _constraint_name(key, fallback)
+    return fallback[:63]
+
+
 def _unique_groups(table: TableDef) -> dict[str, list[str]]:
     groups: dict[str, list[str]] = {}
     for col in table.columns:
@@ -157,7 +206,10 @@ def _index_groups(table: TableDef) -> list[tuple[str, list[str], bool]]:
     unique_names: set[str] = set()
     for col in table.columns:
         key = (col.index_key or "").strip()
-        if not key or key.upper().startswith("PK_"):
+        if not key:
+            continue
+        upper = key.upper()
+        if upper.startswith("PK_") or upper.startswith("FK_"):
             continue
         name = _constraint_name(key, f"ix_{table.name}_{col.name}")
         if col.is_uk:
@@ -190,9 +242,36 @@ def _parse_fk_ref(value: str | None) -> tuple[str, str] | None:
     return table.lower(), col.lower()
 
 
+def build_all_tables_ddl(tables: list[TableDef], *, declared_types: bool = False) -> str:
+    parts = [
+        build_table_ddl(table, declared_types=declared_types)
+        for table in sorted(tables, key=lambda t: t.name)
+    ]
+    return "\n".join(parts)
+
+
+def scripts_from_tables(
+    tables: list[TableDef], *, declared_types: bool = False
+) -> list[dict[str, str]]:
+    scripts: list[dict[str, str]] = [
+        {
+            "name": "00_all_tables.sql",
+            "content": build_all_tables_ddl(tables, declared_types=declared_types),
+        }
+    ]
+    for table in sorted(tables, key=lambda t: t.name):
+        scripts.append(
+            {
+                "name": f"{table.name.upper()}.sql",
+                "content": build_table_ddl(table, declared_types=declared_types),
+            }
+        )
+    return scripts
+
+
 def scripts_by_category(scripts: list[dict]) -> dict:
     """Group script list into database, schema, table, and sample categories."""
-    grouped = {"database": "", "schema": "", "tables": [], "sample": ""}
+    grouped = {"database": "", "schema": "", "all": "", "tables": [], "sample": ""}
     for script in scripts:
         name = script["name"].lower()
         content = script["content"]
@@ -202,6 +281,8 @@ def scripts_by_category(scripts: list[dict]) -> dict:
             grouped["schema"] = content
         elif name.startswith("99_sample"):
             grouped["sample"] = content
+        elif name == "00_all_tables.sql":
+            grouped["all"] = content
         elif not name.startswith("00_") and not name.startswith("01_") and not name.startswith("99_"):
             grouped["tables"].append({"name": script["name"], "content": content})
     return grouped

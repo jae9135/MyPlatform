@@ -37,6 +37,8 @@ SHEET_HINTS = (
 
 INSTRUCTION_MARKERS = ("[작성", "작성 방법", "작성 사례", "입력 (*", "입력\n", "아래의")
 
+_CONSTRAINT_LINE = re.compile(r"^(PK|FK|UK|IX)_([^(]+)\(([^)]*)\)$", re.I)
+
 LABEL_TO_FIELD: dict[str, str] = {
     "no": "no",
     "번호": "no",
@@ -52,6 +54,8 @@ LABEL_TO_FIELD: dict[str, str] = {
     "type": "data_type",
     "데이터길이": "data_length",
     "길이": "data_length",
+    "length": "data_length",
+    "datalength": "data_length",
     "notnull여부": "not_null",
     "null여부": "nullable",
     "pk여부": "pk",
@@ -99,6 +103,9 @@ class ParseMeta:
     sheet_name: str
     format: str  # flat | block
     tables: list[TableDef]
+    system_name: str = ""
+    created_date: str = ""
+    author: str = ""
 
 
 def parse_excel(
@@ -115,13 +122,22 @@ def parse_excel_with_meta(
     resolved = resolve_sheet(wb, sheet_name)
     ws = wb[resolved]
     tables, fmt = _parse_worksheet(ws)
+    system_name = _read_system_name(ws, fmt)
+    created_date, author = _read_doc_meta(ws, fmt)
     wb.close()
     if not tables:
         raise ValueError(
             f"시트 '{resolved}'에서 테이블/컬럼 정의를 찾지 못했습니다. "
             "지원 양식: 목록형(테이블정의서) 또는 블록형(테이블 정의서/테이블명세서)."
         )
-    return ParseMeta(sheet_name=resolved, format=fmt, tables=tables)
+    return ParseMeta(
+        sheet_name=resolved,
+        format=fmt,
+        tables=tables,
+        system_name=system_name,
+        created_date=created_date,
+        author=author,
+    )
 
 
 def resolve_sheet(wb, sheet_name: str | None) -> str:
@@ -246,6 +262,11 @@ def _parse_flat(ws, header_row: int, col_map: dict[str, int]) -> list[TableDef]:
         pk_val = _cell(ws, row, pk_col) if pk_col else None
         key_val = _cell(ws, row, key_col) if key_col else None
         fk_val = _cell(ws, row, fk_col) if fk_col else None
+        is_pk, is_fk = _parse_key_flags(key_val, pk_val, fk_val)
+        dtype, dlen = _split_excel_type(
+            data_type,
+            _parse_length(_effective_cell(ws, row, col_map.get("data_length", COL_DATA_LENGTH))),
+        )
 
         tables[table_key].columns.append(
             ColumnDef(
@@ -253,14 +274,12 @@ def _parse_flat(ws, header_row: int, col_map: dict[str, int]) -> list[TableDef]:
                 korean_name=str(
                     _cell(ws, row, col_map.get("column_ko", COL_COLUMN_KO)) or column_name
                 ).strip(),
-                data_type=str(data_type or "").strip(),
-                length=_parse_length(
-                    _cell(ws, row, col_map.get("data_length", COL_DATA_LENGTH))
-                ),
-                not_null=not_null or _parse_pk(key_val, pk_val),
-                is_pk=_parse_pk(key_val, pk_val),
+                data_type=dtype,
+                length=dlen,
+                not_null=not_null or is_pk,
+                is_pk=is_pk,
                 comment=_optional_str(_cell(ws, row, comment_col)),
-                is_fk=_is_fk(fk_val) or str(key_val or "").strip().upper() == "FK",
+                is_fk=is_fk,
                 fk_ref=_fk_ref(fk_val),
                 index_key=_index_key(_cell(ws, row, index_col)),
                 is_uk=_is_uk(_cell(ws, row, index_col)),
@@ -306,21 +325,31 @@ def _parse_block(ws) -> list[TableDef]:
                 korean_name=str(table_ko or table_key).strip(),
             )
 
+        index_key_parts: list[str] = []
         while data_row <= max_row:
-            marker = str(_cell(ws, data_row, 1) or "").strip()
+            marker = str(_effective_cell(ws, data_row, 1) or "").strip()
             if _is_table_meta_row(ws, data_row):
                 break
-            if marker in ("Index Key", "업무규칙", "테이블 정의서", "테이블정의서"):
+            if marker == "Index Key" or (
+                not marker
+                and _looks_like_constraint(_read_block_index_key_value(ws, data_row))
+            ):
+                val = _read_block_index_key_value(ws, data_row)
+                if val:
+                    index_key_parts.append(val)
                 data_row += 1
                 continue
+            if marker in ("업무규칙", "테이블 정의서", "테이블정의서"):
+                data_row += 1
+                break
 
-            column_name = _cell(ws, data_row, col_map.get("column_en", 2))
+            column_name = _effective_cell(ws, data_row, col_map.get("column_en", 2))
             if not column_name or _is_instruction_text(column_name):
                 data_row += 1
                 continue
 
-            column_ko = _cell(ws, data_row, col_map.get("column_ko", 4))
-            data_type = _cell(ws, data_row, col_map.get("data_type", 5))
+            column_ko = _effective_cell(ws, data_row, col_map.get("column_ko", 4))
+            data_type = _effective_cell(ws, data_row, col_map.get("data_type", 5))
             if not data_type or _is_instruction_text(data_type):
                 data_row += 1
                 continue
@@ -333,10 +362,6 @@ def _parse_block(ws) -> list[TableDef]:
             comment_col = col_map.get("comment")
             default_col = col_map.get("default")
 
-            key_val = _cell(ws, data_row, key_col) if key_col else None
-            pk_val = _cell(ws, data_row, pk_col) if pk_col else None
-            fk_val = _cell(ws, data_row, fk_col) if fk_col else None
-
             not_null = False
             if nullable_col:
                 not_null = _parse_not_null("nullable", _cell(ws, data_row, nullable_col))
@@ -345,20 +370,29 @@ def _parse_block(ws) -> list[TableDef]:
                     "not_null", _cell(ws, data_row, not_null_col)
                 )
 
+            key_val = _effective_cell(ws, data_row, key_col) if key_col else None
+            pk_val = _effective_cell(ws, data_row, pk_col) if pk_col else None
+            fk_val = _effective_cell(ws, data_row, fk_col) if fk_col else None
+            is_pk, is_fk = _parse_key_flags(key_val, pk_val, fk_val)
+            dtype, dlen = _split_excel_type(
+                data_type,
+                _parse_length(
+                    _effective_cell(ws, data_row, col_map.get("data_length", 6))
+                ),
+            )
+
             tables[table_key].columns.append(
                 ColumnDef(
                     name=str(column_name).strip().lower(),
                     korean_name=str(column_ko or column_name).strip(),
-                    data_type=str(data_type).strip(),
-                    length=_parse_length(
-                        _cell(ws, data_row, col_map.get("data_length", 6))
-                    ),
-                    not_null=not_null or _parse_pk(key_val, pk_val),
-                    is_pk=_parse_pk(key_val, pk_val),
+                    data_type=dtype,
+                    length=dlen,
+                    not_null=not_null or is_pk,
+                    is_pk=is_pk,
                     comment=_optional_str(
                         _cell(ws, data_row, comment_col) if comment_col else None
                     ),
-                    is_fk=_is_fk(fk_val) or str(key_val or "").strip().upper() == "FK",
+                    is_fk=is_fk,
                     fk_ref=_fk_ref(fk_val),
                     index_key=None,
                     is_uk=False,
@@ -369,8 +403,13 @@ def _parse_block(ws) -> list[TableDef]:
             )
             data_row += 1
 
+        if index_key_parts:
+            _apply_index_key_constraints(
+                tables[table_key], "\n".join(index_key_parts), tables
+            )
         row = data_row
 
+    _infer_missing_fk_refs(tables)
     return list(tables.values())
 
 
@@ -396,11 +435,11 @@ def _score_design_sheet(ws) -> int:
 def _map_header_row(ws, row: int) -> dict[str, int]:
     mapping: dict[str, int] = {}
     for col in range(1, (ws.max_column or 0) + 1):
-        label = normalize_label(ws.cell(row, col).value)
+        label = normalize_label(_effective_cell(ws, row, col))
         if not label:
             continue
         field = LABEL_TO_FIELD.get(label)
-        if field:
+        if field and field not in mapping:
             mapping[field] = col
     return mapping
 
@@ -414,6 +453,88 @@ def _is_table_meta_row(ws, row: int) -> bool:
 def _is_block_column_header(ws, row: int) -> bool:
     col_map = _map_header_row(ws, row)
     return "column_en" in col_map and "column_ko" in col_map and "data_type" in col_map
+
+
+def _read_system_name(ws, fmt: str) -> str:
+    return _read_labeled_meta(ws, fmt, {"시스템명", "모듈시스템명"})
+
+
+def _read_doc_meta(ws, fmt: str) -> tuple[str, str]:
+    created = _read_labeled_meta(ws, fmt, {"작성일", "작성일자"})
+    author = _read_labeled_meta(ws, fmt, {"작성자", "작성자명"})
+    return _format_meta_date(created), author
+
+
+def _format_meta_date(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    match = re.match(r"^(\d{4})[./-](\d{1,2})[./-](\d{1,2})", text)
+    if match:
+        return f"{match.group(1)}-{int(match.group(2)):02d}-{int(match.group(3)):02d}"
+    return text
+
+
+def _read_labeled_meta(ws, fmt: str, labels: set[str]) -> str:
+    max_col = ws.max_column or 1
+    if fmt == "block":
+        last = min(8, ws.max_row or 1)
+        for row in range(1, last + 1):
+            if _is_table_meta_row(ws, row):
+                last = max(1, row - 1)
+                break
+    else:
+        header = _find_flat_header(ws)
+        last = header[0] if header else min(12, ws.max_row or 1)
+    for row in range(1, last + 1):
+        for col in range(1, max_col + 1):
+            if normalize_label(_effective_cell(ws, row, col)) not in labels:
+                continue
+            for c in range(col + 1, min(col + 8, max_col + 1)):
+                val = _effective_cell(ws, row, c)
+                if val in (None, "") or _is_instruction_text(val):
+                    continue
+                if normalize_label(val) in {
+                    "시스템명",
+                    "모듈시스템명",
+                    "작성일",
+                    "작성일자",
+                    "작성자",
+                    "작성자명",
+                }:
+                    continue
+                if hasattr(val, "strftime"):
+                    return val.strftime("%Y-%m-%d")
+                return str(val).strip()
+    if fmt == "block":
+        max_row = ws.max_row or 0
+        for row in range(1, max_row + 1):
+            if not _is_table_meta_row(ws, row):
+                continue
+            name = _read_module_labeled(ws, row, labels)
+            if name:
+                return name
+    return ""
+
+
+def _read_module_labeled(ws, table_meta_row: int, labels: set[str]) -> str:
+    module_row = table_meta_row - 1
+    if module_row < 1:
+        return ""
+    max_col = ws.max_column or 1
+    for col in range(1, max_col + 1):
+        if normalize_label(_effective_cell(ws, module_row, col)) not in labels:
+            continue
+        for c in range(col + 1, min(col + 8, max_col + 1)):
+            val = _effective_cell(ws, module_row, c)
+            if val in (None, "") or _is_instruction_text(val):
+                continue
+            if normalize_label(val) in labels:
+                continue
+            if hasattr(val, "strftime"):
+                return val.strftime("%Y-%m-%d")
+            return str(val).strip()
+    return ""
 
 
 def _read_module_name(ws, table_meta_row: int) -> str | None:
@@ -450,17 +571,51 @@ def _cell(ws, row: int, col: int | None):
     return ws.cell(row, col).value
 
 
+def _effective_cell(ws, row: int, col: int | None):
+    if not col:
+        return None
+    for rng in ws.merged_cells.ranges:
+        if rng.min_row <= row <= rng.max_row and rng.min_col <= col <= rng.max_col:
+            return ws.cell(rng.min_row, rng.min_col).value
+    return ws.cell(row, col).value
+
+
+def _looks_like_constraint(value) -> bool:
+    text = str(value or "").strip()
+    return bool(re.match(r"^(PK|FK|UK|IX)_", text, re.I))
+
+
 def _normalize_identifier(value: str) -> str:
     return str(value).strip().lower()
 
 
 def _parse_length(value) -> int | None:
-    if value is None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip().replace(",", "")
+    if not text or text in ("-", "/", "None", "NONE"):
+        return None
+    match = re.search(r"(\d+)", text)
+    if not match:
         return None
     try:
-        return int(value)
+        return int(match.group(1))
     except (TypeError, ValueError):
         return None
+
+
+def _split_excel_type(data_type, length: int | None) -> tuple[str, int | None]:
+    text = str(data_type or "").strip()
+    packed = re.match(r"^([A-Za-z][A-Za-z0-9_]+)\s*\(\s*(\d+)\s*\)\s*$", text)
+    if packed:
+        name = packed.group(1).upper()
+        packed_len = int(packed.group(2))
+        return name, length if length else packed_len
+    return text, length
 
 
 def _parse_not_null(kind: str, value) -> bool:
@@ -473,9 +628,157 @@ def _parse_not_null(kind: str, value) -> bool:
 
 
 def _parse_pk(key_val, pk_val) -> bool:
-    if str(key_val or "").strip().upper() == "PK":
-        return True
-    return _is_yes(pk_val)
+    is_pk, _ = _parse_key_flags(key_val, pk_val, None)
+    return is_pk
+
+
+def _parse_key_flags(key_val, pk_val, fk_val) -> tuple[bool, bool]:
+    text = str(key_val or "").upper()
+    tokens = set(re.findall(r"PK|FK|UK", text))
+    is_pk = "PK" in tokens or _is_yes(pk_val)
+    is_fk = "FK" in tokens or _is_fk(fk_val)
+    return is_pk, is_fk
+
+
+def _read_block_index_key_value(ws, row: int) -> str | None:
+    value_col = 3
+    for col in range(2, (ws.max_column or 0) + 1):
+        if _cell(ws, row, col) not in (None, ""):
+            value_col = col
+            break
+    return _optional_str(_cell(ws, row, value_col))
+
+
+def _split_index_key_text(text: str) -> list[str]:
+    lines: list[str] = []
+    for line in str(text or "").replace("\r\n", "\n").split("\n"):
+        for part in line.split(";"):
+            chunk = part.strip()
+            if chunk:
+                lines.append(chunk)
+    return lines
+
+
+def _parse_constraint_line(line: str) -> tuple[str, str, list[str]] | None:
+    match = _CONSTRAINT_LINE.match(line.strip())
+    if not match:
+        return None
+    kind = match.group(1).upper()
+    name = match.group(2).strip()
+    cols = [c.strip().lower() for c in match.group(3).split(",") if c.strip()]
+    return kind, name, cols
+
+
+def _resolve_column_name(table: TableDef, raw: str) -> str | None:
+    want = raw.strip().lower()
+    names = [c.name for c in table.columns]
+    if want in names:
+        return want
+    for name in names:
+        if name.replace("_", "") == want.replace("_", ""):
+            return name
+    for name in names:
+        if want in name or name in want:
+            return name
+    return None
+
+
+def _find_table_by_token(token: str, tables: dict[str, TableDef]) -> TableDef | None:
+    needle = token.strip().lower()
+    for key, table in tables.items():
+        if key.lower() == needle or table.name == needle:
+            return table
+    return None
+
+
+def _infer_fk_parent_table(
+    constraint_name: str, child_table: TableDef, tables: dict[str, TableDef]
+) -> TableDef | None:
+    body = constraint_name.strip()
+    if body.upper().startswith("FK_"):
+        body = body[3:]
+    child_up = child_table.name.upper().replace("-", "_")
+    body_up = body.upper()
+    if body_up.startswith(child_up + "_"):
+        parent_token = body[len(child_up) + 1 :]
+        parent = _find_table_by_token(parent_token.split("_")[0], tables)
+        if parent:
+            return parent
+        parent = _find_table_by_token(parent_token, tables)
+        if parent:
+            return parent
+    if "_" in body:
+        parent = _find_table_by_token(body.split("_")[-1], tables)
+        if parent:
+            return parent
+    return None
+
+
+def _build_fk_ref(parent_table: TableDef, fk_col: str) -> str:
+    parent_cols = {c.name for c in parent_table.columns}
+    if fk_col in parent_cols:
+        return f"{parent_table.name}({fk_col})"
+    pk_cols = parent_table.pk_columns
+    if pk_cols:
+        return f"{parent_table.name}({pk_cols[0]})"
+    return f"{parent_table.name}({fk_col})"
+
+
+def _apply_index_key_constraints(
+    table: TableDef, text: str, tables: dict[str, TableDef]
+) -> None:
+    by_name = {c.name: c for c in table.columns}
+    for line in _split_index_key_text(text):
+        parsed = _parse_constraint_line(line)
+        if not parsed:
+            continue
+        kind, name, raw_cols = parsed
+        resolved_cols = [_resolve_column_name(table, col) for col in raw_cols]
+        resolved_cols = [col for col in resolved_cols if col]
+        if kind == "PK":
+            for col_name in resolved_cols:
+                col = by_name.get(col_name)
+                if not col:
+                    continue
+                col.is_pk = True
+                col.not_null = True
+                if not col.index_key:
+                    col.index_key = line
+        elif kind == "FK":
+            parent = _infer_fk_parent_table(name, table, tables)
+            target_cols = resolved_cols or list(by_name.keys())
+            for col_name in target_cols:
+                col = by_name.get(col_name)
+                if not col:
+                    continue
+                col.is_fk = True
+                if parent:
+                    col.fk_ref = _build_fk_ref(parent, col_name)
+                if col.index_key and col.index_key != line:
+                    col.index_key = f"{col.index_key}\n{line}"
+                else:
+                    col.index_key = line
+        elif kind == "UK":
+            for col_name in resolved_cols:
+                col = by_name.get(col_name)
+                if not col:
+                    continue
+                col.is_uk = True
+                col.index_key = line
+
+
+def _infer_missing_fk_refs(tables: dict[str, TableDef]) -> None:
+    for table in tables.values():
+        for col in table.columns:
+            if not col.is_fk or col.fk_ref:
+                continue
+            if not col.name.endswith("_id"):
+                continue
+            candidate = col.name[:-3]
+            parent = _find_table_by_token(candidate, tables)
+            if not parent:
+                continue
+            col.fk_ref = _build_fk_ref(parent, col.name)
 
 
 def _is_yes(value) -> bool:

@@ -28,6 +28,14 @@ export const APPS: PlatformApp[] = [
     category: "db-std",
   },
   {
+    id: "er-modeler",
+    name: "ER Modeler",
+    description: "테이블정의서 → ERD 편집 → 설계서 내보내기",
+    status: "beta",
+    href: "/apps/er-modeler",
+    category: "db-std",
+  },
+  {
     id: "deliverable-manager",
     name: "DeliverableManager",
     description: "산출물 목록 조회 (공개 테스트 껍데기)",

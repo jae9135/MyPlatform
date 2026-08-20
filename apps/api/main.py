@@ -78,7 +78,17 @@ class ApplyAlterBody(BaseModel):
     include_caution: bool = Field(
         False, description="Allow ALTER COLUMN / ADD COLUMN NOT NULL"
     )
-    dry_run: bool = Field(False, description="Validate only; do not execute")
+
+
+class ErImportSqlBody(BaseModel):
+    sql: str = Field(..., description="CREATE TABLE / ALTER / COMMENT SQL")
+    filename: str | None = Field(None, description="Optional source file name")
+    db_name: str | None = Field(None, description="Fallback DB name")
+    schema_name: str | None = Field(
+        None, alias="schema", description="Fallback schema name"
+    )
+
+    model_config = {"populate_by_name": True}
 
 
 class DataRowBody(BaseModel):
@@ -158,6 +168,7 @@ def health() -> dict:
             for s in DBMANAGER_SAMPLE_CATALOG
             if (DBMANAGER_SAMPLES_DIR / s["filename"]).exists()
         ),
+        "er_export": "v4-index-key-box",
     }
 
 
@@ -190,6 +201,19 @@ def _load_dbmanager():
         )
     _ensure_api_path()
     import dbmanager.service as svc  # type: ignore
+
+    return svc
+
+
+def _load_er_modeler():
+    service_py = APP_DIR / "er_modeler" / "service.py"
+    if not service_py.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="ER Modeler 소스를 찾을 수 없습니다.",
+        )
+    _ensure_api_path()
+    import er_modeler.service as svc  # type: ignore
 
     return svc
 
@@ -814,6 +838,124 @@ async def dbmanager_export_design(
             "Content-Disposition": f'attachment; filename="{fname}"',
             "X-Table-Count": str(len(db_tables)),
             "X-Db-Target": dbc.masked_target(),
+        },
+    )
+
+
+@app.post("/v1/er-modeler/import")
+async def er_modeler_import(
+    design: UploadFile = File(...),
+    sheet: str = Form(""),
+) -> dict:
+    """테이블정의서 Excel → ERD 모델 JSON (테이블·컬럼·FK 관계)."""
+    raw = await design.read()
+    if not raw:
+        raise HTTPException(400, detail="empty design file")
+
+    svc = _load_er_modeler()
+    sheet_name = sheet.strip() or None
+    try:
+        payload = svc.import_design_from_upload(raw, sheet_name=sheet_name)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return {
+        **payload,
+        "source_filename": design.filename or "design.xlsx",
+    }
+
+
+@app.post("/v1/er-modeler/import-sql")
+async def er_modeler_import_sql(body: ErImportSqlBody) -> dict:
+    """CREATE TABLE / ALTER TABLE / COMMENT SQL → ERD 모델 JSON."""
+    sql = (body.sql or "").strip()
+    if not sql:
+        raise HTTPException(400, detail="empty sql")
+
+    svc = _load_er_modeler()
+    try:
+        payload = svc.import_design_from_sql(
+            sql,
+            db_name=body.db_name,
+            schema=body.schema_name,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return {
+        **payload,
+        "source_filename": body.filename or "script.sql",
+    }
+
+
+@app.post("/v1/er-modeler/export")
+async def er_modeler_export(
+    model: str = Form(...),
+    design: UploadFile = File(...),
+    sheet: str = Form(""),
+):
+    """ERD 모델 JSON + 양식 Excel → 테이블정의서 다운로드."""
+    template_bytes = await design.read()
+    if not template_bytes:
+        raise HTTPException(400, detail="empty design template file")
+
+    svc = _load_er_modeler()
+    sheet_name = sheet.strip() or None
+    try:
+        parsed = svc.parse_model_json(model)
+        data, fname = svc.export_model_to_excel_bytes(
+            parsed,
+            template_bytes,
+            sheet_name=sheet_name,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=(
+            "application/vnd.openxmlformats-officedocument"
+            ".spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": f'attachment; filename="{fname}"',
+            "X-Table-Count": str(len(parsed.get("tables") or [])),
+        },
+    )
+
+
+@app.post("/v1/er-modeler/generate")
+async def er_modeler_generate(
+    model: str = Form(...),
+    format: str = Form("zip"),
+):
+    """ERD 모델 JSON → PostgreSQL DDL (Index Key 기반 PK/FK/UK/INDEX 포함)."""
+    fmt = (format or "zip").lower().strip()
+    if fmt not in ("json", "zip"):
+        raise HTTPException(400, detail="format must be json|zip")
+
+    svc = _load_er_modeler()
+    try:
+        parsed = svc.parse_model_json(model)
+        result = svc.generate_scripts_from_model(parsed)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    if fmt == "json":
+        return JSONResponse(result)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for script in result["scripts"]:
+            zf.writestr(script["name"], script["content"])
+    buf.seek(0)
+
+    schema = result.get("schema") or "db1"
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="er_modeler_{schema}_ddl.zip"'
         },
     )
 

@@ -10,11 +10,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function upstreamBase(): string {
-  return (
-    process.env.API_BASE_URL?.replace(/\/$/, "") ||
-    process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
-    "http://127.0.0.1:8000"
-  );
+  const fromEnv =
+    process.env.API_UPSTREAM_URL?.trim() ||
+    process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  return "http://127.0.0.1:8001";
 }
 
 async function isAuthed(req: NextRequest): Promise<boolean> {
@@ -53,7 +53,22 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
     init.body = await req.arrayBuffer();
   }
 
-  const res = await fetch(target, init);
+  let res: Response;
+  try {
+    res = await fetch(target, init);
+  } catch (e) {
+    const cause =
+      e instanceof Error && "cause" in e ? (e as Error & { cause?: unknown }).cause : e;
+    const refused =
+      cause &&
+      typeof cause === "object" &&
+      "code" in cause &&
+      (cause as { code?: string }).code === "ECONNREFUSED";
+    const detail = refused
+      ? `API 서버에 연결할 수 없습니다 (${upstreamBase()}). 터미널에서 API를 실행했는지 확인하세요.`
+      : "API 요청에 실패했습니다.";
+    return NextResponse.json({ detail }, { status: 503 });
+  }
   const outHeaders = new Headers();
   for (const name of ["content-type", "content-disposition", "cache-control"]) {
     const v = res.headers.get(name);
