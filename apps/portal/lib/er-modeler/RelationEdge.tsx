@@ -114,22 +114,22 @@ function snapToNodeBorder(
   y: number
 ): Point {
   if (!node) return { x, y };
-  const left = node.internals?.positionAbsolute?.x ?? 0;
   const top = node.internals?.positionAbsolute?.y ?? 0;
-  const w = node.measured?.width ?? node.width ?? 240;
-  const h = node.measured?.height ?? node.height ?? 80;
+  const left = node.internals?.positionAbsolute?.x ?? 0;
+  const w = node.width ?? node.measured?.width ?? 240;
+  const h = node.height ?? node.measured?.height ?? 80;
   const pad = 8;
   const s = side || "R";
-  if (s === "L") {
-    return { x: left, y: Math.max(top + pad, Math.min(top + h - pad, y)) };
-  }
-  if (s === "R") {
-    return { x: left + w, y: Math.max(top + pad, Math.min(top + h - pad, y)) };
+  if (s === "L" || s === "R") {
+    return {
+      x,
+      y: Math.max(top + pad, Math.min(top + h - pad, y)),
+    };
   }
   if (s === "T") {
-    return { x: Math.max(left + pad, Math.min(left + w - pad, x)), y: top };
+    return { x: Math.max(left + pad, Math.min(left + w - pad, x)), y };
   }
-  return { x: Math.max(left + pad, Math.min(left + w - pad, x)), y: top + h };
+  return { x: Math.max(left + pad, Math.min(left + w - pad, x)), y };
 }
 
 function buildPoints(

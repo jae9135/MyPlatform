@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { DraggableModal } from "./DraggableModal";
+import type { RunProgress } from "./ImportDialog";
 
 export type ExportKind = "excel" | "script";
 export type ExportScope = "all" | "selected";
@@ -17,11 +18,13 @@ type Props = {
   open: boolean;
   busy: boolean;
   progress?: string;
+  exportProgress?: RunProgress | null;
   tableCount: number;
   selectedCount: number;
   templateName: string;
   scriptResult: ScriptExportResult | null;
   onClose: () => void;
+  onCancel?: () => void;
   onExportExcel: (scope: ExportScope, templateFile?: File) => void;
   onGenerateScript: (scope: ExportScope) => void;
   onClearScript: () => void;
@@ -98,11 +101,13 @@ export function ExportDialog({
   open,
   busy,
   progress,
+  exportProgress,
   tableCount,
   selectedCount,
   templateName,
   scriptResult,
   onClose,
+  onCancel,
   onExportExcel,
   onGenerateScript,
   onClearScript,
@@ -169,14 +174,41 @@ export function ExportDialog({
           : "형식과 범위를 고른 뒤 내보냅니다."
       }
       onClose={onClose}
+      onCancel={onCancel}
       className={`er-import-modal${showPreview ? " er-export-wide" : ""}`}
       width={showPreview ? 720 : 420}
     >
         {busy ? (
-          <div className="er-progress-inline">
-            <span className="er-progress-dot" />
-            <span>{progress || "처리 중…"}</span>
-          </div>
+          exportProgress ? (
+            <div className="er-run-progress">
+              <div
+                className="er-progress-bar"
+                role="progressbar"
+                aria-valuenow={Math.round(exportProgress.pct)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className="er-progress-fill"
+                  style={{ width: `${exportProgress.pct}%` }}
+                />
+              </div>
+              <p className="hint">
+                {exportProgress.label} · {Math.round(exportProgress.pct)}% · 경과{" "}
+                {exportProgress.elapsedSec}초
+                {exportProgress.etaSec != null && exportProgress.etaSec > 0
+                  ? ` · 약 ${exportProgress.etaSec}초 남음`
+                  : exportProgress.pct >= 95
+                    ? " · 거의 완료…"
+                    : ""}
+              </p>
+            </div>
+          ) : (
+            <div className="er-progress-inline">
+              <span className="er-progress-dot" />
+              <span>{progress || "처리 중…"}</span>
+            </div>
+          )
         ) : null}
 
         <div className="er-choice-group">

@@ -10,14 +10,32 @@ import {
 } from "./types";
 
 const NODE_WIDTH = 300;
-const HEADER_HEIGHT = 44;
-const ROW_HEIGHT = 26;
-const PADDING = 12;
+const HEADER_HEIGHT = 48;
+const ROW_HEIGHT = 28;
+const PADDING = 16;
 const MIN_TABLE_WIDTH = 160;
+const KEY_COL_MIN = 52;
+const COL_GAP = 8;
+const ROW_PAD_X = 12;
 let measureCanvas: HTMLCanvasElement | null = null;
 
-export function tableNodeHeight(columnCount: number): number {
-  return HEADER_HEIGHT + columnCount * ROW_HEIGHT + PADDING;
+function keyColumnWidth(col: ErColumn): number {
+  const badges: string[] = [];
+  if (col.isPk) badges.push("PK");
+  if (col.isFk) badges.push("FK");
+  const label = badges.join(" ") || " ";
+  return Math.max(
+    KEY_COL_MIN,
+    measureText(label, "700 10px system-ui, sans-serif") + 6
+  );
+}
+
+export function tableNodeHeight(
+  columnCount: number,
+  options?: { addColumnRow?: boolean }
+): number {
+  const addRow = options?.addColumnRow ? ROW_HEIGHT : 0;
+  return HEADER_HEIGHT + columnCount * ROW_HEIGHT + addRow + PADDING;
 }
 
 function measureText(text: string, font: string): number {
@@ -38,6 +56,7 @@ export function tableNodeWidth(
   const title = formatTableTitle(table.name, table.koreanName, mode);
   let width = measureText(title, "600 13.2px system-ui, sans-serif") + 28;
   for (const col of table.columns) {
+    const keyW = keyColumnWidth(col);
     const idW = measureText(col.name, "12.5px ui-monospace, Consolas, monospace");
     const koW =
       mode === "en"
@@ -48,8 +67,10 @@ export function tableNodeWidth(
       "11.5px ui-monospace, Consolas, monospace"
     );
     const nameW = mode === "ko" ? koW : idW;
-    const extraKo = mode === "both" ? koW + 10 : 0;
-    const row = 8 + 52 + 8 + nameW + extraKo + typeW + 4;
+    const gapCount = mode === "both" ? 3 : 2;
+    const colsW =
+      mode === "both" ? nameW + koW + typeW : nameW + typeW;
+    const row = ROW_PAD_X + keyW + COL_GAP * gapCount + colsW + 12;
     width = Math.max(width, row);
   }
   return Math.ceil(Math.max(MIN_TABLE_WIDTH, width));

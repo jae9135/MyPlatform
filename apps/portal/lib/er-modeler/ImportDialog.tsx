@@ -15,12 +15,16 @@ export type ImportProgress = {
   label: string;
 };
 
+/** 가져오기/내보내기 공통 진행 상태 */
+export type RunProgress = ImportProgress;
+
 type Props = {
   open: boolean;
   busy: boolean;
   progress?: string;
   importProgress?: ImportProgress | null;
   onClose: () => void;
+  onCancel?: () => void;
   onImportExcel: (file: File, mode: ImportMode) => void;
   onImportSql: (sql: string, filename: string, mode: ImportMode) => void;
 };
@@ -31,6 +35,7 @@ export function ImportDialog({
   progress,
   importProgress,
   onClose,
+  onCancel,
   onImportExcel,
   onImportSql,
 }: Props) {
@@ -54,6 +59,7 @@ export function ImportDialog({
         </>
       }
       onClose={onClose}
+      onCancel={onCancel}
       className="er-import-modal"
       width={420}
     >

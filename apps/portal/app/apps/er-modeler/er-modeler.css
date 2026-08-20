@@ -244,7 +244,15 @@
   color: var(--muted);
 }
 
+.er-table-node-shell {
+  position: relative;
+  display: inline-block;
+  width: max-content;
+  overflow: visible;
+}
+
 .er-table-node {
+  box-sizing: border-box;
   width: max-content;
   min-width: 0;
   max-width: none;
@@ -260,7 +268,12 @@
 }
 
 .react-flow__node-erTable {
-  overflow: visible;
+  overflow: visible !important;
+  height: auto !important;
+}
+
+.react-flow__node-erTable.selectable {
+  overflow: visible !important;
 }
 
 .er-table-node.selected {
@@ -284,6 +297,7 @@
   position: relative;
   display: grid;
   grid-template-columns: 52px max-content max-content;
+  overflow: visible;
 }
 
 .er-table-node-body.er-cols-both {
@@ -297,20 +311,15 @@
   align-items: center;
   column-gap: 8px;
   padding: 0 4px 0 8px;
+  min-height: 28px;
   border-bottom: 1px solid #1e2834;
   position: relative;
+  overflow: visible;
   cursor: grab;
 }
 
 .er-table-node-body.er-cols-both .er-table-node-row {
   grid-template-columns: 52px max-content max-content max-content;
-}
-
-@supports (grid-template-columns: subgrid) {
-  .er-table-node-row,
-  .er-table-node-body.er-cols-both .er-table-node-row {
-    grid-template-columns: subgrid;
-  }
 }
 
 .er-table-node > .er-handle-edge.er-handle-left,
@@ -746,14 +755,18 @@
 
 .er-row-actions,
 .er-header-actions {
-  position: absolute;
-  left: calc(100% + 4px);
-  top: 50%;
-  transform: translateY(-50%);
   display: flex;
   gap: 3px;
   z-index: 12;
   pointer-events: auto;
+  white-space: nowrap;
+}
+
+.er-row-actions-floating {
+  position: absolute;
+  left: calc(100% + 4px);
+  right: auto;
+  transform: translateY(-50%);
 }
 
 .er-row-action {
@@ -785,6 +798,7 @@
   justify-content: center;
   grid-column: 1 / -1;
   width: 100%;
+  min-height: 28px;
   border: none;
   border-top: 1px dashed #2a3544;
   background: transparent;

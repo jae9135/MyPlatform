@@ -259,9 +259,48 @@ export function parseDataType(
   return { dataType, length: length ?? null };
 }
 
-export function normalizeColumn(raw: Partial<ErColumn> & { name: string }): ErColumn {
+const SQL_TYPE_PREFIX =
+  /^(VARCHAR2?|CHAR|NCHAR|NVARCHAR2?|NUMBER|NUMERIC|DECIMAL|INT(?:EGER)?|BIGINT|SMALLINT|FLOAT|DOUBLE|DATE|TIME(?:STAMP)?|CLOB|NCLOB|BLOB|RAW|BOOLEAN|BOOL|TEXT)/i;
+
+function normalizeMetaLabel(value: string): string {
+  return value.replace(/\s+/g, "").replace(/[()]/g, "").toLowerCase();
+}
+
+const MODULE_META_LABELS = new Set([
+  "모듈시스템명",
+  "시스템명",
+  "module",
+]);
+
+export function isModuleMetaColumn(
+  col: Pick<ErColumn, "name" | "koreanName" | "dataType" | "isPk" | "isFk">
+): boolean {
+  if (col.isPk || col.isFk) return false;
+  for (const raw of [col.name, col.koreanName]) {
+    const label = normalizeMetaLabel(raw || "");
+    if (!label) continue;
+    if (MODULE_META_LABELS.has(label)) return true;
+    if (label.includes("모듈") && label.includes("시스템")) return true;
+  }
+  const dt = (col.dataType || "").trim();
+  if (dt && !SQL_TYPE_PREFIX.test(dt)) {
+    const nameLabel = normalizeMetaLabel(col.name || "");
+    const koLabel = normalizeMetaLabel(col.koreanName || "");
+    if (
+      MODULE_META_LABELS.has(nameLabel) ||
+      MODULE_META_LABELS.has(koLabel) ||
+      nameLabel.includes("모듈") ||
+      koLabel.includes("모듈")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function normalizeColumn(raw: Partial<ErColumn> & { name: string }): ErColumn | null {
   const parsed = parseDataType(raw.dataType || "VARCHAR2", raw.length ?? null);
-  return {
+  const col: ErColumn = {
     name: raw.name.trim().toLowerCase(),
     koreanName: (raw.koreanName || "").trim(),
     dataType: parsed.dataType,
@@ -275,6 +314,7 @@ export function normalizeColumn(raw: Partial<ErColumn> & { name: string }): ErCo
     isUk: Boolean(raw.isUk),
     defaultValue: raw.defaultValue ?? null,
   };
+  return isModuleMetaColumn(col) ? null : col;
 }
 
 export function normalizeTable(raw: Partial<ErTable> & { name: string }): ErTable {
@@ -283,9 +323,9 @@ export function normalizeTable(raw: Partial<ErTable> & { name: string }): ErTabl
     id: raw.id || name,
     name,
     koreanName: (raw.koreanName || "").trim(),
-    columns: (raw.columns || []).map((c) =>
-      normalizeColumn({ ...c, name: c.name || "col" })
-    ),
+    columns: (raw.columns || [])
+      .map((c) => normalizeColumn({ ...c, name: c.name || "col" }))
+      .filter((c): c is ErColumn => c !== null),
     position: raw.position || { x: 0, y: 0 },
   };
 }

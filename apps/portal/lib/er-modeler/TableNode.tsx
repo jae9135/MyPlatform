@@ -1,7 +1,7 @@
 "use client";
 
-import { memo } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { memo, useEffect, useRef } from "react";
+import { Handle, Position, useReactFlow, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 
 import {
   EDGE_COLUMN,
@@ -12,7 +12,8 @@ import {
   type ErColumn,
   type NameDisplayMode,
 } from "./types";
-import { ROW_HEIGHT, tableNodeWidth } from "./layout";
+import { HEADER_HEIGHT, ROW_HEIGHT, tableNodeWidth } from "./layout";
+import { useErSelection } from "./selectionContext";
 
 export type ErTableNodeData = {
   tableId: string;
@@ -82,8 +83,13 @@ function IconDown() {
   );
 }
 
-function TableNodeComponent({ id, data, selected }: NodeProps) {
+function TableNodeComponent({ id, data }: NodeProps) {
   const d = data as ErTableNodeData;
+  const sel = useErSelection();
+  const boxRef = useRef<HTMLDivElement>(null);
+  const sizeRef = useRef({ w: 0, h: 0 });
+  const updateNodeInternals = useUpdateNodeInternals();
+  const { setNodes } = useReactFlow();
   const mode = d.nameDisplay || "both";
   const title = formatTableTitle(d.name, d.koreanName, mode);
   const handleTable = d.name;
@@ -91,19 +97,51 @@ function TableNodeComponent({ id, data, selected }: NodeProps) {
   const bottomId = columnHandleId(handleTable, EDGE_COLUMN, "B");
   const leftEdgeId = columnHandleId(handleTable, EDGE_COLUMN, "L");
   const rightEdgeId = columnHandleId(handleTable, EDGE_COLUMN, "R");
-  const selectedCol = d.selectedColumnName || null;
-  const tableSelected = Boolean(selected || d.appSelected);
-  const showActions = Boolean(d.showActions);
   const tid = d.tableId || id;
+  const selectedCol =
+    sel.selectedTableId === tid ? sel.selectedColumnName : null;
+  const tableSelected = sel.selectedTableIds.includes(tid);
+  const showActions = sel.selectedTableId === tid && sel.showActions;
   const tableWidth = tableNodeWidth(
     { name: d.name, koreanName: d.koreanName, columns: d.columns },
     mode
   );
+  const activeColIdx = selectedCol
+    ? d.columns.findIndex((c) => c.name === selectedCol)
+    : -1;
+
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+
+    const syncSize = () => {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      const prev = sizeRef.current;
+      if (Math.abs(prev.w - w) < 1 && Math.abs(prev.h - h) < 1) return;
+      sizeRef.current = { w, h };
+      setNodes((nodes) =>
+        nodes.map((n) =>
+          n.id === id
+            ? { ...n, width: w, height: h, style: { ...n.style, width: w, height: h } }
+            : n
+        )
+      );
+      updateNodeInternals(id);
+    };
+
+    syncSize();
+    const ro = new ResizeObserver(syncSize);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [id, tableWidth, d.columns.length, mode, setNodes, updateNodeInternals]);
 
   return (
+    <div className="er-table-node-shell">
     <div
+      ref={boxRef}
       className={`er-table-node${tableSelected ? " selected" : ""}${d.connectSource ? " connect-source" : ""}`}
-      style={{ width: tableWidth }}
+      style={{ width: "max-content" }}
       onClick={(e) => {
         if (d.connectMode) {
           e.stopPropagation();
@@ -174,22 +212,6 @@ function TableNodeComponent({ id, data, selected }: NodeProps) {
         }}
       >
         {title}
-        {showActions && !selectedCol ? (
-          <div
-            className="er-row-actions er-header-actions nodrag nopan"
-            onClick={(e) => e.stopPropagation()}
-            onDoubleClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="er-row-action"
-              title="테이블 수정"
-              onClick={() => d.onEditTable?.(tid)}
-            >
-              <IconInfo />
-            </button>
-          </div>
-        ) : null}
       </div>
       <div className={`er-table-node-body${mode === "both" ? " er-cols-both" : ""}`}>
         {d.columns.map((col, idx) => {
@@ -207,7 +229,6 @@ function TableNodeComponent({ id, data, selected }: NodeProps) {
               data-er-table={handleTable}
               data-er-col={col.name}
               className={`er-table-node-row${col.isPk ? " pk" : ""}${col.isFk ? " fk" : ""}${active ? " active" : ""}`}
-              style={{ height: ROW_HEIGHT }}
               onClick={(e) => {
                 e.stopPropagation();
                 if (d.connectMode) {
@@ -242,48 +263,6 @@ function TableNodeComponent({ id, data, selected }: NodeProps) {
               <span className="er-col-type" title={typeLabel}>
                 {typeLabel || "\u00a0"}
               </span>
-              {showActions && active ? (
-                <div
-                  className="er-row-actions nodrag nopan"
-                  onClick={(e) => e.stopPropagation()}
-                  onDoubleClick={(e) => e.stopPropagation()}
-                >
-                  <button
-                    type="button"
-                    className="er-row-action"
-                    title="속성 수정"
-                    onClick={() => d.onEditColumn?.(d.tableId || id, col.name)}
-                  >
-                    <IconInfo />
-                  </button>
-                  <button
-                    type="button"
-                    className="er-row-action"
-                    title="컬럼 삭제"
-                    onClick={() => d.onDeleteColumn?.(d.tableId || id, col.name)}
-                  >
-                    <IconTrash />
-                  </button>
-                  <button
-                    type="button"
-                    className="er-row-action"
-                    title="위로"
-                    disabled={idx === 0}
-                    onClick={() => d.onMoveColumn?.(d.tableId || id, col.name, -1)}
-                  >
-                    <IconUp />
-                  </button>
-                  <button
-                    type="button"
-                    className="er-row-action"
-                    title="아래로"
-                    disabled={idx === d.columns.length - 1}
-                    onClick={() => d.onMoveColumn?.(d.tableId || id, col.name, 1)}
-                  >
-                    <IconDown />
-                  </button>
-                </div>
-              ) : null}
             </div>
           );
         })}
@@ -291,7 +270,6 @@ function TableNodeComponent({ id, data, selected }: NodeProps) {
           <button
             type="button"
             className="er-table-add-col nodrag nopan"
-            style={{ height: ROW_HEIGHT }}
             onClick={(e) => {
               e.stopPropagation();
               d.onAddColumn?.(d.tableId || id);
@@ -313,6 +291,77 @@ function TableNodeComponent({ id, data, selected }: NodeProps) {
         id={bottomId}
         className="er-handle er-handle-bottom"
       />
+    </div>
+    {showActions && !selectedCol ? (
+      <div
+        className="er-row-actions er-header-actions er-row-actions-floating nodrag nopan"
+        style={{ top: HEADER_HEIGHT / 2 }}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="er-row-action"
+          title="테이블 수정"
+          onClick={() => d.onEditTable?.(tid)}
+        >
+          <IconInfo />
+        </button>
+      </div>
+    ) : null}
+    {showActions && activeColIdx >= 0 ? (
+      <div
+        className="er-row-actions er-row-actions-floating nodrag nopan"
+        style={{
+          top: HEADER_HEIGHT + activeColIdx * ROW_HEIGHT + ROW_HEIGHT / 2,
+        }}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="er-row-action"
+          title="속성 수정"
+          onClick={() =>
+            d.onEditColumn?.(d.tableId || id, d.columns[activeColIdx].name)
+          }
+        >
+          <IconInfo />
+        </button>
+        <button
+          type="button"
+          className="er-row-action"
+          title="컬럼 삭제"
+          onClick={() =>
+            d.onDeleteColumn?.(d.tableId || id, d.columns[activeColIdx].name)
+          }
+        >
+          <IconTrash />
+        </button>
+        <button
+          type="button"
+          className="er-row-action"
+          title="위로"
+          disabled={activeColIdx === 0}
+          onClick={() =>
+            d.onMoveColumn?.(d.tableId || id, d.columns[activeColIdx].name, -1)
+          }
+        >
+          <IconUp />
+        </button>
+        <button
+          type="button"
+          className="er-row-action"
+          title="아래로"
+          disabled={activeColIdx === d.columns.length - 1}
+          onClick={() =>
+            d.onMoveColumn?.(d.tableId || id, d.columns[activeColIdx].name, 1)
+          }
+        >
+          <IconDown />
+        </button>
+      </div>
+    ) : null}
     </div>
   );
 }

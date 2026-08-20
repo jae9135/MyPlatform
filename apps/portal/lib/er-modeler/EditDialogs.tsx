@@ -333,14 +333,17 @@ export function ColumnEditDialog({
               setSaveError("컬럼ID를 입력하세요.");
               return;
             }
-            const reason = onSave(
-              normalizeColumn({
-                ...draft,
-                name,
-                dataType: typeText || draft.dataType,
-                notNull: draft.isPk ? true : draft.notNull,
-              })
-            );
+            const normalized = normalizeColumn({
+              ...draft,
+              name,
+              dataType: typeText || draft.dataType,
+              notNull: draft.isPk ? true : draft.notNull,
+            });
+            if (!normalized) {
+              setSaveError("메타 정보 행은 컬럼으로 저장할 수 없습니다.");
+              return;
+            }
+            const reason = onSave(normalized);
             if (reason) setSaveError(reason);
           }}
         >

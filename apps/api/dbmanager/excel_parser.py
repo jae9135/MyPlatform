@@ -234,6 +234,10 @@ def _parse_flat(ws, header_row: int, col_map: dict[str, int]) -> list[TableDef]:
         if normalize_label(data_type) in ("데이터타입", "type"):
             continue
 
+        column_ko = _cell(ws, row, col_map.get("column_ko", COL_COLUMN_KO))
+        if _is_module_meta_row(column_name, column_ko, data_type):
+            continue
+
         table_key = str(table_name).strip()
         if table_key not in tables:
             tables[table_key] = TableDef(
@@ -343,6 +347,12 @@ def _parse_block(ws) -> list[TableDef]:
             if marker in ("업무규칙", "테이블 정의서", "테이블정의서"):
                 data_row += 1
                 break
+            marker_lab = normalize_label(marker)
+            if marker_lab in _MODULE_META_LABELS or (
+                "모듈" in marker_lab and "시스템" in marker_lab
+            ):
+                data_row += 1
+                continue
 
             column_name = _effective_cell(ws, data_row, col_map.get("column_en", 2))
             if not column_name or _is_instruction_text(column_name):
@@ -352,6 +362,9 @@ def _parse_block(ws) -> list[TableDef]:
             column_ko = _effective_cell(ws, data_row, col_map.get("column_ko", 4))
             data_type = _effective_cell(ws, data_row, col_map.get("data_type", 5))
             if not data_type or _is_instruction_text(data_type):
+                data_row += 1
+                continue
+            if _is_module_meta_row(column_name, column_ko, data_type):
                 data_row += 1
                 continue
 
@@ -562,6 +575,33 @@ def normalize_label(value) -> str:
     text = re.sub(r"\s+", "", text)
     text = text.replace("(", "").replace(")", "")
     return text
+
+
+_MODULE_META_LABELS = {"모듈시스템명", "시스템명", "module"}
+_SQL_TYPE_PREFIX = re.compile(
+    r"^(VARCHAR2?|CHAR|NCHAR|NVARCHAR2?|NUMBER|NUMERIC|DECIMAL|INT(?:EGER)?|BIGINT|SMALLINT|FLOAT|DOUBLE|DATE|TIME(?:STAMP)?|CLOB|NCLOB|BLOB|RAW|BOOLEAN|BOOL|TEXT)",
+    re.I,
+)
+
+
+def _is_module_meta_row(column_name, column_ko=None, data_type=None) -> bool:
+    for val in (column_name, column_ko):
+        if not val:
+            continue
+        lab = normalize_label(val)
+        if lab in _MODULE_META_LABELS:
+            return True
+        if "모듈" in lab and "시스템" in lab:
+            return True
+    dt = str(data_type or "").strip()
+    if dt and not _SQL_TYPE_PREFIX.match(dt):
+        for val in (column_name, column_ko):
+            if not val:
+                continue
+            lab = normalize_label(val)
+            if lab in _MODULE_META_LABELS or "모듈" in lab:
+                return True
+    return False
 
 
 def _is_instruction_text(value) -> bool:

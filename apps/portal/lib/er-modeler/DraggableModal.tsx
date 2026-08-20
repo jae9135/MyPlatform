@@ -9,6 +9,7 @@ type Props = {
   titleId: string;
   subtitle?: ReactNode;
   onClose: () => void;
+  onCancel?: () => void;
   className?: string;
   width?: number;
   children: ReactNode;
@@ -21,6 +22,7 @@ export function DraggableModal({
   titleId,
   subtitle,
   onClose,
+  onCancel,
   className = "",
   width = 420,
   children,
@@ -99,10 +101,12 @@ export function DraggableModal({
           <button
             type="button"
             className="btn ghost er-btn-sm"
-            onClick={onClose}
-            disabled={busy}
+            onClick={() => {
+              if (busy) onCancel?.();
+              onClose();
+            }}
           >
-            닫기
+            {busy ? "취소" : "닫기"}
           </button>
         </div>
         {children}

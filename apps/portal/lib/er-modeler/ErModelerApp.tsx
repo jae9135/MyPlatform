@@ -72,6 +72,7 @@ import {
 } from "./storage";
 import { ErTableNode } from "./TableNode";
 import { ErRelationEdge } from "./RelationEdge";
+import { ErSelectionContext } from "./selectionContext";
 import {
   columnHandleId,
   createEmptyProject,
@@ -117,6 +118,10 @@ function estimateImportMs(file: File): number {
 function estimateSqlImportMs(sql: string): number {
   const kb = new TextEncoder().encode(sql).length / 1024;
   return Math.min(60000, Math.max(2000, 2000 + kb * 40));
+}
+
+function estimateExportMs(tableCount: number): number {
+  return Math.min(90000, Math.max(2500, 2500 + tableCount * 900));
 }
 
 function cloneProject(project: ErProject): ErProject {
@@ -192,6 +197,15 @@ function ErModelerInner() {
     null
   );
   const [showActions, setShowActions] = useState(false);
+  const erSelection = useMemo(
+    () => ({
+      selectedTableId,
+      selectedTableIds,
+      selectedColumnName,
+      showActions,
+    }),
+    [selectedTableId, selectedTableIds, selectedColumnName, showActions]
+  );
   const [selectedRelationId, setSelectedRelationId] = useState<string | null>(
     null
   );
@@ -203,6 +217,9 @@ function ErModelerInner() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(
+    null
+  );
+  const [exportProgress, setExportProgress] = useState<ImportProgress | null>(
     null
   );
   const [validationOpen, setValidationOpen] = useState(false);
@@ -236,6 +253,8 @@ function ErModelerInner() {
   );
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const operationAbortRef = useRef<AbortController | null>(null);
+  const importProgressTimerRef = useRef<number | null>(null);
   const projectRef = useRef(project);
   projectRef.current = project;
   const selectedRelationIdRef = useRef(selectedRelationId);
@@ -329,14 +348,9 @@ function ErModelerInner() {
       }
       n = n.map((node) => ({
         ...node,
-        selected: selectedTableIds.includes(node.id),
         data: {
           ...node.data,
           nameDisplay: display,
-          appSelected: selectedTableIds.includes(node.id),
-          selectedColumnName:
-            node.id === selectedTableId ? selectedColumnName : null,
-          showActions: node.id === selectedTableId && showActions,
           connectMode: canvasTool === "connect",
           connectSource: connectDraft?.tableId === node.id,
           onSelect: (
@@ -369,7 +383,7 @@ function ErModelerInner() {
       setEdges(e);
       return next;
     },
-    [canvasTool, connectDraft, enrichEdges, nameDisplay, selectedColumnName, selectedTableId, selectedTableIds, setEdges, setNodes, showActions, showRelLabels]
+    [canvasTool, connectDraft, enrichEdges, nameDisplay, setEdges, setNodes, showRelLabels]
   );
 
   useEffect(() => {
@@ -734,6 +748,39 @@ function ErModelerInner() {
     setEdges((eds) => eds.map((e) => ({ ...e, selected: e.id === edge.id })));
   }, [setEdges]);
 
+  function clearProgressTimer() {
+    if (importProgressTimerRef.current) {
+      window.clearInterval(importProgressTimerRef.current);
+      importProgressTimerRef.current = null;
+    }
+  }
+
+  function cancelRunningOperation() {
+    operationAbortRef.current?.abort();
+    operationAbortRef.current = null;
+    clearProgressTimer();
+    setBusy(false);
+    setProgress("");
+    setImportProgress(null);
+    setExportProgress(null);
+    setMsg("취소했습니다.");
+  }
+
+  function closeImportDialog() {
+    if (busy) cancelRunningOperation();
+    setImportOpen(false);
+  }
+
+  function closeExportDialog() {
+    if (busy) {
+      cancelRunningOperation();
+      setExportOpen(false);
+      return;
+    }
+    setExportOpen(false);
+    setScriptExport(null);
+  }
+
   function commitImported(
     imported: ErProject,
     mode: ImportMode,
@@ -784,6 +831,8 @@ function ErModelerInner() {
   }
 
   async function handleImport(file: File, mode: ImportMode = "replace") {
+    const ac = new AbortController();
+    operationAbortRef.current = ac;
     setBusy(true);
     setImportProgress(null);
     setProgress("서버에 파일 전송 중…");
@@ -791,7 +840,8 @@ function ErModelerInner() {
     const started = Date.now();
     const estimateMs = estimateImportMs(file);
     let progressLabel = "파일 업로드 중";
-    const progressTimer = window.setInterval(() => {
+    clearProgressTimer();
+    importProgressTimerRef.current = window.setInterval(() => {
       const elapsedMs = Date.now() - started;
       const pct = Math.min(88, (elapsedMs / estimateMs) * 88);
       const elapsedSec = Math.round(elapsedMs / 1000);
@@ -811,7 +861,9 @@ function ErModelerInner() {
       const res = await fetch(`${API_BASE}/v1/er-modeler/import`, {
         method: "POST",
         body: fd,
+        signal: ac.signal,
       });
+      if (ac.signal.aborted) return;
       const j = (await res.json().catch(() => ({}))) as ImportResponse & {
         detail?: string;
       };
@@ -834,6 +886,7 @@ function ErModelerInner() {
         },
         undefined
       );
+      if (ac.signal.aborted) return;
       commitImported(
         imported,
         mode,
@@ -846,6 +899,7 @@ function ErModelerInner() {
         label: "완료",
       });
       void fileToBase64(file).then((templateBase64) => {
+        if (ac.signal.aborted) return;
         commitProject(
           {
             ...projectRef.current,
@@ -856,12 +910,18 @@ function ErModelerInner() {
         );
       });
     } catch (e) {
+      if (ac.signal.aborted || (e as Error).name === "AbortError") return;
       setMsg(String((e as Error).message || e));
     } finally {
-      window.clearInterval(progressTimer);
-      setBusy(false);
-      setProgress("");
-      window.setTimeout(() => setImportProgress(null), 500);
+      clearProgressTimer();
+      if (operationAbortRef.current === ac) {
+        operationAbortRef.current = null;
+      }
+      if (!ac.signal.aborted) {
+        setBusy(false);
+        setProgress("");
+        window.setTimeout(() => setImportProgress(null), 500);
+      }
     }
   }
 
@@ -870,6 +930,8 @@ function ErModelerInner() {
     filename: string,
     mode: ImportMode = "replace"
   ) {
+    const ac = new AbortController();
+    operationAbortRef.current = ac;
     setBusy(true);
     setImportProgress(null);
     setProgress("SQL 스크립트 분석 중…");
@@ -877,7 +939,8 @@ function ErModelerInner() {
     const started = Date.now();
     const estimateMs = estimateSqlImportMs(sql);
     let progressLabel = "SQL 분석 중";
-    const progressTimer = window.setInterval(() => {
+    clearProgressTimer();
+    importProgressTimerRef.current = window.setInterval(() => {
       const elapsedMs = Date.now() - started;
       const pct = Math.min(88, (elapsedMs / estimateMs) * 88);
       const elapsedSec = Math.round(elapsedMs / 1000);
@@ -900,7 +963,9 @@ function ErModelerInner() {
           db_name: project.dbName,
           schema: project.schema,
         }),
+        signal: ac.signal,
       });
+      if (ac.signal.aborted) return;
       const j = (await res.json().catch(() => ({}))) as ImportResponse & {
         detail?: string;
       };
@@ -923,6 +988,7 @@ function ErModelerInner() {
         },
         project.templateBase64
       );
+      if (ac.signal.aborted) return;
       commitImported(
         imported,
         mode,
@@ -935,12 +1001,18 @@ function ErModelerInner() {
         label: "완료",
       });
     } catch (e) {
+      if (ac.signal.aborted || (e as Error).name === "AbortError") return;
       setMsg(String((e as Error).message || e));
     } finally {
-      window.clearInterval(progressTimer);
-      setBusy(false);
-      setProgress("");
-      window.setTimeout(() => setImportProgress(null), 500);
+      clearProgressTimer();
+      if (operationAbortRef.current === ac) {
+        operationAbortRef.current = null;
+      }
+      if (!ac.signal.aborted) {
+        setBusy(false);
+        setProgress("");
+        window.setTimeout(() => setImportProgress(null), 500);
+      }
     }
   }
 
@@ -984,10 +1056,29 @@ function ErModelerInner() {
       setMsg("Excel로 내보내려면 양식 파일을 선택하세요.");
       return;
     }
+    const ac = new AbortController();
+    operationAbortRef.current = ac;
     setBusy(true);
+    setExportProgress(null);
     setProgress("양식 준비 중…");
     setMsg("설계서 생성 중…");
+    const started = Date.now();
+    const estimateMs = estimateExportMs(target.tables.length);
+    let progressLabel = "양식 준비 중";
+    clearProgressTimer();
+    importProgressTimerRef.current = window.setInterval(() => {
+      const elapsedMs = Date.now() - started;
+      const pct = Math.min(88, (elapsedMs / estimateMs) * 88);
+      const elapsedSec = Math.round(elapsedMs / 1000);
+      const remainingMs = estimateMs - elapsedMs;
+      const etaSec =
+        pct >= 88 || remainingMs <= 0
+          ? 0
+          : Math.max(1, Math.round(remainingMs / 1000));
+      setExportProgress({ pct, elapsedSec, etaSec, label: progressLabel });
+    }, 250);
     try {
+      progressLabel = "Excel 파일 생성 중";
       setProgress("Excel 파일 생성 중…");
       const blob = base64ToBlob(
         templateBase64,
@@ -997,46 +1088,92 @@ function ErModelerInner() {
       fd.append("model", JSON.stringify(target));
       fd.append("design", blob, sourceFilename || "template.xlsx");
       if (target.sheet) fd.append("sheet", target.sheet);
+      progressLabel = "서버에서 정의서 작성 중";
       setProgress("서버에서 정의서 작성 중…");
       const res = await fetch(`${API_BASE}/v1/er-modeler/export`, {
         method: "POST",
         body: fd,
+        signal: ac.signal,
       });
+      if (ac.signal.aborted) return;
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.detail || "export failed");
       }
+      progressLabel = "파일 내려받는 중";
       setProgress("파일 내려받는 중…");
+      setExportProgress({
+        pct: 92,
+        elapsedSec: Math.round((Date.now() - started) / 1000),
+        etaSec: 1,
+        label: progressLabel,
+      });
       const outBlob = await res.blob();
+      if (ac.signal.aborted) return;
       const disp = res.headers.get("Content-Disposition") || "";
       const match = disp.match(/filename="?([^";]+)"?/);
       const fname = match?.[1] || `design_${target.schema}.xlsx`;
       downloadBlob(outBlob, fname);
+      setExportProgress({
+        pct: 100,
+        elapsedSec: Math.round((Date.now() - started) / 1000),
+        etaSec: 0,
+        label: "완료",
+      });
       setExportOpen(false);
       setMsg(`내보내기 완료 — ${target.tables.length}개 테이블`);
     } catch (e) {
+      if (ac.signal.aborted || (e as Error).name === "AbortError") return;
       setMsg(String((e as Error).message || e));
     } finally {
-      setBusy(false);
-      setProgress("");
+      clearProgressTimer();
+      if (operationAbortRef.current === ac) {
+        operationAbortRef.current = null;
+      }
+      if (!ac.signal.aborted) {
+        setBusy(false);
+        setProgress("");
+        window.setTimeout(() => setExportProgress(null), 500);
+      }
     }
   }
 
   async function handleExportScript(scope: ExportScope) {
     const target = projectForExport(scope);
     if (!target) return;
+    const ac = new AbortController();
+    operationAbortRef.current = ac;
     setBusy(true);
+    setExportProgress(null);
     setProgress("스크립트 생성 중…");
     setMsg("DDL 스크립트 생성 중…");
+    const started = Date.now();
+    const estimateMs = estimateExportMs(target.tables.length);
+    let progressLabel = "스크립트 생성 중";
+    clearProgressTimer();
+    importProgressTimerRef.current = window.setInterval(() => {
+      const elapsedMs = Date.now() - started;
+      const pct = Math.min(88, (elapsedMs / estimateMs) * 88);
+      const elapsedSec = Math.round(elapsedMs / 1000);
+      const remainingMs = estimateMs - elapsedMs;
+      const etaSec =
+        pct >= 88 || remainingMs <= 0
+          ? 0
+          : Math.max(1, Math.round(remainingMs / 1000));
+      setExportProgress({ pct, elapsedSec, etaSec, label: progressLabel });
+    }, 250);
     try {
       const fd = new FormData();
       fd.append("model", JSON.stringify(target));
       fd.append("format", "json");
+      progressLabel = "서버에서 DDL 생성 중";
       setProgress("서버에서 DDL 생성 중…");
       const res = await fetch(`${API_BASE}/v1/er-modeler/generate`, {
         method: "POST",
         body: fd,
+        signal: ac.signal,
       });
+      if (ac.signal.aborted) return;
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(
@@ -1047,6 +1184,12 @@ function ErModelerInner() {
       if (!scripts.length) {
         throw new Error("생성된 스크립트가 없습니다.");
       }
+      setExportProgress({
+        pct: 100,
+        elapsedSec: Math.round((Date.now() - started) / 1000),
+        etaSec: 0,
+        label: "완료",
+      });
       setScriptExport({
         schema: j.schema || target.schema || "db1",
         scripts,
@@ -1055,10 +1198,18 @@ function ErModelerInner() {
         `스크립트 생성 완료 — ${target.tables.length}개 테이블 (Index Key constraint 포함)`
       );
     } catch (e) {
+      if (ac.signal.aborted || (e as Error).name === "AbortError") return;
       setMsg(String((e as Error).message || e));
     } finally {
-      setBusy(false);
-      setProgress("");
+      clearProgressTimer();
+      if (operationAbortRef.current === ac) {
+        operationAbortRef.current = null;
+      }
+      if (!ac.signal.aborted) {
+        setBusy(false);
+        setProgress("");
+        window.setTimeout(() => setExportProgress(null), 500);
+      }
     }
   }
 
@@ -1214,6 +1365,7 @@ function ErModelerInner() {
       isFk: false,
       fkRef: null,
     });
+    if (!nextCol) return;
     commitProject({
       ...cur,
       tables: cur.tables.map((t) =>
@@ -1543,7 +1695,8 @@ function ErModelerInner() {
         busy={busy}
         progress={progress}
         importProgress={importProgress}
-        onClose={() => setImportOpen(false)}
+        onClose={closeImportDialog}
+        onCancel={cancelRunningOperation}
         onImportExcel={(file, mode) => void handleImport(file, mode)}
         onImportSql={(sql, filename, mode) =>
           void handleImportSql(sql, filename, mode)
@@ -1554,14 +1707,13 @@ function ErModelerInner() {
         open={exportOpen}
         busy={busy}
         progress={progress}
+        exportProgress={exportProgress}
         tableCount={project.tables.length}
         selectedCount={selectedTableIds.length}
         templateName={project.sourceFilename || ""}
         scriptResult={scriptExport}
-        onClose={() => {
-          setExportOpen(false);
-          setScriptExport(null);
-        }}
+        onClose={closeExportDialog}
+        onCancel={cancelRunningOperation}
         onExportExcel={(scope, file) => void handleExportExcel(scope, file)}
         onGenerateScript={(scope) => void handleExportScript(scope)}
         onClearScript={() => setScriptExport(null)}
@@ -1801,6 +1953,7 @@ function ErModelerInner() {
               </p>
             </div>
           ) : null}
+          <ErSelectionContext.Provider value={erSelection}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -1955,6 +2108,7 @@ function ErModelerInner() {
               maskColor="rgba(8, 12, 18, 0.75)"
             />
           </ReactFlow>
+          </ErSelectionContext.Provider>
           {connectDraft && connectCursor ? (
             <svg className="er-connect-preview" aria-hidden>
               {(() => {
