@@ -50,8 +50,16 @@ import {
 import { layoutGraph, HEADER_HEIGHT, NODE_WIDTH, ROW_HEIGHT } from "./layout";
 import { ExportDialog, type ExportScope, type ScriptExportResult } from "./ExportDialog";
 import { ImportDialog, type ImportMode, type ImportProgress } from "./ImportDialog";
+import { ImportPreviewDialog } from "./ImportPreviewDialog";
+import { buildImportPreview, addedTableIdsAfterImport, type ImportPreview } from "./importPreview";
 import { CardinalityPicker } from "./CardinalityPicker";
 import { ValidationDialog } from "./ValidationDialog";
+import { parseValidationJump } from "./validationJump";
+import {
+  exportDiagramPdf,
+  exportDiagramPng,
+  exportDiagramSvg,
+} from "./canvasExport";
 import {
   ColumnEditDialog,
   RelationEditDialog,
@@ -74,6 +82,7 @@ import { ErTableNode } from "./TableNode";
 import { ErRelationEdge } from "./RelationEdge";
 import { ErSelectionContext } from "./selectionContext";
 import {
+  formatTableTitle,
   columnHandleId,
   createEmptyProject,
   EDGE_COLUMN,
@@ -95,6 +104,7 @@ import {
   type RelationCardinality,
 } from "./types";
 import { errorsForColumnSave, errorsTouching, formatErrorReasons, formatValidationReasons, validateErProject, validationForRelation, type ErValidationItem } from "./validation";
+import { enrichExportScripts } from "./scriptExport";
 
 const nodeTypes = { erTable: ErTableNode };
 const edgeTypes = { erRelation: ErRelationEdge };
@@ -225,6 +235,15 @@ function ErModelerInner() {
   const [validationOpen, setValidationOpen] = useState(false);
   const [validationItems, setValidationItems] = useState<ErValidationItem[]>([]);
   const [importOpen, setImportOpen] = useState(false);
+  const [importPending, setImportPending] = useState<{
+    imported: ErProject;
+    mode: ImportMode;
+    summary: string;
+    preview: ImportPreview;
+    sourceLabel: string;
+    templateFile?: File;
+  } | null>(null);
+  const [tableSearch, setTableSearch] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
   const [scriptExport, setScriptExport] = useState<ScriptExportResult | null>(
     null
@@ -244,7 +263,7 @@ function ErModelerInner() {
     null
   );
 
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
   const tableEditAnchor = useEditAnchor(tableEditId, null, project.tables);
   const columnEditAnchor = useEditAnchor(
     columnEdit?.tableId ?? null,
@@ -271,20 +290,66 @@ function ErModelerInner() {
   const [connectCursor, setConnectCursor] = useState<{ x: number; y: number } | null>(
     null
   );
+  const [duplicatePlacement, setDuplicatePlacement] = useState<ErTable | null>(null);
+  const [duplicateCursor, setDuplicateCursor] = useState<{ x: number; y: number } | null>(
+    null
+  );
   const pathLayoutRef = useRef<
     (relationId: string, layout: EdgePathLayout) => void
   >(() => {});
   const undoStackRef = useRef<ErProject[]>([]);
+  const redoStackRef = useRef<ErProject[]>([]);
   const nodeActionsRef = useRef({
     onSelect: (_tableId: string, _additive?: boolean, _columnName?: string, _point?: { x: number; y: number }) => {},
     onSelectColumn: (_tableId: string, _columnName: string) => {},
     onRevealActions: (_tableId: string, _columnName: string | null) => {},
     onEditTable: (_tableId: string) => {},
+    onDuplicateTable: (_tableId: string) => {},
     onEditColumn: (_tableId: string, _columnName: string) => {},
     onDeleteColumn: (_tableId: string, _columnName: string) => {},
     onMoveColumn: (_tableId: string, _columnName: string, _dir: -1 | 1) => {},
     onAddColumn: (_tableId: string) => {},
   });
+
+  const filteredTables = useMemo(() => {
+    const q = tableSearch.trim().toLowerCase();
+    if (!q) return project.tables;
+    return project.tables.filter(
+      (t) =>
+        t.name.toLowerCase().includes(q) ||
+        (t.koreanName || "").toLowerCase().includes(q)
+    );
+  }, [project.tables, tableSearch]);
+
+  const focusTableIds = useCallback(
+    (tableIds: string[]) => {
+      if (!tableIds.length) return;
+      requestAnimationFrame(() => {
+        fitView({
+          nodes: tableIds.map((id) => ({ id })),
+          padding: 0.35,
+          duration: 350,
+          maxZoom: 1.15,
+        });
+      });
+    },
+    [fitView]
+  );
+
+  const focusAndSelectTable = useCallback(
+    (tableId: string, columnName?: string | null) => {
+      setSelectedTableId(tableId);
+      setSelectedTableIds([tableId]);
+      setSelectedColumnName(columnName ?? null);
+      setShowActions(Boolean(columnName));
+      setSelectedRelationId(null);
+      setRelationAnchor(null);
+      setTableEditId(null);
+      setColumnEdit(null);
+      focusTableIds([tableId]);
+    },
+    [focusTableIds]
+  );
 
   const initialFlow = useMemo(
     () => projectToFlow(project, nameDisplay),
@@ -365,6 +430,8 @@ function ErModelerInner() {
             nodeActionsRef.current.onRevealActions(tableId, columnName),
           onEditTable: (tableId: string) =>
             nodeActionsRef.current.onEditTable(tableId),
+          onDuplicateTable: (tableId: string) =>
+            nodeActionsRef.current.onDuplicateTable(tableId),
           onEditColumn: (tableId: string, columnName: string) =>
             nodeActionsRef.current.onEditColumn(tableId, columnName),
           onDeleteColumn: (tableId: string, columnName: string) =>
@@ -410,6 +477,28 @@ function ErModelerInner() {
     [library]
   );
 
+  const resetCanvasUiState = useCallback(() => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    setCanvasTool("select");
+    setConnectDraft(null);
+    setConnectCursor(null);
+    setDuplicatePlacement(null);
+    setDuplicateCursor(null);
+    setTableSearch("");
+    setSelectedTableId(null);
+    setSelectedTableIds([]);
+    setSelectedColumnName(null);
+    setShowActions(false);
+    setSelectedRelationId(null);
+    setRelationAnchor(null);
+    setTableEditId(null);
+    setColumnEdit(null);
+    setImportPending(null);
+  }, []);
+
   pathLayoutRef.current = (relationId: string, layout: EdgePathLayout) => {
     const cur = projectRef.current;
     const next = {
@@ -440,6 +529,7 @@ function ErModelerInner() {
   const pushUndo = useCallback(() => {
     undoStackRef.current.push(cloneProject(projectRef.current));
     if (undoStackRef.current.length > 40) undoStackRef.current.shift();
+    redoStackRef.current = [];
   }, []);
 
   const commitWithUndo = useCallback(
@@ -456,13 +546,30 @@ function ErModelerInner() {
       setMsg("되돌릴 작업이 없습니다.");
       return;
     }
+    redoStackRef.current.push(cloneProject(projectRef.current));
     commitProject(prev);
     setSelectedRelationId(null);
     setRelationAnchor(null);
     setTableEditId(null);
     setColumnEdit(null);
-    setMsg("삭제를 취소했습니다.");
+    setMsg("실행 취소했습니다.");
   }, [commitProject]);
+
+  const redoLast = useCallback(() => {
+    const next = redoStackRef.current.pop();
+    if (!next) {
+      setMsg("다시 실행할 작업이 없습니다.");
+      return;
+    }
+    undoStackRef.current.push(cloneProject(projectRef.current));
+    commitProject(next);
+    setMsg("다시 실행했습니다.");
+  }, [commitProject]);
+
+  const undoLastRef = useRef(undoLast);
+  undoLastRef.current = undoLast;
+  const redoLastRef = useRef(redoLast);
+  redoLastRef.current = redoLast;
 
   const onNodesChangeWrapped: OnNodesChange = useCallback(
     (changes) => {
@@ -589,11 +696,8 @@ function ErModelerInner() {
       setConnectDraft(null);
       setConnectCursor(null);
       setCanvasTool("select");
-      const items = validationForRelation(next, rel);
-      setRelationEditNotice(items.length ? formatValidationReasons(items) : null);
-      if (endPt) {
-        setRelationAnchor({ x: endPt.x + 10, y: endPt.y + 8 });
-      }
+      setRelationEditNotice(null);
+      setRelationAnchor(null);
       setMsg(
         `관계 추가 [${rel.cardinality}] ${rel.fromTable} → ${rel.toTable}`
       );
@@ -717,6 +821,18 @@ function ErModelerInner() {
     return () => window.removeEventListener("pointermove", onMove);
   }, [canvasTool]);
 
+  useEffect(() => {
+    if (!duplicatePlacement) {
+      setDuplicateCursor(null);
+      return;
+    }
+    const onMove = (e: PointerEvent) => {
+      setDuplicateCursor({ x: e.clientX, y: e.clientY });
+    };
+    window.addEventListener("pointermove", onMove);
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [duplicatePlacement]);
+
   const isValidConnection = useCallback((conn: Connection | { source: string | null; target: string | null }) => {
     return Boolean(conn.source && conn.target && conn.source !== conn.target);
   }, []);
@@ -784,9 +900,13 @@ function ErModelerInner() {
   function commitImported(
     imported: ErProject,
     mode: ImportMode,
-    summary: string
+    summary: string,
+    preview?: ImportPreview
   ) {
     const current = projectRef.current;
+    const before = current;
+    const effectivePreview =
+      preview ?? buildImportPreview(before, imported, mode);
     let next = imported;
     let extra = "";
     if (mode === "append" && current.tables.length) {
@@ -799,8 +919,12 @@ function ErModelerInner() {
         imported
       );
       next = merged.project;
-      extra = ` · 추가 ${merged.added}개`;
-      if (merged.skipped) extra += ` · 중복 ${merged.skipped}개 건너뜀`;
+      if (merged.added === 0 && merged.skipped > 0) {
+        extra = ` · 화면 추가 0개 (동일 테이블명 ${merged.skipped}개 건너뜀)`;
+      } else {
+        extra = ` · 화면에 추가 ${merged.added}개`;
+        if (merged.skipped) extra += ` · 중복 ${merged.skipped}개 건너뜀`;
+      }
     } else {
       next = {
         ...imported,
@@ -811,8 +935,10 @@ function ErModelerInner() {
         author: imported.author || current.author || "",
       };
     }
+    const focusIds = addedTableIdsAfterImport(before, next, effectivePreview);
     const shouldLayout = !(mode === "append" && current.tables.length);
     next = refreshFlow(next, false);
+    projectRef.current = next;
     const state = upsertActive(library, next);
     setLibrary(state);
     setProject(next);
@@ -820,12 +946,42 @@ function ErModelerInner() {
     setSelectedTableId(null);
     setSelectedTableIds([]);
     setImportOpen(false);
+    setImportPending(null);
     setMsg(summary + extra);
+
+    const runFocus = () => {
+      if (focusIds.length) focusTableIds(focusIds);
+      else if (next.tables.length === 1) focusTableIds([next.tables[0].id]);
+    };
+
     if (shouldLayout) {
+      const layoutBase = next;
       requestAnimationFrame(() => {
-        const laid = refreshFlow(projectRef.current, true);
+        const laid = refreshFlow(layoutBase, true);
+        projectRef.current = laid;
         setProject(laid);
         scheduleSave(laid);
+        runFocus();
+      });
+    } else {
+      requestAnimationFrame(runFocus);
+    }
+  }
+
+  function confirmImportPending() {
+    if (!importPending) return;
+    const { imported, mode, summary, preview, templateFile } = importPending;
+    commitImported(imported, mode, summary, preview);
+    if (templateFile) {
+      void fileToBase64(templateFile).then((templateBase64) => {
+        commitProject(
+          {
+            ...projectRef.current,
+            templateBase64,
+            sourceFilename: templateFile.name,
+          },
+          { skipFlow: true }
+        );
       });
     }
   }
@@ -887,28 +1043,22 @@ function ErModelerInner() {
         undefined
       );
       if (ac.signal.aborted) return;
-      commitImported(
+      const preview = buildImportPreview(projectRef.current, imported, mode);
+      setImportPending({
         imported,
         mode,
-        `가져오기 완료 — 테이블 ${j.meta.tables}개 · 관계 ${j.meta.relations}개`
-      );
+        summary: `가져오기 완료 — 테이블 ${j.meta.tables}개 · 관계 ${j.meta.relations}개`,
+        preview,
+        sourceLabel: file.name,
+        templateFile: file,
+      });
       setImportProgress({
         pct: 100,
         elapsedSec: Math.round((Date.now() - started) / 1000),
         etaSec: 0,
-        label: "완료",
+        label: "미리보기",
       });
-      void fileToBase64(file).then((templateBase64) => {
-        if (ac.signal.aborted) return;
-        commitProject(
-          {
-            ...projectRef.current,
-            templateBase64,
-            sourceFilename: file.name,
-          },
-          { skipFlow: true }
-        );
-      });
+      setMsg("가져오기 미리보기 — 적용 여부를 확인하세요.");
     } catch (e) {
       if (ac.signal.aborted || (e as Error).name === "AbortError") return;
       setMsg(String((e as Error).message || e));
@@ -989,17 +1139,21 @@ function ErModelerInner() {
         project.templateBase64
       );
       if (ac.signal.aborted) return;
-      commitImported(
+      const preview = buildImportPreview(projectRef.current, imported, mode);
+      setImportPending({
         imported,
         mode,
-        `스크립트 가져오기 완료 — 테이블 ${j.meta.tables}개 · 관계 ${j.meta.relations}개`
-      );
+        summary: `스크립트 가져오기 완료 — 테이블 ${j.meta.tables}개 · 관계 ${j.meta.relations}개`,
+        preview,
+        sourceLabel: filename,
+      });
       setImportProgress({
         pct: 100,
         elapsedSec: Math.round((Date.now() - started) / 1000),
         etaSec: 0,
-        label: "완료",
+        label: "미리보기",
       });
+      setMsg("가져오기 미리보기 — 적용 여부를 확인하세요.");
     } catch (e) {
       if (ac.signal.aborted || (e as Error).name === "AbortError") return;
       setMsg(String((e as Error).message || e));
@@ -1163,8 +1317,13 @@ function ErModelerInner() {
       setExportProgress({ pct, elapsedSec, etaSec, label: progressLabel });
     }, 250);
     try {
+      const payload: ErProject = {
+        ...target,
+        dbName: (target.dbName || "dbm").trim() || "dbm",
+        schema: (target.schema || "db1").trim() || "db1",
+      };
       const fd = new FormData();
-      fd.append("model", JSON.stringify(target));
+      fd.append("model", JSON.stringify(payload));
       fd.append("format", "json");
       progressLabel = "서버에서 DDL 생성 중";
       setProgress("서버에서 DDL 생성 중…");
@@ -1180,10 +1339,13 @@ function ErModelerInner() {
           j.detail || j.error || `스크립트 생성 실패 (HTTP ${res.status})`
         );
       }
-      const scripts = Array.isArray(j.scripts) ? j.scripts : [];
-      if (!scripts.length) {
+      const rawScripts = Array.isArray(j.scripts) ? j.scripts : [];
+      if (!rawScripts.length) {
         throw new Error("생성된 스크립트가 없습니다.");
       }
+      const exportDb = (j.db_name || target.dbName || "dbm").trim() || "dbm";
+      const exportSchema = (j.schema || target.schema || "db1").trim() || "db1";
+      const scripts = enrichExportScripts(rawScripts, exportDb, exportSchema);
       setExportProgress({
         pct: 100,
         elapsedSec: Math.round((Date.now() - started) / 1000),
@@ -1191,11 +1353,12 @@ function ErModelerInner() {
         label: "완료",
       });
       setScriptExport({
-        schema: j.schema || target.schema || "db1",
+        dbName: exportDb,
+        schema: exportSchema,
         scripts,
       });
       setMsg(
-        `스크립트 생성 완료 — ${target.tables.length}개 테이블 (Index Key constraint 포함)`
+        `스크립트 생성 완료 — DB ${j.db_name || target.dbName} · 스키마 ${j.schema || target.schema} · ${target.tables.length}개 테이블`
       );
     } catch (e) {
       if (ac.signal.aborted || (e as Error).name === "AbortError") return;
@@ -1252,9 +1415,90 @@ function ErModelerInner() {
     setValidationItems(items);
     setValidationOpen(true);
     const errCount = items.filter((x) => x.severity === "error").length;
+    const warnCount = items.filter((x) => x.severity === "warn").length;
     setMsg(
-      `검증 완료 — ${items.length}개 항목 (${errCount}개 오류)`
+      `검증 완료 — ${items.length}개 항목 (오류 ${errCount} · 경고 ${warnCount})`
     );
+  }
+
+  function handleAutoLayout() {
+    const cur = projectRef.current;
+    if (!cur.tables.length) {
+      setMsg("배치할 테이블이 없습니다.");
+      return;
+    }
+    let { nodes: n, edges: e } = projectToFlow(cur, nameDisplay);
+    n = layoutGraph(n, e);
+    let next = applyNodePositions(cur, n);
+    next = optimizeRelationSides(next);
+    commitWithUndo(next, { layout: false });
+    requestAnimationFrame(() => {
+      fitView({ padding: 0.12, duration: 280 });
+    });
+    setMsg("자동 배치를 적용했습니다.");
+  }
+
+  async function handleDiagramExport(format: "png" | "svg" | "pdf") {
+    const flowRoot = canvasWrapRef.current?.querySelector(
+      ".react-flow"
+    ) as HTMLElement | null;
+    if (!flowRoot) {
+      setMsg("캔버스를 찾을 수 없습니다.");
+      return;
+    }
+    const flowNodes = getNodes();
+    if (!flowNodes.length) {
+      setMsg("내보낼 테이블이 없습니다.");
+      return;
+    }
+    setBusy(true);
+    setMsg(`다이어그램 ${format.toUpperCase()} 내보내는 중…`);
+    try {
+      const cur = projectRef.current;
+      const input = {
+        flowRoot,
+        project: cur,
+        nodes: flowNodes,
+        nameDisplay,
+        projectName: cur.name || "erd",
+      };
+      if (format === "png") await exportDiagramPng(input);
+      else if (format === "svg") await exportDiagramSvg(input);
+      else await exportDiagramPdf(input);
+      setMsg(`다이어그램 ${format.toUpperCase()} 내보내기 완료`);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "다이어그램 내보내기 실패");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleValidationJump(item: ErValidationItem) {
+    const target = parseValidationJump(item, projectRef.current);
+    if (!target) {
+      setMsg("이 항목은 캔버스 위치를 찾을 수 없습니다.");
+      return;
+    }
+    if (target.kind === "table") {
+      focusAndSelectTable(target.tableId);
+      setValidationOpen(false);
+      return;
+    }
+    if (target.kind === "column") {
+      focusAndSelectTable(target.tableId, target.columnName);
+      setValidationOpen(false);
+      return;
+    }
+    setSelectedRelationId(target.relationId);
+    setSelectedTableId(null);
+    setSelectedTableIds([]);
+    setSelectedColumnName(null);
+    setShowActions(false);
+    setEdges((eds) =>
+      eds.map((e) => ({ ...e, selected: e.id === target.relationId }))
+    );
+    setValidationOpen(false);
+    setMsg("관계선을 선택했습니다.");
   }
 
   function handleSave() {
@@ -1270,13 +1514,15 @@ function ErModelerInner() {
   function handleNewProject() {
     const item = createEmptyProject();
     const state = addProject(library, item);
+    resetCanvasUiState();
     setLibrary(state);
     setProject(item);
+    projectRef.current = item;
+    setNodes([]);
+    setEdges([]);
     refreshFlow(item, false);
-    setSelectedTableId(null);
-    setSelectedTableIds([]);
-    setShowActions(false);
     undoStackRef.current = [];
+    redoStackRef.current = [];
     setMsg("새 프로젝트를 만들었습니다.");
   }
 
@@ -1306,6 +1552,65 @@ function ErModelerInner() {
     setSelectedColumnName(null);
     setShowActions(false);
     setMsg(`테이블 추가: ${table.name}`);
+    focusTableIds([table.id]);
+  }
+
+  function buildDuplicateTable(table: ErTable, existing: ErTable[]): ErTable {
+    let name = `${table.name}_copy`;
+    if (existing.some((t) => t.name === name)) {
+      let i = 2;
+      while (existing.some((t) => t.name === `${table.name}_copy${i}`)) i += 1;
+      name = `${table.name}_copy${i}`;
+    }
+    return {
+      ...table,
+      id: name,
+      name,
+      koreanName: table.koreanName ? `${table.koreanName} (복사)` : "",
+      position: { x: 0, y: 0 },
+      columns: table.columns.map((c) => ({ ...c })),
+    };
+  }
+
+  function startDuplicatePlacement(tableId: string) {
+    const cur = projectRef.current;
+    const table = cur.tables.find((t) => t.id === tableId);
+    if (!table) return;
+    setDuplicatePlacement(buildDuplicateTable(table, cur.tables));
+    setDuplicateCursor(null);
+    setCanvasTool("select");
+    setConnectDraft(null);
+    setConnectCursor(null);
+    setSelectedTableId(tableId);
+    setSelectedTableIds([tableId]);
+    setSelectedColumnName(null);
+    setShowActions(false);
+    setSelectedRelationId(null);
+    setRelationAnchor(null);
+    setTableEditId(null);
+    setColumnEdit(null);
+    setMsg("복제 테이블을 캔버스에 놓을 위치를 클릭하세요. Esc로 취소.");
+  }
+
+  function placeDuplicateTableAt(clientX: number, clientY: number) {
+    if (!duplicatePlacement) return;
+    const pos = screenToFlowPosition({ x: clientX, y: clientY });
+    const copy = { ...duplicatePlacement, position: pos };
+    setDuplicatePlacement(null);
+    setDuplicateCursor(null);
+    const cur = projectRef.current;
+    if (cur.tables.some((t) => t.name === copy.name)) {
+      setMsg("같은 이름의 테이블이 이미 있습니다.");
+      return;
+    }
+    commitWithUndo({ ...cur, tables: [...cur.tables, copy] });
+    focusAndSelectTable(copy.id);
+    setMsg(`테이블 복제: ${copy.name}`);
+  }
+
+  function cancelDuplicatePlacement() {
+    setDuplicatePlacement(null);
+    setDuplicateCursor(null);
   }
 
   function handleRenameTable(tableId: string, nextIdRaw: string, koreanName: string): string | null {
@@ -1523,6 +1828,9 @@ function ErModelerInner() {
       setColumnEdit(null);
       setTableEditId(tableId);
     },
+    onDuplicateTable: (tableId) => {
+      startDuplicatePlacement(tableId);
+    },
     onEditColumn: (tableId, columnName) => {
       setSelectedTableId(tableId);
       setSelectedColumnName(columnName);
@@ -1541,15 +1849,18 @@ function ErModelerInner() {
   };
 
   function handleSwitchProject(id: string) {
+    if (id === library.activeId) return;
     const state = switchActive(library, id);
     const active = getActive(state).project;
+    resetCanvasUiState();
     setLibrary(state);
     setProject(active);
+    projectRef.current = active;
+    setNodes([]);
+    setEdges([]);
     refreshFlow(active, false);
-    setSelectedTableId(null);
-    setSelectedTableIds([]);
-    setShowActions(false);
     undoStackRef.current = [];
+    redoStackRef.current = [];
     setMsg("");
   }
 
@@ -1557,18 +1868,25 @@ function ErModelerInner() {
     if (!confirm("현재 프로젝트를 삭제할까요?")) return;
     const state = removeActive(library);
     const active = getActive(state).project;
+    resetCanvasUiState();
     setLibrary(state);
     setProject(active);
+    projectRef.current = active;
+    setNodes([]);
+    setEdges([]);
     refreshFlow(active, false);
-    setSelectedTableId(null);
-    setSelectedTableIds([]);
-    setShowActions(false);
     undoStackRef.current = [];
+    redoStackRef.current = [];
   }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (duplicatePlacement) {
+          cancelDuplicatePlacement();
+          setMsg("");
+          return;
+        }
         if (canvasTool !== "select") {
           setCanvasTool("select");
           setMsg("");
@@ -1579,6 +1897,14 @@ function ErModelerInner() {
       if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z") && !e.shiftKey) {
         e.preventDefault();
         undoLast();
+        return;
+      }
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        ((e.key === "y" || e.key === "Y") || ((e.key === "z" || e.key === "Z") && e.shiftKey))
+      ) {
+        e.preventDefault();
+        redoLast();
         return;
       }
       if (e.key !== "Delete" && e.key !== "Backspace") return;
@@ -1621,7 +1947,7 @@ function ErModelerInner() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canvasTool, commitWithUndo, edges, nodesInteractive, selectedRelationId, selectedTableId, selectedTableIds, undoLast]);
+  }, [canvasTool, commitWithUndo, duplicatePlacement, edges, nodesInteractive, redoLast, selectedRelationId, selectedTableId, selectedTableIds, undoLast]);
 
   function startSplit(e: React.PointerEvent) {
     e.preventDefault();
@@ -1671,6 +1997,14 @@ function ErModelerInner() {
             type="button"
             className="btn ghost er-btn-sm"
             disabled={busy || !project.tables.length}
+            onClick={handleAutoLayout}
+          >
+            자동 배치
+          </button>
+          <button
+            type="button"
+            className="btn ghost er-btn-sm"
+            disabled={busy || !project.tables.length}
             onClick={handleValidateEr}
           >
             검증
@@ -1695,12 +2029,21 @@ function ErModelerInner() {
         busy={busy}
         progress={progress}
         importProgress={importProgress}
+        hasExistingTables={project.tables.length > 0}
         onClose={closeImportDialog}
         onCancel={cancelRunningOperation}
         onImportExcel={(file, mode) => void handleImport(file, mode)}
         onImportSql={(sql, filename, mode) =>
           void handleImportSql(sql, filename, mode)
         }
+      />
+
+      <ImportPreviewDialog
+        open={Boolean(importPending)}
+        preview={importPending?.preview ?? null}
+        sourceLabel={importPending?.sourceLabel ?? ""}
+        onConfirm={confirmImportPending}
+        onCancel={() => setImportPending(null)}
       />
 
       <ExportDialog
@@ -1716,6 +2059,7 @@ function ErModelerInner() {
         onCancel={cancelRunningOperation}
         onExportExcel={(scope, file) => void handleExportExcel(scope, file)}
         onGenerateScript={(scope) => void handleExportScript(scope)}
+        onExportDiagram={(format) => void handleDiagramExport(format)}
         onClearScript={() => setScriptExport(null)}
       />
 
@@ -1784,6 +2128,7 @@ function ErModelerInner() {
           open={validationOpen}
           items={validationItems}
           onClose={() => setValidationOpen(false)}
+          onJump={handleValidationJump}
         />
       ) : null}
 
@@ -1826,6 +2171,39 @@ function ErModelerInner() {
               </li>
             ))}
           </ul>
+          {project.tables.length > 0 ? (
+            <div className="er-table-search">
+              <h3>테이블 찾기</h3>
+              <input
+                type="search"
+                className="er-table-search-input"
+                placeholder="영문·한글 이름 검색"
+                value={tableSearch}
+                onChange={(e) => setTableSearch(e.target.value)}
+              />
+              <ul className="er-table-search-list">
+                {filteredTables.length === 0 ? (
+                  <li className="hint">검색 결과 없음</li>
+                ) : (
+                  filteredTables.map((t) => (
+                    <li key={t.id}>
+                      <button
+                        type="button"
+                        className={
+                          selectedTableId === t.id
+                            ? "er-table-search-item active"
+                            : "er-table-search-item"
+                        }
+                        onClick={() => focusAndSelectTable(t.id)}
+                      >
+                        {formatTableTitle(t.name, t.koreanName, nameDisplay)}
+                      </button>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
+          ) : null}
           <div className="er-meta-fields er-sidebar-meta">
             <label>
               시스템명
@@ -1893,13 +2271,32 @@ function ErModelerInner() {
             <summary>도움말</summary>
             <ul>
               <li>
-                <strong>가져오기</strong> — Excel 정의서 또는 CREATE TABLE
-                스크립트에서 그립니다. 신규로 가져오거나 기존 작업에 더할 수
-                있습니다.
+                <strong>Ctrl+Z / Ctrl+Y</strong> — 실행 취소 / 다시 실행
               </li>
               <li>
-                <strong>내보내기</strong> — Excel(양식 지정) 또는 스크립트로
-                내보냅니다. 전체 또는 선택한 테이블만 내보낼 수 있습니다.
+                <strong>테이블 복제</strong> — 헤더의 복제 아이콘을 누른 뒤
+                캔버스를 클릭해 놓을 위치를 정합니다.
+              </li>
+              <li>
+                <strong>테이블 찾기</strong> — 왼쪽 목록에서 이름을 검색해
+                캔버스로 이동합니다.
+              </li>
+              <li>
+                <strong>자동 배치</strong> — 상단 「자동 배치」로 테이블·관계선
+                위치를 정리합니다.
+              </li>
+              <li>
+                <strong>내보내기</strong> — Excel, 스크립트, PNG, SVG, PDF
+                형식을 선택해 내보냅니다.
+              </li>
+              <li>
+                <strong>검증</strong> — 고아 테이블, FK 타입 불일치, PK 없음,
+                순환 FK 등을 확인합니다. 항목 클릭 시 해당 위치로 이동합니다.
+              </li>
+              <li>
+                <strong>가져오기</strong> — Excel 정의서 또는 CREATE TABLE
+                스크립트에서 그립니다. 적용 전 미리보기에서 추가·건너뜀을
+                확인할 수 있습니다.
               </li>
               <li>
                 <strong>선택</strong> — Shift+클릭으로 테이블을 여러 개 고릅니다.
@@ -1908,10 +2305,6 @@ function ErModelerInner() {
                 <strong>새 테이블</strong> — 줌 옆 아이콘을 누른 뒤 캔버스를
                 클릭합니다. 테이블을 선택한 뒤 테이블 이름을 클릭하면 수정
                 아이콘이 나타납니다. 이름을 더블클릭해도 수정 창이 열립니다.
-              </li>
-              <li>
-                <strong>Ctrl+Z</strong> — 직전에 지운 테이블·연결선·컬럼을
-                되돌립니다.
               </li>
               <li>
                 <strong>관계 연결</strong> — 아래 연결선 아이콘을 누른 뒤 테이블을
@@ -1944,8 +2337,11 @@ function ErModelerInner() {
           onPointerDown={startSplit}
         />
 
-        <div className="er-canvas-wrap" ref={canvasWrapRef}>
-          {project.tables.length === 0 ? (
+        <div
+          className={`er-canvas-wrap${duplicatePlacement ? " er-tool-duplicate" : ""}`}
+          ref={canvasWrapRef}
+        >
+          {project.tables.length === 0 && nodes.length === 0 ? (
             <div className="er-empty">
               <p>줌 옆 「새 테이블」아이콘을 누른 뒤 캔버스를 클릭하세요.</p>
               <p className="hint">
@@ -1955,6 +2351,7 @@ function ErModelerInner() {
           ) : null}
           <ErSelectionContext.Provider value={erSelection}>
           <ReactFlow
+            key={library.activeId}
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChangeWrapped}
@@ -1962,6 +2359,10 @@ function ErModelerInner() {
             onConnectStart={onConnectStart}
             onConnectEnd={onConnectEnd}
             onPaneClick={(event) => {
+              if (duplicatePlacement) {
+                placeDuplicateTableAt(event.clientX, event.clientY);
+                return;
+              }
               if (canvasTool === "table") {
                 const pos = screenToFlowPosition({
                   x: event.clientX,
@@ -2109,6 +2510,26 @@ function ErModelerInner() {
             />
           </ReactFlow>
           </ErSelectionContext.Provider>
+          {duplicatePlacement && duplicateCursor ? (
+            <div
+              className="er-duplicate-ghost"
+              style={{
+                left: duplicateCursor.x - (canvasWrapRef.current?.getBoundingClientRect().left ?? 0),
+                top: duplicateCursor.y - (canvasWrapRef.current?.getBoundingClientRect().top ?? 0),
+              }}
+            >
+              <div className="er-duplicate-ghost-title">
+                {formatTableTitle(
+                  duplicatePlacement.name,
+                  duplicatePlacement.koreanName,
+                  nameDisplay
+                )}
+              </div>
+              <div className="er-duplicate-ghost-meta">
+                {duplicatePlacement.columns.length} columns
+              </div>
+            </div>
+          ) : null}
           {connectDraft && connectCursor ? (
             <svg className="er-connect-preview" aria-hidden>
               {(() => {

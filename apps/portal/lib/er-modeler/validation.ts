@@ -263,13 +263,13 @@ export function errorsTouching(
 }
 
 function detectCycleEdges(project: ErProject): string[][] {
-  // adjacency: child(fromTable) -> parent(toTable)
   const adj = new Map<string, string[]>();
   for (const rel of project.relations) {
-    const a = rel.fromTable;
-    const b = rel.toTable;
-    if (!adj.has(a)) adj.set(a, []);
-    adj.get(a)!.push(b);
+    const roles = relationParentChild(project, rel);
+    const from = roles ? roles.childTable : rel.fromTable;
+    const to = roles ? roles.parentTable : rel.toTable;
+    if (!adj.has(from)) adj.set(from, []);
+    adj.get(from)!.push(to);
   }
 
   const visited = new Set<string>();
@@ -424,8 +424,8 @@ function validatePkFk(project: ErProject): ErValidationItem[] {
       if (fromType && toType && fromType !== toType) {
         items.push({
           id: `type_mismatch_${child.name}_${col.name}`,
-          severity: "error",
-          title: "데이터 타입 불일치",
+          severity: "warn",
+          title: "FK 타입 불일치",
           detail: `'${child.name}.${col.name}'(${col.dataType}) ↔ '${parent.name}.${parentCol.name}'(${parentCol.dataType})`,
         });
       }
@@ -439,7 +439,7 @@ function validatePkFk(project: ErProject): ErValidationItem[] {
       items.push({
         id: `pk_missing_${t.name}`,
         severity: "warn",
-        title: "PK 없음",
+        title: "PK 없는 테이블",
         detail: `테이블 '${t.name}'에 PK가 없습니다.`,
       });
     }
@@ -520,8 +520,8 @@ function validateRelations(project: ErProject): ErValidationItem[] {
     if (childType && parentType && childType !== parentType) {
       items.push({
         id: `rel_type_mismatch_${rel.id}`,
-        severity: "error",
-        title: "데이터 타입 불일치",
+        severity: "warn",
+        title: "FK 타입 불일치",
         detail: `'${childTable.name}.${childCol.name}'(${childCol.dataType}) ↔ '${parentTable.name}.${parentCol.name}'(${parentCol.dataType})`,
       });
     }
@@ -571,12 +571,32 @@ function validateRelations(project: ErProject): ErValidationItem[] {
     }
     items.push({
       id: `cycle_${c.join("_")}`,
-      severity: "error",
-      title: "순환참조",
+      severity: "warn",
+      title: "순환 FK 경고",
       detail: c.join(" → "),
     });
   }
 
+  return items;
+}
+
+function validateOrphanTables(project: ErProject): ErValidationItem[] {
+  if (project.tables.length <= 1) return [];
+  const connected = new Set<string>();
+  for (const rel of project.relations) {
+    connected.add(rel.fromTable);
+    connected.add(rel.toTable);
+  }
+  const items: ErValidationItem[] = [];
+  for (const t of project.tables) {
+    if (connected.has(t.name) || connected.has(t.id)) continue;
+    items.push({
+      id: `orphan_table_${t.name}`,
+      severity: "warn",
+      title: "고아 테이블",
+      detail: `테이블 '${t.name}'에 연결된 관계가 없습니다.`,
+    });
+  }
   return items;
 }
 
@@ -586,6 +606,7 @@ export function validateErProject(project: ErProject): ErValidationItem[] {
   results.push(...validateTableNames(project));
   results.push(...validateAttributeNames(project));
   results.push(...validatePkFk(project));
+  results.push(...validateOrphanTables(project));
   results.push(...validateRelations(project));
 
   // Stable ordering: errors first

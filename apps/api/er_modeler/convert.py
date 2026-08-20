@@ -93,8 +93,11 @@ def _split_type_length(data_type: str, length: Any) -> tuple[str, int | None]:
 
 
 def table_defs_from_model(model: dict[str, Any]) -> list[TableDef]:
-    db_name = (model.get("dbName") or "dbm").strip() or "dbm"
-    schema = (model.get("schema") or "db1").strip() or "db1"
+    db_name = (
+        model.get("dbName") or model.get("db_name") or "dbm"
+    )
+    db_name = str(db_name).strip() or "dbm"
+    schema = str(model.get("schema") or model.get("schemaName") or "db1").strip() or "db1"
     tables: list[TableDef] = []
 
     for raw in model.get("tables") or []:

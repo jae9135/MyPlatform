@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { DraggableModal } from "./DraggableModal";
 
@@ -27,6 +27,7 @@ type Props = {
   onCancel?: () => void;
   onImportExcel: (file: File, mode: ImportMode) => void;
   onImportSql: (sql: string, filename: string, mode: ImportMode) => void;
+  hasExistingTables?: boolean;
 };
 
 export function ImportDialog({
@@ -38,6 +39,7 @@ export function ImportDialog({
   onCancel,
   onImportExcel,
   onImportSql,
+  hasExistingTables = false,
 }: Props) {
   const [tab, setTab] = useState<Tab>("excel");
   const [mode, setMode] = useState<ImportMode>("replace");
@@ -45,6 +47,12 @@ export function ImportDialog({
   const [sqlName, setSqlName] = useState("script.sql");
   const excelRef = useRef<HTMLInputElement>(null);
   const sqlFileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      setMode(hasExistingTables ? "append" : "replace");
+    }
+  }, [open, hasExistingTables]);
 
   return (
     <DraggableModal

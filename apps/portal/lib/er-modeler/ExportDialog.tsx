@@ -5,11 +5,17 @@ import { useEffect, useRef, useState } from "react";
 import { DraggableModal } from "./DraggableModal";
 import type { RunProgress } from "./ImportDialog";
 
-export type ExportKind = "excel" | "script";
+export type ExportKind = "excel" | "script" | "png" | "svg" | "pdf";
 export type ExportScope = "all" | "selected";
+export type DiagramFormat = "png" | "svg" | "pdf";
+
+function isDiagramKind(kind: ExportKind): kind is DiagramFormat {
+  return kind === "png" || kind === "svg" || kind === "pdf";
+}
 
 export type GeneratedScript = { name: string; content: string };
 export type ScriptExportResult = {
+  dbName?: string;
   schema?: string;
   scripts: GeneratedScript[];
 };
@@ -27,6 +33,7 @@ type Props = {
   onCancel?: () => void;
   onExportExcel: (scope: ExportScope, templateFile?: File) => void;
   onGenerateScript: (scope: ExportScope) => void;
+  onExportDiagram: (format: DiagramFormat) => void;
   onClearScript: () => void;
 };
 
@@ -110,6 +117,7 @@ export function ExportDialog({
   onCancel,
   onExportExcel,
   onGenerateScript,
+  onExportDiagram,
   onClearScript,
 }: Props) {
   const [kind, setKind] = useState<ExportKind>("excel");
@@ -139,13 +147,18 @@ export function ExportDialog({
   const templateLabel = picked?.name || templateName || "없음";
   const excelReady = Boolean(picked || templateName);
   const hasSelection = selectedCount > 0;
-  const canRun =
+  const diagramKind = isDiagramKind(kind);
+  const canRunExcel =
     !busy &&
     tableCount > 0 &&
     (scope === "all" || hasSelection) &&
-    (kind === "script" || excelReady);
+    excelReady;
+  const canRunScript =
+    !busy && tableCount > 0 && (scope === "all" || hasSelection);
+  const canRunDiagram = !busy && tableCount > 0;
   const scripts = scriptResult?.scripts || [];
   const current = scripts.find((s) => s.name === activeScript) || scripts[0];
+  const dbName = scriptResult?.dbName || "dbm";
   const schema = scriptResult?.schema || "db1";
   const showPreview = kind === "script" && scripts.length > 0;
 
@@ -159,7 +172,7 @@ export function ExportDialog({
 
   function saveAll() {
     if (!scripts.length) return;
-    downloadBlob(zipStore(scripts), `er_modeler_${schema}_ddl.zip`);
+    downloadBlob(zipStore(scripts), `er_modeler_${dbName}_${schema}_ddl.zip`);
   }
 
   return (
@@ -171,7 +184,9 @@ export function ExportDialog({
       subtitle={
         kind === "script"
           ? "범위를 고른 뒤 생성하고, 확인 후 저장합니다."
-          : "형식과 범위를 고른 뒤 내보냅니다."
+          : diagramKind
+            ? "현재 캔버스 ERD를 이미지·문서 파일로 저장합니다."
+            : "형식과 범위를 고른 뒤 내보냅니다."
       }
       onClose={onClose}
       onCancel={onCancel}
@@ -234,41 +249,86 @@ export function ExportDialog({
             />
             스크립트
           </label>
+          <label>
+            <input
+              type="radio"
+              name="er-export-kind"
+              checked={kind === "png"}
+              onChange={() => {
+                setKind("png");
+                onClearScript();
+              }}
+            />
+            PNG
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="er-export-kind"
+              checked={kind === "svg"}
+              onChange={() => {
+                setKind("svg");
+                onClearScript();
+              }}
+            />
+            SVG
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="er-export-kind"
+              checked={kind === "pdf"}
+              onChange={() => {
+                setKind("pdf");
+                onClearScript();
+              }}
+            />
+            PDF
+          </label>
         </div>
 
-        <div className="er-choice-group">
-          <span>범위</span>
-          <label>
-            <input
-              type="radio"
-              name="er-export-scope"
-              checked={scope === "all"}
-              onChange={() => {
-                setScope("all");
-                onClearScript();
-              }}
-            />
-            전체 테이블 ({tableCount})
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="er-export-scope"
-              checked={scope === "selected"}
-              onChange={() => {
-                setScope("selected");
-                onClearScript();
-              }}
-              disabled={!hasSelection}
-            />
-            선택한 테이블만 ({selectedCount})
-          </label>
-        </div>
-        {scope === "selected" && !hasSelection ? (
-          <p className="hint">Shift+클릭으로 테이블을 여러 개 고르세요.</p>
+        {!diagramKind ? (
+          <>
+            <div className="er-choice-group">
+              <span>범위</span>
+              <label>
+                <input
+                  type="radio"
+                  name="er-export-scope"
+                  checked={scope === "all"}
+                  onChange={() => {
+                    setScope("all");
+                    onClearScript();
+                  }}
+                />
+                전체 테이블 ({tableCount})
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="er-export-scope"
+                  checked={scope === "selected"}
+                  onChange={() => {
+                    setScope("selected");
+                    onClearScript();
+                  }}
+                  disabled={!hasSelection}
+                />
+                선택한 테이블만 ({selectedCount})
+              </label>
+            </div>
+            {scope === "selected" && !hasSelection ? (
+              <p className="hint">Shift+클릭으로 테이블을 여러 개 고르세요.</p>
+            ) : null}
+          </>
         ) : null}
 
-        {kind === "excel" ? (
+        {diagramKind ? (
+          <p className="hint">
+            캔버스에 표시된 테이블·관계선 전체가 {kind.toUpperCase()} 파일로
+            저장됩니다.
+          </p>
+        ) : kind === "excel" ? (
           <div className="er-import-excel">
             <p className="hint">
               테이블정의서 양식(.xlsx)을 지정한 뒤 내보냅니다.
@@ -296,7 +356,10 @@ export function ExportDialog({
           </div>
         ) : showPreview ? (
           <div className="er-script-preview-wrap">
-            <p className="hint">생성된 DDL입니다. 확인한 뒤 저장하세요.</p>
+            <p className="hint">
+              DB <strong>{dbName}</strong> · 스키마 <strong>{schema}</strong> 기준
+              DDL입니다. 확인한 뒤 저장하세요.
+            </p>
             <div className="er-script-tabs">
               {scripts.map((s) => (
                 <button
@@ -313,22 +376,33 @@ export function ExportDialog({
           </div>
         ) : (
           <p className="hint">
-            생성하면 CREATE TABLE 등 DDL이 화면에 표시됩니다. 확인 후 저장할 수
-            있습니다.
+            프로젝트의 DB명·스키마 설정에 따라 CREATE DATABASE, CREATE SCHEMA,
+            CREATE TABLE DDL이 생성됩니다.
           </p>
         )}
 
         <div className="er-modal-foot">
           <span className="hint">
-            {scope === "selected"
-              ? `${selectedCount}개 테이블`
-              : `${tableCount}개 테이블`}
+            {diagramKind
+              ? `${tableCount}개 테이블 · 캔버스 전체`
+              : scope === "selected"
+                ? `${selectedCount}개 테이블`
+                : `${tableCount}개 테이블`}
           </span>
-          {kind === "excel" ? (
+          {diagramKind ? (
             <button
               type="button"
               className="btn"
-              disabled={!canRun}
+              disabled={!canRunDiagram}
+              onClick={() => onExportDiagram(kind)}
+            >
+              내보내기
+            </button>
+          ) : kind === "excel" ? (
+            <button
+              type="button"
+              className="btn"
+              disabled={!canRunExcel}
               onClick={() => onExportExcel(scope, picked || undefined)}
             >
               내보내기
@@ -351,7 +425,7 @@ export function ExportDialog({
             <button
               type="button"
               className="btn"
-              disabled={!canRun}
+              disabled={!canRunScript}
               onClick={() => onGenerateScript(scope)}
             >
               생성

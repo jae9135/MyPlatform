@@ -7,9 +7,10 @@ type Props = {
   open: boolean;
   items: ErValidationItem[];
   onClose: () => void;
+  onJump?: (item: ErValidationItem) => void;
 };
 
-export function ValidationDialog({ open, items, onClose }: Props) {
+export function ValidationDialog({ open, items, onClose, onJump }: Props) {
   const errorCount = items.filter((x) => x.severity === "error").length;
 
   return (
@@ -20,6 +21,7 @@ export function ValidationDialog({ open, items, onClose }: Props) {
       subtitle={
         <>
           {items.length}개 항목 · {errorCount}개 오류
+          {onJump ? " · 항목 클릭 시 해당 위치로 이동" : ""}
         </>
       }
       onClose={onClose}
@@ -32,7 +34,23 @@ export function ValidationDialog({ open, items, onClose }: Props) {
         ) : (
           <div className="er-validation-list">
             {items.map((it) => (
-              <div key={it.id} className="er-validation-item">
+              <div
+                key={it.id}
+                className={`er-validation-item${onJump ? " clickable" : ""}`}
+                role={onJump ? "button" : undefined}
+                tabIndex={onJump ? 0 : undefined}
+                onClick={onJump ? () => onJump(it) : undefined}
+                onKeyDown={
+                  onJump
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onJump(it);
+                        }
+                      }
+                    : undefined
+                }
+              >
                 <div
                   className={`er-validation-item-title${it.severity === "error" ? " error" : ""}`}
                 >

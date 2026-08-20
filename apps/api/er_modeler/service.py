@@ -137,10 +137,20 @@ def generate_scripts_from_model(model: dict[str, Any]) -> dict[str, Any]:
     if not table_defs:
         raise ValueError("생성할 테이블이 없습니다.")
 
+    db_name = (
+        model.get("dbName") or model.get("db_name") or table_defs[0].db_name or "dbm"
+    )
+    db_name = str(db_name).strip() or "dbm"
+    schema = (
+        model.get("schema") or model.get("schemaName") or table_defs[0].schema or "db1"
+    )
+    schema = str(schema).strip() or "db1"
+    for table in table_defs:
+        table.db_name = db_name
+        table.schema = schema
+
     scripts = scripts_from_tables(table_defs, declared_types=True)
     grouped = scripts_by_category(scripts)
-    db_name = (model.get("dbName") or table_defs[0].db_name or "dbm").strip() or "dbm"
-    schema = (model.get("schema") or table_defs[0].schema or "db1").strip() or "db1"
 
     return {
         "ok": True,

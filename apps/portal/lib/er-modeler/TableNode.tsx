@@ -36,6 +36,7 @@ export type ErTableNodeData = {
   onRevealActions?: (tableId: string, columnName: string | null) => void;
   showActions?: boolean;
   onEditTable?: (tableId: string) => void;
+  onDuplicateTable?: (tableId: string) => void;
   onEditColumn?: (tableId: string, columnName: string) => void;
   onDeleteColumn?: (tableId: string, columnName: string) => void;
   onMoveColumn?: (tableId: string, columnName: string, dir: -1 | 1) => void;
@@ -79,6 +80,15 @@ function IconDown() {
   return (
     <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden>
       <path d="M8 4v8M4.5 8.5 8 12l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconCopy() {
+  return (
+    <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden>
+      <rect x="5.5" y="2.5" width="7" height="9" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M3.5 5.5h-.8a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-.8" fill="none" stroke="currentColor" strokeWidth="1.2" />
     </svg>
   );
 }
@@ -306,6 +316,14 @@ function TableNodeComponent({ id, data }: NodeProps) {
           onClick={() => d.onEditTable?.(tid)}
         >
           <IconInfo />
+        </button>
+        <button
+          type="button"
+          className="er-row-action"
+          title="테이블 복제 — 캔버스 클릭 위치에 복제본 배치"
+          onClick={() => d.onDuplicateTable?.(tid)}
+        >
+          <IconCopy />
         </button>
       </div>
     ) : null}

@@ -29,6 +29,16 @@ def generate_all_ddl(tables: list[TableDef], output_dir: Path) -> list[Path]:
     return created
 
 
+def _qualify(schema: str | None, name: str) -> str:
+    s = (schema or "").strip() or "db1"
+    n = (name or "").strip()
+    return f"{s}.{n}" if n else s
+
+
+def _resolve_schema(table: TableDef, fallback: str | None = None) -> str:
+    return (table.schema or fallback or "db1").strip() or "db1"
+
+
 def build_database_sql(db_names: list[str]) -> str:
     lines = [
         "-- Database creation script",
@@ -46,25 +56,44 @@ def build_database_sql(db_names: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _build_schema_sql(schemas: list[str]) -> str:
+def build_schema_sql(schemas: list[str], *, db_name: str | None = None) -> str:
     lines = [
         "-- Schema creation script",
+    ]
+    if db_name:
+        lines.append(f"-- Target database: {db_name}")
+    lines.extend([
         "-- Connect to target database before running",
         "",
-    ]
+    ])
     for schema in schemas:
         lines.append(f"CREATE SCHEMA IF NOT EXISTS {schema};")
     lines.append("")
     return "\n".join(lines)
 
 
-def build_table_ddl(table: TableDef, *, declared_types: bool = False) -> str:
-    """Build CREATE TABLE + COMMENT + UK/FK/INDEX statements (no schema prefix)."""
+def _build_schema_sql(schemas: list[str]) -> str:
+    return build_schema_sql(schemas)
+
+
+def build_table_ddl(
+    table: TableDef,
+    *,
+    declared_types: bool = False,
+    schema: str | None = None,
+) -> str:
+    """Build CREATE TABLE + COMMENT + UK/FK/INDEX with schema-qualified names."""
+    schema_name = _resolve_schema(table, schema)
+    db_name = (table.db_name or "").strip() or "dbm"
+    tname = table.name
+    qtable = _qualify(schema_name, tname)
     lines = [
-        f"-- Table: {table.name}",
+        f"-- Database: {db_name or '(default)'}",
+        f"-- Schema: {schema_name}",
+        f"-- Table: {tname}",
         f"-- Source: {table.korean_name}",
         "",
-        f"CREATE TABLE IF NOT EXISTS {table.name} (",
+        f"CREATE TABLE IF NOT EXISTS {qtable} (",
     ]
 
     column_lines = []
@@ -94,14 +123,14 @@ def build_table_ddl(table: TableDef, *, declared_types: bool = False) -> str:
     lines.append("")
 
     lines.append(
-        f"COMMENT ON TABLE {table.name} "
+        f"COMMENT ON TABLE {qtable} "
         f"IS '{_escape(table.korean_name)}';"
     )
     for col in table.columns:
         encoded = encode_column_comment(col.korean_name, col.comment)
         if encoded:
             lines.append(
-                f"COMMENT ON COLUMN {table.name}.{col.name} "
+                f"COMMENT ON COLUMN {qtable}.{col.name} "
                 f"IS '{_escape(encoded)}';"
             )
 
@@ -110,7 +139,7 @@ def build_table_ddl(table: TableDef, *, declared_types: bool = False) -> str:
         cols_sql = ", ".join(idx_cols)
         lines.append(
             f"CREATE {kind} IF NOT EXISTS {idx_name} "
-            f"ON {table.name} ({cols_sql});"
+            f"ON {qtable} ({cols_sql});"
         )
 
     for col in table.columns:
@@ -118,11 +147,12 @@ def build_table_ddl(table: TableDef, *, declared_types: bool = False) -> str:
         if not ref:
             continue
         ref_table, ref_col = ref
+        ref_qtable = _qualify(schema_name, ref_table)
         fk_name = _fk_constraint_name(col, table)
         lines.append(
-            f"ALTER TABLE {table.name} "
+            f"ALTER TABLE {qtable} "
             f"ADD CONSTRAINT {fk_name} "
-            f"FOREIGN KEY ({col.name}) REFERENCES {ref_table} ({ref_col});"
+            f"FOREIGN KEY ({col.name}) REFERENCES {ref_qtable} ({ref_col});"
         )
 
     lines.append("")
@@ -242,9 +272,17 @@ def _parse_fk_ref(value: str | None) -> tuple[str, str] | None:
     return table.lower(), col.lower()
 
 
-def build_all_tables_ddl(tables: list[TableDef], *, declared_types: bool = False) -> str:
+def build_all_tables_ddl(
+    tables: list[TableDef],
+    *,
+    declared_types: bool = False,
+    schema: str | None = None,
+) -> str:
+    schema_name = schema
+    if not (schema_name or "").strip() and tables:
+        schema_name = _resolve_schema(tables[0])
     parts = [
-        build_table_ddl(table, declared_types=declared_types)
+        build_table_ddl(table, declared_types=declared_types, schema=schema_name)
         for table in sorted(tables, key=lambda t: t.name)
     ]
     return "\n".join(parts)
@@ -253,17 +291,42 @@ def build_all_tables_ddl(tables: list[TableDef], *, declared_types: bool = False
 def scripts_from_tables(
     tables: list[TableDef], *, declared_types: bool = False
 ) -> list[dict[str, str]]:
+    if not tables:
+        return []
+
+    db_names = sorted(
+        {(t.db_name or "dbm").strip() or "dbm" for t in tables}
+    )
+    schemas = sorted(
+        {(t.schema or "db1").strip() or "db1" for t in tables}
+    )
+    primary_db = db_names[0] if db_names else "dbm"
+
     scripts: list[dict[str, str]] = [
         {
-            "name": "00_all_tables.sql",
-            "content": build_all_tables_ddl(tables, declared_types=declared_types),
-        }
+            "name": "00_database.sql",
+            "content": build_database_sql(db_names),
+        },
+        {
+            "name": "01_schema.sql",
+            "content": build_schema_sql(schemas, db_name=primary_db),
+        },
+        {
+            "name": "02_all_tables.sql",
+            "content": build_all_tables_ddl(
+                tables, declared_types=declared_types, schema=schemas[0]
+            ),
+        },
     ]
     for table in sorted(tables, key=lambda t: t.name):
         scripts.append(
             {
                 "name": f"{table.name.upper()}.sql",
-                "content": build_table_ddl(table, declared_types=declared_types),
+                "content": build_table_ddl(
+                    table,
+                    declared_types=declared_types,
+                    schema=table.schema or schemas[0],
+                ),
             }
         )
     return scripts
@@ -281,7 +344,7 @@ def scripts_by_category(scripts: list[dict]) -> dict:
             grouped["schema"] = content
         elif name.startswith("99_sample"):
             grouped["sample"] = content
-        elif name == "00_all_tables.sql":
+        elif name in ("00_all_tables.sql", "02_all_tables.sql"):
             grouped["all"] = content
         elif not name.startswith("00_") and not name.startswith("01_") and not name.startswith("99_"):
             grouped["tables"].append({"name": script["name"], "content": content})
