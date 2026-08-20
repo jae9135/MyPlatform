@@ -84,6 +84,7 @@ import {
   type EdgePathLayout,
   type ErColumn,
   type ErProject,
+  type ErRelation,
   type ErTable,
   type HandleSide,
   type ImportResponse,
