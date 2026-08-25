@@ -1,5 +1,5 @@
 import { API_BASE } from "@/lib/apiBase";
-import { type LocalFetchErrorOpts, wrapLocalFetchError } from "@/lib/localScanApi";
+import { isLocalPortalHost, type LocalFetchErrorOpts, wrapScanFetchError } from "@/lib/localScanApi";
 
 /** Vercel serverless proxy body limit (~4.5MB). Stay under for safety. */
 export const PROXY_SAFE_UPLOAD_BYTES = 4 * 1024 * 1024;
@@ -65,7 +65,7 @@ export async function readJsonResponse(res: Response): Promise<Record<string, un
     if (!res.ok) {
       if (res.status === 502 || res.status === 504) {
         throw new Error(
-          `API 오류 (HTTP ${res.status}) — Render 대용량 ZIP 처리 실패. 「내 PC에서 검사」 옵션 또는 Render 유료 플랜·재배포를 확인하세요.`
+          `API 오류 (HTTP ${res.status}) — Render 대용량 ZIP 처리 실패. localhost:3000 로컬 포털 또는 Render 재배포를 확인하세요.`
         );
       }
       throw new Error(`API 오류 (HTTP ${res.status}) — 응답 본문 없음`);
@@ -100,8 +100,8 @@ export async function stageLargeZip(file: File): Promise<{ staging_id: string; s
   return { staging_id, size_bytes: Number(j.size_bytes || file.size) };
 }
 
-export function wrapFetchError(e: unknown, opts?: LocalFetchErrorOpts): Error {
-  return wrapLocalFetchError(e, opts);
+export function wrapFetchError(e: unknown, _opts?: LocalFetchErrorOpts): Error {
+  return wrapScanFetchError(e);
 }
 
 /** Large ZIP: skip cloud validate upload; check size client-side only. */
@@ -119,9 +119,10 @@ export function clientSideZipValidate(file: File, localMode = false): DesignChec
       `대용량 ZIP (${formatMb(file.size)}MB) — 업로드·진단에 수 분 걸릴 수 있습니다.`
     );
   }
-  const cloudHint = localMode
-    ? `진단 가능 — ZIP ${formatMb(file.size)}MB (로컬 API로 업로드)`
-    : `진단 가능 — ZIP ${formatMb(file.size)}MB (실행 시 Render로 직접 업로드)`;
+  const cloudHint =
+    localMode || isLocalPortalHost()
+      ? `진단 가능 — ZIP ${formatMb(file.size)}MB`
+      : `진단 가능 — ZIP ${formatMb(file.size)}MB (실행 시 Render로 직접 업로드)`;
   return {
     ok: true,
     message: cloudHint,

@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -67,41 +68,68 @@ def _discover_tool_home(glob_pattern: str) -> Path | None:
 def _executable_in_home(home: Path, names: tuple[str, ...]) -> Path | None:
     for sub in names:
         p = home / sub.replace("/", os.sep)
-        if p.is_file():
-            return p
+        if not p.is_file():
+            continue
+        if sys.platform != "win32" and p.suffix.lower() in (".bat", ".cmd"):
+            continue
+        return p
     return None
+
+
+def _pmd_bin_candidates() -> tuple[str, ...]:
+    if sys.platform == "win32":
+        return ("bin/pmd.bat", "bin/pmd.cmd", "bin/pmd")
+    return ("bin/pmd", "bin/pmd.bat", "bin/pmd.cmd")
+
+
+def _spotbugs_bin_candidates() -> tuple[str, ...]:
+    if sys.platform == "win32":
+        return ("bin/spotbugs.bat", "bin/spotbugs.cmd", "bin/spotbugs")
+    return ("bin/spotbugs", "bin/spotbugs.bat", "bin/spotbugs.cmd")
+
+
+def _which_tool_names(base: str) -> list[str]:
+    if sys.platform == "win32":
+        return [f"{base}.bat", f"{base}.cmd", base]
+    return [base, f"{base}.bat"]
+
+
+def _normalize_tool_exe(path: Path | None) -> Path | None:
+    if not path or not path.is_file():
+        return None
+    if sys.platform != "win32" and path.suffix.lower() in (".bat", ".cmd"):
+        return None
+    return path
 
 
 def pmd_executable() -> Path | None:
     home = os.environ.get("PMD_HOME", "").strip()
+    names = _pmd_bin_candidates()
     if home:
-        exe = _executable_in_home(Path(home), ("bin/pmd.bat", "bin/pmd", "bin/pmd.cmd"))
+        exe = _executable_in_home(Path(home), names)
         if exe:
             return exe
     discovered = _discover_tool_home("pmd-bin-*")
     if discovered:
-        exe = _executable_in_home(discovered, ("bin/pmd.bat", "bin/pmd", "bin/pmd.cmd"))
+        exe = _executable_in_home(discovered, names)
         if exe:
             return exe
-    return _tool_path("PMD_BIN", ["pmd", "pmd.bat"])
+    return _normalize_tool_exe(_tool_path("PMD_BIN", _which_tool_names("pmd")))
 
 
 def spotbugs_executable() -> Path | None:
     home = os.environ.get("SPOTBUGS_HOME", "").strip()
+    names = _spotbugs_bin_candidates()
     if home:
-        exe = _executable_in_home(
-            Path(home), ("bin/spotbugs.bat", "bin/spotbugs", "bin/spotbugs.cmd")
-        )
+        exe = _executable_in_home(Path(home), names)
         if exe:
             return exe
     discovered = _discover_tool_home("spotbugs-*")
     if discovered:
-        exe = _executable_in_home(
-            discovered, ("bin/spotbugs.bat", "bin/spotbugs", "bin/spotbugs.cmd")
-        )
+        exe = _executable_in_home(discovered, names)
         if exe:
             return exe
-    return _tool_path("SPOTBUGS_BIN", ["spotbugs", "spotbugs.bat"])
+    return _normalize_tool_exe(_tool_path("SPOTBUGS_BIN", _which_tool_names("spotbugs")))
 
 
 def findsecbugs_plugin() -> Path | None:

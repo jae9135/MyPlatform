@@ -4,15 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PortalNav } from "@/lib/PortalNav";
 import { API_BASE } from "@/lib/apiBase";
 import {
-  fetchLocalApi,
-  getLocalScanApiBase,
-  isLocalScanEnabled,
-  postLocalMultipart,
+  fetchScanApi,
+  isLocalPortalHost,
+  postScanMultipart,
+  wrapScanFetchError,
 } from "@/lib/localScanApi";
 import {
+  CloudLargeZipHint,
   EnvSourceBadge,
   EnvToolsSkeleton,
-  LocalScanSettings,
 } from "@/components/LocalScanSettings";
 import {
   normalizeFixGuides,
@@ -26,7 +26,6 @@ import {
   readJsonResponse,
   shouldUploadDirect,
   stageLargeZip,
-  wrapFetchError,
 } from "@/lib/formUpload";
 
 const PAGE_SIZE = 80;
@@ -200,10 +199,6 @@ const DEFAULT_PMD_RULESETS_DISPLAY =
 const DEFAULT_EXCLUDE_DISPLAY =
   "**/test/**, **/tests/**, **/target/**, **/node_modules/**, **/build/**, …";
 
-function zipScanUsesLocal(mode: "portal" | "upload", useLocalScan: boolean): boolean {
-  return mode === "upload" && useLocalScan;
-}
-
 const SEV_LABEL: Record<string, string> = {
   high: "높음",
   medium: "중간",
@@ -330,8 +325,6 @@ export default function SourceScanPage() {
     pmd: {},
     bandit: {},
   });
-  const [useLocalScan, setUseLocalScan] = useState(() => isLocalScanEnabled());
-  const [localApiUrl, setLocalApiUrl] = useState(() => getLocalScanApiBase());
   const [envLoading, setEnvLoading] = useState(true);
   const prefsLoaded = useRef(false);
   const forceRescanRef = useRef(false);
@@ -341,8 +334,8 @@ export default function SourceScanPage() {
 
   const validateWatchKey = useMemo(
     () =>
-      [mode, target, zipFile?.name ?? "", zipFile?.size ?? 0, zipFile?.lastModified ?? 0, useLocalScan].join("|"),
-    [mode, target, zipFile, useLocalScan]
+      [mode, target, zipFile?.name ?? "", zipFile?.size ?? 0, zipFile?.lastModified ?? 0].join("|"),
+    [mode, target, zipFile]
   );
 
   const scanOpts = useMemo(
@@ -433,20 +426,16 @@ export default function SourceScanPage() {
     showAdvanced,
   ]);
 
-  const apiUsesLocal = zipScanUsesLocal(mode, useLocalScan);
-
   const loadScanEnvironment = useCallback(async () => {
-    const local = zipScanUsesLocal(mode, useLocalScan);
     setEnvLoading(true);
     setEnvLoadError("");
-    if (local) setEnvStatus(null);
 
     try {
-      const eRes = await fetchLocalApi(local, "v1/source-scan/environment", undefined, API_BASE);
+      const eRes = await fetchScanApi("v1/source-scan/environment");
       let env: EnvStatus | null = null;
       if (eRes.ok) {
         env = (await readJsonResponse(eRes)) as EnvStatus;
-      } else if (!local) {
+      } else {
         const detailRes = await fetch(`${API_BASE}/health/detail`);
         if (detailRes.ok) {
           const detail = (await readJsonResponse(detailRes)) as { source_scan?: EnvStatus };
@@ -460,28 +449,23 @@ export default function SourceScanPage() {
       }
       if (env) {
         setEnvStatus(env);
-      } else if (local) {
-        setEnvLoadError(
-          `로컬 API에 연결되지 않음 (${localApiUrl}). start-local-scan.bat 실행 후 새로고침.`
-        );
       } else {
         setEnvLoadError(
           `API 연결 실패 (HTTP ${eRes.status}). NEXT_PUBLIC_API_BASE_URL·API_ACCESS_KEY 확인.`
         );
       }
     } catch (e) {
-      setEnvLoadError(wrapFetchError(e, { local, localApiUrl }).message);
+      setEnvLoadError(wrapScanFetchError(e).message);
     } finally {
       setEnvLoading(false);
     }
 
-    const bgLocal = local;
     void (async () => {
       try {
         const [tRes, hRes, gRes] = await Promise.all([
-          fetchLocalApi(bgLocal, "v1/source-scan/targets", undefined, API_BASE),
-          fetchLocalApi(bgLocal, "v1/source-scan/history?limit=15", undefined, API_BASE),
-          fetchLocalApi(bgLocal, "v1/source-scan/fix-guides", undefined, API_BASE),
+          fetchScanApi("v1/source-scan/targets"),
+          fetchScanApi("v1/source-scan/history?limit=15"),
+          fetchScanApi("v1/source-scan/fix-guides"),
         ]);
         const tj = await readJsonResponse(tRes);
         if (tRes.ok && Array.isArray(tj.targets)) setTargets(tj.targets as PortalTarget[]);
@@ -497,7 +481,7 @@ export default function SourceScanPage() {
         /* non-blocking */
       }
     })();
-  }, [mode, useLocalScan, localApiUrl]);
+  }, []);
 
   useEffect(() => {
     void loadScanEnvironment();
@@ -508,13 +492,13 @@ export default function SourceScanPage() {
       setDesignCheck(IDLE_UPLOAD_CHECK);
       return;
     }
-    if (mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !apiUsesLocal) {
-      const local = clientSideZipValidate(zipFile, false);
+    if (mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !isLocalPortalHost()) {
+      const check = clientSideZipValidate(zipFile, false);
       setDesignCheck({
         checking: false,
-        canRun: local.ok,
-        message: local.message,
-        warnings: local.warnings,
+        canRun: check.ok,
+        message: check.message,
+        warnings: check.warnings,
       });
       return;
     }
@@ -524,9 +508,10 @@ export default function SourceScanPage() {
       fd.append("mode", mode);
       fd.append("target", mode === "upload" ? "upload" : target);
       if (mode === "upload" && zipFile) fd.append("file", zipFile);
-      const res = apiUsesLocal
-        ? await postLocalMultipart(true, "v1/source-scan/validate", fd, API_BASE)
-        : await postMultipart("v1/source-scan/validate", fd, zipFile);
+      const res =
+        mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !isLocalPortalHost()
+          ? await postMultipart("v1/source-scan/validate", fd, zipFile)
+          : await postScanMultipart("v1/source-scan/validate", fd);
       const j = await readJsonResponse(res);
       if (!res.ok) {
         setDesignCheck({
@@ -546,10 +531,10 @@ export default function SourceScanPage() {
       setDesignCheck({
         checking: false,
         canRun: false,
-        message: wrapFetchError(e, { local: apiUsesLocal, localApiUrl }).message,
+        message: wrapScanFetchError(e).message,
       });
     }
-  }, [mode, target, zipFile, apiUsesLocal, localApiUrl]);
+  }, [mode, target, zipFile]);
 
   validateRef.current = validate;
 
@@ -591,11 +576,11 @@ export default function SourceScanPage() {
     }
   }
 
-  async function pollJob(jobId: string, localScan: boolean): Promise<ScanResult | null> {
+  async function pollJob(jobId: string): Promise<ScanResult | null> {
     return new Promise((resolve, reject) => {
       const poll = async () => {
         try {
-          const res = await fetchLocalApi(localScan, `v1/source-scan/jobs/${jobId}`, undefined, API_BASE);
+          const res = await fetchScanApi(`v1/source-scan/jobs/${jobId}`);
           const j = await readJsonResponse(res);
           if (!res.ok) throw new Error(String(j.detail || "진행 상태 조회 실패"));
           setScanProgress({
@@ -635,12 +620,7 @@ export default function SourceScanPage() {
   async function cancelScan() {
     if (!scanProgress?.job_id) return;
     try {
-      await fetchLocalApi(
-        zipScanUsesLocal(mode, useLocalScan),
-        `v1/source-scan/jobs/${scanProgress.job_id}/cancel`,
-        { method: "POST" },
-        API_BASE
-      );
+      await fetchScanApi(`v1/source-scan/jobs/${scanProgress.job_id}/cancel`, { method: "POST" });
       setMsg("진단 취소 요청됨");
     } catch (e) {
       setMsg(String((e as Error).message || e));
@@ -741,7 +721,7 @@ export default function SourceScanPage() {
       job_id: "",
       status: "running",
       pct: 0,
-      message: mode === "upload" ? (apiUsesLocal ? "로컬 API로 ZIP 전송 중…" : "ZIP 업로드 중…") : "진단 요청 전송 중…",
+      message: mode === "upload" ? "ZIP 업로드 중…" : "진단 요청 전송 중…",
       steps: [
         { id: "prepare", label: "준비", status: "running", detail: "" },
         { id: "finalize", label: "결과 정리", status: "pending", detail: "" },
@@ -754,7 +734,7 @@ export default function SourceScanPage() {
       fd.append("format", "json");
       appendScanOptions(fd);
 
-      if (mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !apiUsesLocal) {
+      if (mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !isLocalPortalHost()) {
         setScanProgress((prev) =>
           prev
             ? { ...prev, message: `Render로 ZIP 업로드 중… (${(zipFile.size / (1024 * 1024)).toFixed(1)}MB)` }
@@ -783,7 +763,7 @@ export default function SourceScanPage() {
           message: "진단 시작…",
           steps: start.steps || [],
         });
-        const scanResult = await pollJob(start.job_id, false);
+        const scanResult = await pollJob(start.job_id);
         if (!scanResult) throw new Error("진단 결과 없음");
         forceRescanRef.current = false;
         setModeState((prev) => ({
@@ -796,7 +776,7 @@ export default function SourceScanPage() {
         }));
         setTab("all");
         setMsg(formatScanCompleteMessage(scanResult.stats));
-        const hRes = await fetchLocalApi(false, "v1/source-scan/history?limit=15", undefined, API_BASE);
+        const hRes = await fetchScanApi("v1/source-scan/history?limit=15");
         if (hRes.ok) {
           const hj = await readJsonResponse(hRes);
           setHistory((hj.history as HistoryItem[]) || []);
@@ -806,9 +786,10 @@ export default function SourceScanPage() {
       }
 
       if (mode === "upload" && zipFile) fd.append("file", zipFile);
-      const res = apiUsesLocal
-        ? await postLocalMultipart(true, "v1/source-scan/run", fd, API_BASE)
-        : await postMultipart("v1/source-scan/run", fd, zipFile);
+      const res =
+        mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !isLocalPortalHost()
+          ? await postMultipart("v1/source-scan/run", fd, zipFile)
+          : await postScanMultipart("v1/source-scan/run", fd);
       const start = (await readJsonResponse(res)) as {
         async?: boolean;
         job_id?: string;
@@ -826,7 +807,7 @@ export default function SourceScanPage() {
         steps: start.steps || [],
       });
 
-      const scanResult = await pollJob(start.job_id, apiUsesLocal);
+      const scanResult = await pollJob(start.job_id);
       if (!scanResult) throw new Error("진단 결과 없음");
 
       forceRescanRef.current = false;
@@ -848,7 +829,7 @@ export default function SourceScanPage() {
       window.setTimeout(() => setScanProgress(null), 800);
     } catch (e) {
       forceRescanRef.current = false;
-      setMsg(wrapFetchError(e, { local: apiUsesLocal, localApiUrl }).message);
+      setMsg(wrapScanFetchError(e).message);
       setScanProgress(null);
     } finally {
       setBusy(false);
@@ -934,18 +915,18 @@ export default function SourceScanPage() {
       <section className="panel">
         <div className="env-panel-head">
           <h2>도구·환경 상태</h2>
-          <EnvSourceBadge local={apiUsesLocal} />
+          <EnvSourceBadge />
         </div>
         {envLoading ? <EnvToolsSkeleton /> : null}
         {envLoadError ? <p className="msg err">{envLoadError}</p> : null}
         {!envLoading && envStatus ? (
           <>
-            {!apiUsesLocal && !envStatus.pmd && !envStatus.spotbugs ? (
+            {!isLocalPortalHost() && !envStatus.pmd && !envStatus.spotbugs ? (
               <p className="msg err">
-                Render에 Java 도구 없음 — ZIP 검사는 「내 PC에서 검사」 사용 또는 Docker Render URL 확인.
+                Render에 Java 도구 미설정 — Docker Render 재배포 확인. 대용량 ZIP은 localhost:3000 로컬 포털 사용.
               </p>
             ) : null}
-            {apiUsesLocal && (!envStatus.pmd || !envStatus.spotbugs) ? (
+            {isLocalPortalHost() && (!envStatus.pmd || !envStatus.spotbugs) ? (
               <p className="msg err">
                 이 PC에 PMD/SpotBugs 미설정 — <code>start-api-source-scan.ps1</code> 상단{" "}
                 <code>C:\tools</code> 경로를 본인 PC에 맞게 수정하세요.
@@ -1011,18 +992,7 @@ export default function SourceScanPage() {
               소스 ZIP
               <input type="file" accept=".zip,application/zip" onChange={(e) => setZipFile(e.target.files?.[0] ?? null)} />
             </label>
-            <LocalScanSettings
-              useLocal={useLocalScan}
-              localApiUrl={localApiUrl}
-              envLoadError={mode === "upload" && useLocalScan ? envLoadError : undefined}
-              envLoading={mode === "upload" && useLocalScan ? envLoading : false}
-              onToggle={(on) => {
-                setUseLocalScan(on);
-                void loadScanEnvironment();
-              }}
-              onUrlChange={setLocalApiUrl}
-              onUrlBlur={() => void loadScanEnvironment()}
-            />
+            <CloudLargeZipHint />
           </>
         )}
         <ul className="source-scan-option-list">

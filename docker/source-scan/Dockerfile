@@ -5,7 +5,9 @@ FROM eclipse-temurin:8-jdk-jammy
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PMD_HOME=/opt/pmd \
+    PMD_BIN=/opt/pmd/bin/pmd \
     SPOTBUGS_HOME=/opt/spotbugs \
+    SPOTBUGS_BIN=/opt/spotbugs/bin/spotbugs \
     MAVEN_HOME=/opt/maven \
     FINDSEC_BUGS_PLUGIN_JAR=/opt/findsecbugs-plugin.jar \
     SOURCE_SCAN_TOOLS_DIR=/opt \

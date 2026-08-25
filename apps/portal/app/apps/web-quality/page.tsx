@@ -10,15 +10,15 @@ import {
   wrapFetchError,
 } from "@/lib/formUpload";
 import {
-  fetchLocalApi,
-  getLocalScanApiBase,
-  isLocalScanEnabled,
-  postLocalMultipart,
+  fetchScanApi,
+  isLocalPortalHost,
+  postScanMultipart,
+  wrapScanFetchError,
 } from "@/lib/localScanApi";
 import {
+  CloudLargeZipHint,
   EnvSourceBadge,
   EnvToolsSkeleton,
-  LocalScanSettings,
 } from "@/components/LocalScanSettings";
 import {
   type FixGuideEntry,
@@ -96,10 +96,6 @@ function isIpmsMode(mode: ScanMode): boolean {
 
 function isAsyncScanMode(mode: ScanMode): boolean {
   return isIpmsMode(mode) || mode === "external";
-}
-
-function javaUploadUsesLocal(mode: ScanMode, useLocalScan: boolean): boolean {
-  return mode === "java-upload" && useLocalScan;
 }
 
 type ScenarioCandidate = {
@@ -430,8 +426,6 @@ export default function WebQualityPage() {
   const [scenarioWarnings, setScenarioWarnings] = useState<string[]>([]);
   const [envStatus, setEnvStatus] = useState<EnvStatus | null>(null);
   const [envLoadError, setEnvLoadError] = useState("");
-  const [useLocalScan, setUseLocalScan] = useState(() => isLocalScanEnabled());
-  const [localApiUrl, setLocalApiUrl] = useState(() => getLocalScanApiBase());
   const [envLoading, setEnvLoading] = useState(true);
   const [fixGuides, setFixGuides] = useState<Record<string, FixGuideEntry>>({});
   const [designCheck, setDesignCheck] = useState<DesignCheck>(IDLE_CHECK);
@@ -471,9 +465,9 @@ export default function WebQualityPage() {
     if (stored?.length) setSelectedIds(stored);
   }, [selectedIdsByMode]);
 
-  const refreshHistory = useCallback(async (useLocal = false) => {
+  const refreshHistory = useCallback(async () => {
     try {
-      const res = await fetchLocalApi(useLocal, "v1/web-quality/history?limit=15", undefined, API_BASE);
+      const res = await fetchScanApi("v1/web-quality/history?limit=15");
       if (!res.ok) return;
       const j = await readJsonResponse(res);
       setHistory((j.history as HistoryItem[]) || []);
@@ -482,31 +476,27 @@ export default function WebQualityPage() {
     }
   }, []);
 
-  const apiUsesLocal = javaUploadUsesLocal(mode, useLocalScan);
-
   const loadWqEnvironment = useCallback(async () => {
-    const local = javaUploadUsesLocal(mode, useLocalScan);
     setEnvLoading(true);
     setEnvLoadError("");
-    if (local) setEnvStatus(null);
 
     try {
-      const envRes = await fetchLocalApi(local, "v1/web-quality/environment", undefined, API_BASE);
+      const envRes = await fetchScanApi("v1/web-quality/environment");
       const envJ = await readJsonResponse(envRes);
       if (envRes.ok) {
         setEnvStatus(envJ as EnvStatus);
-      } else if (local) {
-        setEnvLoadError(`로컬 API에 연결되지 않음 (${localApiUrl}). start-local-scan.bat 실행 후 새로고침.`);
+      } else {
+        setEnvLoadError(`API 연결 실패 (HTTP ${envRes.status}).`);
       }
     } catch (e) {
-      setEnvLoadError(wrapFetchError(e, { local, localApiUrl }).message);
+      setEnvLoadError(wrapScanFetchError(e).message);
     } finally {
       setEnvLoading(false);
     }
 
     void (async () => {
       try {
-        const guidesRes = await fetchLocalApi(local, "v1/web-quality/fix-guides", undefined, API_BASE);
+        const guidesRes = await fetchScanApi("v1/web-quality/fix-guides");
         const guidesJ = await readJsonResponse(guidesRes);
         if (guidesRes.ok && guidesJ.guides) {
           setFixGuides(guidesJ.guides as Record<string, FixGuideEntry>);
@@ -515,7 +505,7 @@ export default function WebQualityPage() {
         /* non-blocking */
       }
     })();
-  }, [mode, useLocalScan, localApiUrl]);
+  }, []);
 
   useEffect(() => {
     void loadWqEnvironment();
@@ -532,7 +522,7 @@ export default function WebQualityPage() {
     setNeedLogin(prefs.needLogin);
     setSelectedIdsByMode(prefs.selectedIdsByMode || {});
     prefsHydrated.current = true;
-    void refreshHistory(isLocalScanEnabled());
+    void refreshHistory();
   }, [refreshHistory]);
 
   useEffect(() => {
@@ -683,18 +673,12 @@ export default function WebQualityPage() {
       setMsg("ZIP 파일을 선택하세요.");
       return;
     }
-    const useLocal = apiUsesLocal;
     setScenarioBusy(true);
     setScenarioLoaded(false);
     try {
       const fd = new FormData();
       fd.append("file", zipFile);
-      const res = await postLocalMultipart(
-        useLocal,
-        "v1/web-quality/scenarios/upload",
-        fd,
-        API_BASE
-      );
+      const res = await postScanMultipart("v1/web-quality/scenarios/upload", fd);
       const j = (await readJsonResponse(res)) as ScenarioPayload & {
         ok?: boolean;
         detail?: string;
@@ -713,11 +697,11 @@ export default function WebQualityPage() {
       setExtractable(false);
       setScenarios([]);
       setSelectedIds([]);
-      setMsg(wrapFetchError(e, { local: useLocal, localApiUrl }).message);
+      setMsg(wrapScanFetchError(e).message);
     } finally {
       setScenarioBusy(false);
     }
-  }, [applyScenarioPayload, zipFile, apiUsesLocal, localApiUrl]);
+  }, [applyScenarioPayload, zipFile]);
 
   const loadIpmsScenarios = useCallback(async () => {
     const access = ipmsAccessForMode(mode);
@@ -861,9 +845,9 @@ export default function WebQualityPage() {
     await startBrowserSession(ipmsUrl, "ipms");
   }
 
-  async function pollWqJob(jobId: string, useLocal: boolean): Promise<Record<string, unknown> | null> {
+  async function pollWqJob(jobId: string): Promise<Record<string, unknown> | null> {
     for (let i = 0; i < 900; i++) {
-      const res = await fetchLocalApi(useLocal, `v1/web-quality/jobs/${jobId}`, undefined, API_BASE);
+      const res = await fetchScanApi(`v1/web-quality/jobs/${jobId}`);
       const j = (await readJsonResponse(res)) as WqJobProgress & {
         ok?: boolean;
         result?: Record<string, unknown>;
@@ -888,14 +872,8 @@ export default function WebQualityPage() {
   async function cancelScan() {
     const jobId = scanProgress?.job_id;
     if (!jobId) return;
-    const useLocal = javaUploadUsesLocal(scanProgressMode ?? mode, useLocalScan);
     try {
-      const res = await fetchLocalApi(
-        useLocal,
-        `v1/web-quality/jobs/${jobId}/cancel`,
-        { method: "POST" },
-        API_BASE
-      );
+      const res = await fetchScanApi(`v1/web-quality/jobs/${jobId}/cancel`, { method: "POST" });
       if (!res.ok) {
         const j = await readJsonResponse(res);
         throw new Error(String(j.detail || `취소 실패 (HTTP ${res.status})`));
@@ -910,10 +888,8 @@ export default function WebQualityPage() {
     setBusy(true);
     setBusyMode(mode);
     setMsg("");
-    const recordIsJava = (recordMode || mode) === "java-upload";
-    const useLocal = recordIsJava && useLocalScan;
     try {
-      const res = await fetchLocalApi(useLocal, `v1/web-quality/history/${jobId}`, undefined, API_BASE);
+      const res = await fetchScanApi(`v1/web-quality/history/${jobId}`);
       const j = await readJsonResponse(res);
       if (!res.ok || !j.payload) {
         throw new Error(String(j.detail || `이력 불러오기 실패 (HTTP ${res.status})`));
@@ -987,13 +963,12 @@ export default function WebQualityPage() {
   );
 
   const validate = useCallback(async () => {
-    const useLocal = apiUsesLocal;
-    if (mode === "java-upload" && zipFile && shouldUploadDirect(zipFile) && !useLocal) {
-      const local = clientSideZipValidate(zipFile, false);
+    if (mode === "java-upload" && zipFile && shouldUploadDirect(zipFile) && !isLocalPortalHost()) {
+      const check = clientSideZipValidate(zipFile, false);
       setDesignCheck({
         checking: false,
-        canRun: local.ok,
-        message: local.message,
+        canRun: check.ok,
+        message: check.message,
         runtimeReady: undefined,
         portalPasswordSet: undefined,
       });
@@ -1004,7 +979,7 @@ export default function WebQualityPage() {
       const fd = new FormData();
       appendCommonFields(fd);
       if (mode === "java-upload" && zipFile) fd.append("file", zipFile);
-      const res = await postLocalMultipart(useLocal, "v1/web-quality/validate", fd, API_BASE);
+      const res = await postScanMultipart("v1/web-quality/validate", fd);
       const j = await readJsonResponse(res);
       if (!res.ok) {
         setDesignCheck({
@@ -1025,10 +1000,10 @@ export default function WebQualityPage() {
       setDesignCheck({
         checking: false,
         canRun: false,
-        message: wrapFetchError(e, { local: useLocal, localApiUrl }).message,
+        message: wrapScanFetchError(e).message,
       });
     }
-  }, [appendCommonFields, mode, apiUsesLocal, localApiUrl, zipFile]);
+  }, [appendCommonFields, mode, zipFile]);
 
   validateRef.current = validate;
 
@@ -1048,7 +1023,6 @@ export default function WebQualityPage() {
         externalSessionReady ? "1" : "0",
         zipFile ? zipFile.name : "",
         zipFile?.size ?? 0,
-        useLocalScan ? "1" : "0",
       ].join("|"),
     [
       mode,
@@ -1063,7 +1037,6 @@ export default function WebQualityPage() {
       sessionStorageFile,
       externalSessionReady,
       zipFile,
-      useLocalScan,
     ]
   );
 
@@ -1077,7 +1050,6 @@ export default function WebQualityPage() {
 
   async function runScan() {
     const scanMode = mode;
-    const useLocal = javaUploadUsesLocal(scanMode, useLocalScan);
     const format = "json" as const;
     setBusy(true);
     setBusyMode(scanMode);
@@ -1089,13 +1061,9 @@ export default function WebQualityPage() {
         : mode === "ipms-auth"
           ? "IPMS 로그인 화면 진단 실행 중…"
           : mode === "java-upload"
-            ? useLocal
-              ? includeRuntime
-                ? "로컬 API — Java ZIP 정적 + 화면 진단 중…"
-                : "로컬 API — Java ZIP 정적 진단 중…"
-              : includeRuntime
-                ? "Java ZIP 정적 + 화면 진단 실행 중…"
-                : "Java ZIP 정적 진단 실행 중…"
+            ? includeRuntime
+              ? "Java ZIP 정적 + 화면 진단 실행 중…"
+              : "Java ZIP 정적 진단 실행 중…"
             : "외부 URL 화면 진단 실행 중…"
     );
     setMsg("");
@@ -1119,7 +1087,7 @@ export default function WebQualityPage() {
       if (format === "json" && includeRuntime && isAsyncScanMode(mode)) {
         fd.append("async_progress", "true");
       }
-      const res = await postLocalMultipart(useLocal, "v1/web-quality/run", fd, API_BASE);
+      const res = await postScanMultipart("v1/web-quality/run", fd);
       const start = (await readJsonResponse(res)) as ScanResult & {
         detail?: string;
         async?: boolean;
@@ -1138,7 +1106,7 @@ export default function WebQualityPage() {
           pct: start.pct ?? 0,
           message: start.message || "진단 시작…",
         });
-        const polled = await pollWqJob(start.job_id, useLocal);
+        const polled = await pollWqJob(start.job_id);
         if (!polled) throw new Error("진단 결과 없음");
         j = polled as ScanResult;
       } else {
@@ -1159,9 +1127,9 @@ export default function WebQualityPage() {
       setMsg(
         `진단 완료 — ${j.findings.length}건 · 캡처 ${j.screenshots?.length ?? 0}장 · 미실행 ${j.stats?.not_scanned ?? 0}건${diffNote}${rtNote}`
       );
-      void refreshHistory(useLocal);
+      void refreshHistory();
     } catch (e) {
-      setMsg(wrapFetchError(e, { local: apiUsesLocal, localApiUrl }).message);
+      setMsg(wrapScanFetchError(e).message);
     } finally {
       setBusy(false);
       setBusyMode(null);
@@ -1177,7 +1145,6 @@ export default function WebQualityPage() {
   ) {
     const cached = resultsByMode[mode];
     const jobId = lastJobId;
-    const useLocal = apiUsesLocal;
     if (!cached && !jobId) {
       setMsg("먼저 진단을 실행하거나 이력에서 결과를 불러오세요.");
       return;
@@ -1186,34 +1153,19 @@ export default function WebQualityPage() {
     setMsg("");
     try {
       const postExport = (payload: ScanResult) =>
-        fetchLocalApi(
-          useLocal,
-          "v1/web-quality/export",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ format, payload }),
-          },
-          API_BASE
-        );
+        fetchScanApi("v1/web-quality/export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ format, payload }),
+        });
 
       let res: Response;
       if (cached) {
         res = await postExport(cached);
       } else if (jobId) {
-        res = await fetchLocalApi(
-          useLocal,
-          `v1/web-quality/jobs/${jobId}/export?format=${format}`,
-          undefined,
-          API_BASE
-        );
+        res = await fetchScanApi(`v1/web-quality/jobs/${jobId}/export?format=${format}`);
         if (!res.ok) {
-          const histRes = await fetchLocalApi(
-            useLocal,
-            `v1/web-quality/history/${jobId}`,
-            undefined,
-            API_BASE
-          );
+          const histRes = await fetchScanApi(`v1/web-quality/history/${jobId}`);
           if (histRes.ok) {
             const h = (await readJsonResponse(histRes)) as { payload?: ScanResult };
             if (h.payload) {
@@ -1230,7 +1182,7 @@ export default function WebQualityPage() {
           String(
             j.detail ||
               (res.status === 404
-                ? "보고서 API를 찾을 수 없습니다. 로컬 API(start-local-scan.bat) 또는 Render API를 확인하세요."
+                ? "보고서 API를 찾을 수 없습니다. API(start-local-scan.bat) 또는 Render 배포를 확인하세요."
                 : `다운로드 실패 (HTTP ${res.status})`)
           )
         );
@@ -1635,8 +1587,8 @@ python scripts/save_ipms_session.py --url ${ipmsUrl.trim() || IPMS_DEFAULT_URL} 
         ) : mode === "java-upload" ? (
           <div className="wq-step-block">
             <div className="env-panel-head">
-              <EnvSourceBadge local={apiUsesLocal} />
-              {apiUsesLocal && envLoading ? <EnvToolsSkeleton /> : null}
+              <EnvSourceBadge />
+              {envLoading ? <EnvToolsSkeleton /> : null}
             </div>
             <p className="hint">
               Java/WAR <strong>ZIP</strong> — JSP·HTML <strong>정적</strong> 품질 진단 (URL
@@ -1657,19 +1609,7 @@ python scripts/save_ipms_session.py --url ${ipmsUrl.trim() || IPMS_DEFAULT_URL} 
                 />
               </label>
             </div>
-            <LocalScanSettings
-              useLocal={useLocalScan}
-              localApiUrl={localApiUrl}
-              envLoadError={useLocalScan ? envLoadError : undefined}
-              envLoading={useLocalScan ? envLoading : false}
-              onToggle={(on) => {
-                setUseLocalScan(on);
-                void loadWqEnvironment();
-                void refreshHistory(on);
-              }}
-              onUrlChange={setLocalApiUrl}
-              onUrlBlur={() => void loadWqEnvironment()}
-            />
+            <CloudLargeZipHint />
             <div className="btn-row">
               <button
                 type="button"
