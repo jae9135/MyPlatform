@@ -19,7 +19,7 @@ class ScanOptions:
     exclude_globs: list[str] | None = None
     spotbugs_effort: str = "max"
     spotbugs_threshold: str = "low"
-    use_prebuilt_classes: bool = True
+    use_prebuilt_classes: bool = False
     zip_max_bytes: int = 200 * 1024 * 1024
     zip_warn_bytes: int = 50 * 1024 * 1024
 
@@ -33,7 +33,7 @@ class ScanOptions:
         exclude_paths: str = "",
         spotbugs_effort: str = "max",
         spotbugs_threshold: str = "low",
-        use_prebuilt_classes: str = "true",
+        use_prebuilt_classes: str = "false",
     ) -> "ScanOptions":
         return cls(
             try_java_build=(try_java_build or "true").lower() not in ("0", "false", "no"),
@@ -42,7 +42,7 @@ class ScanOptions:
             exclude_globs=parse_exclude_globs(exclude_paths),
             spotbugs_effort=(spotbugs_effort or "max").strip() or "max",
             spotbugs_threshold=(spotbugs_threshold or "low").strip() or "low",
-            use_prebuilt_classes=(use_prebuilt_classes or "true").lower() not in ("0", "false", "no"),
+            use_prebuilt_classes=(use_prebuilt_classes or "false").lower() not in ("0", "false", "no"),
         )
 
     def effective_exclude(self) -> list[str]:

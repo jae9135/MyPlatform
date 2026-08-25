@@ -117,11 +117,30 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
 # === 경로를 환경에 맞게 수정 ===
-$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-8.0.502.7-hotspot"
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-11.0.32.9-hotspot"
 $mavenBin = "C:\Mywork\Tools\apache-maven-3.9.16\bin"
 $env:PMD_HOME = "C:\tools\pmd-bin-7.26.0"
 $env:SPOTBUGS_HOME = "C:\tools\spotbugs-4.10.4"
 $env:SOURCE_SCAN_TOOLS_DIR = "C:\tools"
+
+# SpotBugs 4.9+ 는 실행용 JDK 11+ 필요 (Maven 컴파일은 JAVA_HOME=8 유지 가능)
+$spotbugsJdk = @(
+    $env:SPOTBUGS_JAVA_HOME,
+    (Get-ChildItem "C:\Program Files\Eclipse Adoptium" -Directory -Filter "jdk-11*" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName),
+    (Get-ChildItem "C:\Program Files\Eclipse Adoptium" -Directory -Filter "jdk-17*" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName)
+) | Where-Object { $_ -and (Test-Path (Join-Path $_ "bin\java.exe")) } | Select-Object -First 1
+
+if ($spotbugsJdk) {
+    $env:SPOTBUGS_JAVA_HOME = $spotbugsJdk
+    Write-Host "SPOTBUGS_JAVA_HOME:" $env:SPOTBUGS_JAVA_HOME
+} else {
+    Write-Warning @"
+SpotBugs 4.10 실행에 JDK 11+ 필요 (현재 JAVA_HOME=JDK 8).
+- Eclipse Temurin 11 설치: https://adoptium.net/
+- 설치 후 이 스크립트가 SPOTBUGS_JAVA_HOME 을 자동 설정합니다.
+- 또는 SpotBugs 4.8.6.8 + JDK 8 조합으로 SPOTBUGS_HOME 변경
+"@
+}
 
 $plugin = Get-ChildItem "C:\tools" -Filter "findsecbugs*.jar" -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($plugin) {

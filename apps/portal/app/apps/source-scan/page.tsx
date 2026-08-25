@@ -296,7 +296,7 @@ export default function SourceScanPage() {
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [tryJavaBuild, setTryJavaBuild] = useState(true);
   const [tryEslintZip, setTryEslintZip] = useState(false);
-  const [usePrebuiltClasses, setUsePrebuiltClasses] = useState(true);
+  const [usePrebuiltClasses, setUsePrebuiltClasses] = useState(false);
   const [pmdRulesets, setPmdRulesets] = useState("");
   const [excludePaths, setExcludePaths] = useState("");
   const [spotbugsEffort, setSpotbugsEffort] = useState("max");
@@ -926,6 +926,16 @@ export default function SourceScanPage() {
                 Render에 Java 도구 미설정 — Docker Render 재배포 확인. 대용량 ZIP은 localhost:3000 로컬 포털 사용.
               </p>
             ) : null}
+            {isLocalPortalHost() && envStatus.spotbugs && envStatus.spotbugs_java_ok === false ? (
+              <p className="msg err">
+                SpotBugs 실행 JDK 부족 — SpotBugs 4.10은 <strong>JDK 11+</strong>가 필요합니다.{" "}
+                <code>JAVA_HOME</code>은 JDK 8 유지하고, Temurin 11 설치 후{" "}
+                <code>SPOTBUGS_JAVA_HOME</code>을 설정하세요.{" "}
+                {envStatus.spotbugs_runtime_error ? (
+                  <span className="env-path">{String(envStatus.spotbugs_runtime_error)}</span>
+                ) : null}
+              </p>
+            ) : null}
             {isLocalPortalHost() && (!envStatus.pmd || !envStatus.spotbugs) ? (
               <p className="msg err">
                 이 PC에 PMD/SpotBugs 미설정 — <code>start-api-source-scan.ps1</code> 상단{" "}
@@ -948,6 +958,13 @@ export default function SourceScanPage() {
               <li>
                 <strong>PMD</strong> {envStatus.pmd ? "✓" : "✕"} · <strong>SpotBugs</strong>{" "}
                 {envStatus.spotbugs ? "✓" : "✕"}
+                {envStatus.spotbugs && envStatus.spotbugs_java_ok === false ? " (JDK 11+ 필요)" : ""}
+              </li>
+              <li>
+                <strong>SpotBugs JDK</strong>
+                <span className="env-path">
+                  {String(envStatus.spotbugs_java_home || envStatus.java_home || "(미설정)")}
+                </span>
               </li>
               <li>
                 <strong>plugin</strong>
@@ -1002,7 +1019,7 @@ export default function SourceScanPage() {
               <span>Java Maven/Gradle 빌드 후 FindSecBugs</span>
             </label>
             <p className="source-scan-option-desc">
-              컴파일된 .class가 필요합니다. ZIP의 target/classes가 소스와 맞지 않으면 FindSecBugs 0건일 수 있습니다.
+              기본은 JDK로 재컴파일합니다. ZIP class가 실행 JDK와 맞지 않으면 자동 재컴파일합니다.
             </p>
           </li>
           {mode === "upload" ? (
@@ -1021,9 +1038,11 @@ export default function SourceScanPage() {
                 checked={usePrebuiltClasses}
                 onChange={(e) => setUsePrebuiltClasses(e.target.checked)}
               />
-              <span>ZIP에 target/classes 있으면 컴파일 생략</span>
+              <span>ZIP의 target/classes 재사용 (컴파일 생략)</span>
             </label>
-            <p className="source-scan-option-desc">빌드 산출물이 ZIP에 포함된 경우에만 권장합니다.</p>
+            <p className="source-scan-option-desc">
+              기본은 ZIP에 class가 있어도 clean 후 재컴파일합니다. JDK·소스와 일치하는 산출물만 재사용하려면 체크하세요.
+            </p>
           </li>
         </ul>
         <button type="button" className="btn ghost" style={{ marginTop: "0.75rem" }} onClick={() => setShowAdvanced((v) => !v)}>

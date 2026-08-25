@@ -1834,7 +1834,7 @@ async def source_scan_run(
     exclude_paths: str = Form(""),
     spotbugs_effort: str = Form("max"),
     spotbugs_threshold: str = Form("low"),
-    use_prebuilt_classes: str = Form("true"),
+    use_prebuilt_classes: str = Form("false"),
     progress: str = Form("true"),
     staging_id: str = Form(""),
     file: UploadFile | None = File(None),

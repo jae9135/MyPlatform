@@ -71,7 +71,9 @@ def get_environment_status() -> dict[str, Any]:
         detect_jdk_hint,
         findsecbugs_plugin,
         pmd_executable,
+        resolve_spotbugs_java_home,
         spotbugs_executable,
+        spotbugs_runtime_error,
     )
 
     mvn = _resolve_cli("mvn")
@@ -85,12 +87,17 @@ def get_environment_status() -> dict[str, Any]:
                 mvn_detail = (proc.stderr or proc.stdout or b"").decode("utf-8", errors="replace")[:200]
         except Exception as e:
             mvn_detail = str(e)
+    spotbugs_home = resolve_spotbugs_java_home()
+    spotbugs_runtime_err = spotbugs_runtime_error()
     return {
-        "revision": "mvn-cmd-fix-2",
+        "revision": "spotbugs-jdk11-preflight-1",
         "mvn_path": mvn,
         "mvn_ok": mvn_ok,
         "mvn_detail": mvn_detail,
         "java_home": os.environ.get("JAVA_HOME", ""),
+        "spotbugs_java_home": str(spotbugs_home or os.environ.get("SPOTBUGS_JAVA_HOME", "")),
+        "spotbugs_java_ok": spotbugs_runtime_err is None,
+        "spotbugs_runtime_error": spotbugs_runtime_err or "",
         "jdk_hint": detect_jdk_hint(repo_root()),
         "pmd": bool(pmd_executable()),
         "spotbugs": bool(spotbugs_executable()),

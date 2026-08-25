@@ -13,14 +13,14 @@ export type SourceScanPrefs = {
   showAdvanced: boolean;
 };
 
-const STORAGE_KEY = "source-scan-prefs-v1";
+const STORAGE_KEY = "source-scan-prefs-v2";
 
 const DEFAULTS: SourceScanPrefs = {
   mode: "upload",
   target: "er-modeler",
   tryJavaBuild: true,
   tryEslintZip: false,
-  usePrebuiltClasses: true,
+  usePrebuiltClasses: false,
   pmdRulesets: "",
   excludePaths: "",
   spotbugsEffort: "max",
