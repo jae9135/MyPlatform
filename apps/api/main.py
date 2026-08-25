@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.responses import Response
 
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_CHK_DIR = Path(os.getenv("CHKDBSTD_DIR", str(APP_DIR / "chkdbstd")))
@@ -121,6 +122,8 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     """When API_ACCESS_KEY is set, require X-Api-Key (portal proxy sends it)."""
 
     async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS":
+            return await call_next(request)
         path = request.url.path
         if path in ("/health", "/health/detail", "/docs", "/openapi.json", "/redoc"):
             return await call_next(request)
@@ -134,6 +137,43 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(ApiKeyMiddleware)
+
+
+class DirectUploadCorsMiddleware(BaseHTTPMiddleware):
+    """Browser direct upload (Vercel → Render): reflect Origin on preflight + valid API key."""
+
+    _PUBLIC_PATHS = frozenset({"/health", "/health/detail", "/docs", "/openapi.json", "/redoc"})
+
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin")
+        if request.method == "OPTIONS" and origin:
+            resp = Response(status_code=204)
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+            req_hdr = request.headers.get(
+                "access-control-request-headers", "content-type, x-api-key"
+            )
+            resp.headers["Access-Control-Allow-Headers"] = req_hdr
+            resp.headers["Access-Control-Max-Age"] = "86400"
+            resp.headers["Vary"] = "Origin"
+            return resp
+        response = await call_next(request)
+        if origin:
+            path = request.url.path
+            expected = (os.getenv("API_ACCESS_KEY") or "").strip()
+            got = request.headers.get("x-api-key") or ""
+            allowed = (
+                origin in origins
+                or path in self._PUBLIC_PATHS
+                or (expected and got == expected)
+            )
+            if allowed:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Vary"] = "Origin"
+        return response
+
+
+app.add_middleware(DirectUploadCorsMiddleware)
 
 
 def _ensure_api_path() -> None:

@@ -9,7 +9,13 @@ import {
   type FixGuidesCatalog,
 } from "@/lib/sourceScanFix";
 import { loadSourceScanPrefs, saveSourceScanPrefs } from "@/lib/sourceScanPrefs";
-import { postMultipart, readJsonResponse } from "@/lib/formUpload";
+import {
+  clientSideZipValidate,
+  postMultipart,
+  readJsonResponse,
+  shouldUploadDirect,
+  wrapFetchError,
+} from "@/lib/formUpload";
 
 const PAGE_SIZE = 80;
 
@@ -275,6 +281,7 @@ export default function SourceScanPage() {
   const [tab, setTab] = useState<TabId>("all");
   const [query, setQuery] = useState("");
   const [envStatus, setEnvStatus] = useState<EnvStatus | null>(null);
+  const [envLoadError, setEnvLoadError] = useState("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showRules, setShowRules] = useState(false);
   const [rulesPmd, setRulesPmd] = useState<RuleItem[]>([]);
@@ -386,16 +393,36 @@ export default function SourceScanPage() {
 
   useEffect(() => {
     void (async () => {
+      setEnvLoadError("");
       try {
-        const [tRes, eRes, hRes, gRes] = await Promise.all([
+        const [tRes, eRes, detailRes, hRes, gRes] = await Promise.all([
           fetch(`${API_BASE}/v1/source-scan/targets`),
           fetch(`${API_BASE}/v1/source-scan/environment`),
+          fetch(`${API_BASE}/health/detail`),
           fetch(`${API_BASE}/v1/source-scan/history?limit=15`),
           fetch(`${API_BASE}/v1/source-scan/fix-guides`),
         ]);
         const tj = await tRes.json();
         if (tRes.ok && Array.isArray(tj.targets)) setTargets(tj.targets);
-        if (eRes.ok) setEnvStatus(await eRes.json());
+
+        let env: EnvStatus | null = null;
+        if (eRes.ok) {
+          env = (await eRes.json()) as EnvStatus;
+        } else if (detailRes.ok) {
+          const detail = (await detailRes.json()) as { source_scan?: EnvStatus };
+          if (detail.source_scan) {
+            env = { ok: true, ...detail.source_scan } as EnvStatus;
+            setEnvLoadError(
+              `환경 API HTTP ${eRes.status} — health/detail의 source_scan으로 표시 중. API_ACCESS_KEY 확인.`
+            );
+          }
+        } else {
+          setEnvLoadError(
+            `API 연결 실패 (environment HTTP ${eRes.status}). Vercel NEXT_PUBLIC_API_BASE_URL·API_ACCESS_KEY 확인.`
+          );
+        }
+        if (env) setEnvStatus(env);
+
         if (hRes.ok) {
           const hj = await hRes.json();
           setHistory(hj.history || []);
@@ -404,8 +431,8 @@ export default function SourceScanPage() {
           const gj = await gRes.json();
           setFixGuides(normalizeFixGuides(gj));
         }
-      } catch {
-        /* ignore */
+      } catch (e) {
+        setEnvLoadError(wrapFetchError(e).message);
       }
     })();
   }, []);
@@ -413,6 +440,16 @@ export default function SourceScanPage() {
   const validate = useCallback(async () => {
     if (mode === "upload" && !zipFile) {
       setDesignCheck(IDLE_UPLOAD_CHECK);
+      return;
+    }
+    if (mode === "upload" && zipFile && shouldUploadDirect(zipFile)) {
+      const local = clientSideZipValidate(zipFile);
+      setDesignCheck({
+        checking: false,
+        canRun: local.ok,
+        message: local.message,
+        warnings: local.warnings,
+      });
       return;
     }
     setDesignCheck({ checking: true, canRun: false, message: "사전 검증 중…" });
@@ -441,7 +478,7 @@ export default function SourceScanPage() {
       setDesignCheck({
         checking: false,
         canRun: false,
-        message: String((e as Error).message || e),
+        message: wrapFetchError(e).message,
       });
     }
   }, [mode, target, zipFile]);
@@ -764,6 +801,14 @@ export default function SourceScanPage() {
       {envStatus ? (
         <section className="panel">
           <h2>도구·환경 상태</h2>
+          {envLoadError ? <p className="msg err">{envLoadError}</p> : null}
+          {!envStatus.pmd && !envStatus.spotbugs ? (
+            <p className="msg err">
+              PMD·SpotBugs 미설정 — Vercel <code>NEXT_PUBLIC_API_BASE_URL</code>이 Docker Render URL(예:{" "}
+              <code>https://myplatform-9ukz.onrender.com</code>)인지 확인하세요. Python-only Render에는 Java
+              도구가 없습니다.
+            </p>
+          ) : null}
           <ul className="source-scan-env-grid">
             <li>
               <strong>revision</strong> {String(envStatus.revision || "-")}

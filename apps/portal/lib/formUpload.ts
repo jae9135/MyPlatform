@@ -2,6 +2,14 @@ import { API_BASE } from "@/lib/apiBase";
 
 /** Vercel serverless proxy body limit (~4.5MB). Stay under for safety. */
 export const PROXY_SAFE_UPLOAD_BYTES = 4 * 1024 * 1024;
+export const ZIP_MAX_BYTES = 200 * 1024 * 1024;
+export const ZIP_WARN_BYTES = 50 * 1024 * 1024;
+
+function formatMb(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1);
+}
+
+type DesignCheckResult = { ok: boolean; message: string; warnings: string[] };
 
 type DirectApiConfig = { apiBase: string; apiKey: string };
 
@@ -46,6 +54,7 @@ export async function postMultipart(
     method: "POST",
     headers: { "X-Api-Key": cfg.apiKey },
     body: fd,
+    mode: "cors",
   });
 }
 
@@ -62,4 +71,36 @@ export async function readJsonResponse(res: Response): Promise<Record<string, un
     }
     throw new Error(text.length > 240 ? `${text.slice(0, 240)}…` : text);
   }
+}
+
+export function wrapFetchError(e: unknown): Error {
+  const msg = String((e as Error).message || e);
+  if (msg === "Failed to fetch" || msg.includes("NetworkError")) {
+    return new Error(
+      "Render API 연결 실패(CORS). Render를 재배포하고 CORS_ORIGINS에 Vercel URL을 추가하세요. (진단 실행 시 대용량 ZIP 직접 업로드)"
+    );
+  }
+  return e instanceof Error ? e : new Error(msg);
+}
+
+/** Large ZIP: skip Vercel proxy validate upload; check size client-side only. */
+export function clientSideZipValidate(file: File): DesignCheckResult {
+  if (file.size > ZIP_MAX_BYTES) {
+    return {
+      ok: false,
+      message: `ZIP 용량 초과 (${formatMb(file.size)}MB · 최대 ${formatMb(ZIP_MAX_BYTES)}MB)`,
+      warnings: [],
+    };
+  }
+  const warnings: string[] = [];
+  if (file.size > ZIP_WARN_BYTES) {
+    warnings.push(
+      `대용량 ZIP (${formatMb(file.size)}MB) — 업로드·진단에 수 분 걸릴 수 있습니다.`
+    );
+  }
+  return {
+    ok: true,
+    message: `진단 가능 — ZIP ${formatMb(file.size)}MB (실행 시 Render로 직접 업로드)`,
+    warnings,
+  };
 }
