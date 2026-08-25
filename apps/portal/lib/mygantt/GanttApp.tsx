@@ -588,6 +588,7 @@ export default function GanttApp() {
         <button
           type="button"
           className={pane === "table" ? "active" : ""}
+          data-wq-target="main_table_pane"
           onClick={() => setPane("table")}
         >
           표
@@ -595,13 +596,18 @@ export default function GanttApp() {
         <button
           type="button"
           className={pane === "gantt" ? "active" : ""}
+          data-wq-target="gantt_pane"
           onClick={() => setPane("gantt")}
         >
           간트
         </button>
       </div>
 
-      <div className={`workspace pane-${pane}`} ref={workspaceRef}>
+      <div
+        className={`workspace pane-${pane}`}
+        ref={workspaceRef}
+        data-wq-state={pane === "gantt" ? "gantt_pane" : "main_table_pane"}
+      >
         <div className="workspace-left" style={{ width: `${splitRatio * 100}%` }}>
           <TaskTable
             tasks={project.tasks}

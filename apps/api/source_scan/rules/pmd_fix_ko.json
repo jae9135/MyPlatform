@@ -1,0 +1,49 @@
+{
+  "EmptyCatchBlock": {
+    "fix": "빈 catch 블록은 예외를 숨깁니다. 로깅하거나 적절히 처리·재throw 하세요.",
+    "example": "catch (IOException e) { log.warn(\"failed\", e); throw new ServiceException(e); }"
+  },
+  "CloseResource": {
+    "fix": "Connection·Stream은 try-with-resources로 자동 close 하세요.",
+    "example": "try (InputStream in = Files.newInputStream(path)) { ... }"
+  },
+  "UseEqualsToCompareStrings": {
+    "fix": "문자열 비교는 == 대신 equals()를 사용하세요. null-safe는 Objects.equals(a, b)."
+  },
+  "AvoidReassigningParameters": {
+    "fix": "메서드 파라미터를 재할당하지 말고 지역 변수를 새로 선언하세요."
+  },
+  "GuardLogStatement": {
+    "fix": "비용 큰 로그는 isDebugEnabled() 등으로 감싸 불필요한 문자열 생성을 줄이세요."
+  },
+  "AvoidDuplicateLiterals": {
+    "fix": "반복 문자열은 상수로 추출해 유지보수성과 오타를 줄이세요."
+  },
+  "AvoidCatchingThrowable": {
+    "fix": "Throwable/Error까지 catch하지 말고 구체적 예외만 처리하세요."
+  },
+  "AvoidThrowingRawExceptionTypes": {
+    "fix": "Exception 대신 구체적 예외 타입 또는 커스텀 예외를 던지세요."
+  },
+  "NullAssignment": {
+    "fix": "null 할당이 NPE 위험을 키웁니다. Optional·방어 코드·@NonNull 검사를 검토하세요."
+  },
+  "UnusedLocalVariable": {
+    "fix": "사용하지 않는 지역 변수·import를 제거하세요."
+  },
+  "UnusedPrivateMethod": {
+    "fix": "호출되지 않는 private 메서드는 삭제하거나 사용처를 추가하세요."
+  },
+  "AvoidPrintStackTrace": {
+    "fix": "printStackTrace() 대신 로거(logger.error(\"msg\", e))를 사용하세요."
+  },
+  "PreserveStackTrace": {
+    "fix": "예외를 다시 던질 때 cause를 유지하세요: throw new WrapperException(e) 또는 initCause."
+  },
+  "SimplifyBooleanReturns": {
+    "fix": "if (cond) return true; else return false; → return cond; 형태로 단순화하세요."
+  },
+  "CompareObjectsWithEquals": {
+    "fix": "객체 비교는 == 가 아니라 equals()를 사용하세요."
+  }
+}

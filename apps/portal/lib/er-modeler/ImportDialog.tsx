@@ -70,6 +70,7 @@ export function ImportDialog({
       onCancel={onCancel}
       className="er-import-modal"
       width={420}
+      wqState="import_dialog"
     >
         {busy ? (
           importProgress ? (

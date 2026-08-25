@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { PortalNav } from "@/lib/PortalNav";
 import { APPS } from "@/lib/apps";
+import { getInfraLinks } from "@/lib/portalInfraLinks";
 
 export default function HomePage() {
+  const infraLinks = getInfraLinks();
+
   return (
     <main>
       <PortalNav home />
@@ -14,9 +17,17 @@ export default function HomePage() {
           결과 파일은 기기에만 둡니다.
         </p>
         <div className="badge-row">
-          <span className="badge">Vercel · Portal</span>
-          <span className="badge">Render · API</span>
-          <span className="badge">Supabase · DB/Storage</span>
+          {infraLinks.map((item) => (
+            <a
+              key={item.label}
+              className="badge badge-link"
+              href={item.href}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {item.label}
+            </a>
+          ))}
         </div>
       </section>
 
@@ -40,13 +51,6 @@ export default function HomePage() {
           </article>
         ))}
       </section>
-
-      <footer>
-        로컬 소스:{" "}
-        <code>C:\Mywork\AI\cursor\09 독자 제공용 파일\study\</code>
-        <br />
-        플랫폼 루트: <code>C:\Mywork\MyPlatform</code>
-      </footer>
     </main>
   );
 }

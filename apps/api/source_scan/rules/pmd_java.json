@@ -1,0 +1,56 @@
+[
+  {
+    "id": "GuardLogStatement",
+    "title": "GuardLogStatement",
+    "ruleset": "pmd",
+    "category": "java"
+  },
+  {
+    "id": "EmptyCatchBlock",
+    "title": "EmptyCatchBlock",
+    "ruleset": "pmd",
+    "category": "java"
+  },
+  {
+    "id": "AvoidReassigningParameters",
+    "title": "AvoidReassigningParameters",
+    "ruleset": "pmd",
+    "category": "java"
+  },
+  {
+    "id": "UseEqualsToCompareStrings",
+    "title": "UseEqualsToCompareStrings",
+    "ruleset": "pmd",
+    "category": "java"
+  },
+  {
+    "id": "CloseResource",
+    "title": "CloseResource",
+    "ruleset": "pmd",
+    "category": "java"
+  },
+  {
+    "id": "UnusedLocalVariable",
+    "title": "UnusedLocalVariable",
+    "ruleset": "pmd",
+    "category": "java"
+  },
+  {
+    "id": "AvoidDuplicateLiterals",
+    "title": "AvoidDuplicateLiterals",
+    "ruleset": "pmd",
+    "category": "java"
+  },
+  {
+    "id": "LawOfDemeter",
+    "title": "LawOfDemeter",
+    "ruleset": "pmd",
+    "category": "java"
+  },
+  {
+    "id": "ClassWithOnlyPrivateConstructorsShouldBeFinal",
+    "title": "ClassWithOnlyPrivateConstructorsShouldBeFinal",
+    "ruleset": "pmd",
+    "category": "java"
+  }
+]

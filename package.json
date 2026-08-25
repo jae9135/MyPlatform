@@ -5,6 +5,7 @@
   "scripts": {
     "dev:portal": "npm --prefix apps/portal run dev",
     "build:portal": "npm --prefix apps/portal run build",
-    "dev:api": "python -m uvicorn main:app --app-dir apps/api --reload --port 8001"
+    "dev:api": "python -m uvicorn main:app --app-dir apps/api --reload --port 8001",
+    "dev:api:stable": "python -m uvicorn main:app --app-dir apps/api --port 8001"
   }
 }

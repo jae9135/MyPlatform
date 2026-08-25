@@ -1,0 +1,182 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>전기사업정보시스템</title>
+    
+
+
+
+
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- HTTP 1.0 -->
+
+
+<!-- HTTP 1.1 -->
+
+
+
+
+
+<link rel="icon" href="/ipms.online/app/images/favicon.ico">
+<link rel="apple-touch-icon" href="/ipms.online/app/images/favicon.ico">
+
+
+
+
+
+
+
+<link rel="stylesheet" type="text/css" href="/ipms.online/common/o2sdk.css">
+
+
+
+
+
+
+
+		
+
+
+
+<script src="/ipms.online/app/app-css-package.js"></script>
+<script src="/ipms.online/app/app-css-loader.js"></script>
+
+<script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+
+
+
+    <script>
+        var startDate = new Date();
+        var prevLoadedTime = 0;
+
+        function printSec(name) {
+            var loadedTime = new Date() - startDate;	// 시작으로부터 걸린 시간
+            var runningTime = prevLoadedTime == 0 ? loadedTime : loadedTime - prevLoadedTime;		// 해당 초기화 소요 시간
+            prevLoadedTime += runningTime;
+        };
+    </script>
+    <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+    <script src="https://cdn.iamport.kr/js/iamport.payment-1.2.0.js"></script>
+</head>
+
+<body>
+
+
+<div id="krds-skip-link">
+	<a href="#container">본문 바로가기</a>
+</div>
+
+<div id="wrap">
+	<div class="gov-top">
+		<div class="inner">
+			<span>이 누리집은 대한민국 공식 전자정부 누리집입니다.</span>
+		</div>
+	</div>
+
+	<!-- //누리집 -->
+	<header id="header">
+		<div class="header-info">
+			<div class="logo-area">
+				<h1>
+					<a href="javascript:;" title="홈으로 이동" id="main-logo-tag"><span class="blind">전기사업정보시스템</span></a>
+				</h1>
+			</div>
+			<div class="utility" id="user_info">
+				<!-- O2Main.js에서 로그인/로그아웃 버튼 동적 렌더 -->
+				<button type="button" class="btn-login" title="로그인 열기">로그인</button>
+			</div>
+		</div>
+
+		<!-- 동적 메뉴 트리 주입 영역 -->
+		<nav class="gnb-area" aria-label="주요 메뉴">
+			<ul class="gnb-list" id="gnb"><!-- O2Main.js가 채움 --></ul>
+		</nav>
+	</header>
+	<!-- //header -->
+
+	<div id="container">
+		<div class="content-inner in-between"></div>
+	</div>
+	<div>
+
+
+
+
+	</div>
+
+	<footer id="footer">
+		<div class="footer-inner">
+			<div class="footer-info">
+				<h2><span class="blind">전기사업정보시스템</span></h2>
+				<div class="address-wrap">
+					<address itemscope itemtype="https://schema.org/Organization">
+						<div class="info-item">
+							<span class="label">주소</span>
+							<span class="value" itemprop="address">(44538) 울산광역시 중구 종가로 323 (우정동528-1)</span>
+						</div>
+						<div class="info-item">
+							<span class="label">전화</span>
+							<span class="value" itemprop="telephone">
+      							<a href="tel:052-920-0695">052-920-0695</a>
+    						</span>
+						</div>
+					</address>
+					<p class="copyright">© KOREA ENERGY AGENCY. All rights reserved.</p>
+				</div>
+			</div>
+			<div class="footer-link">
+				<a href="https://www.energy.or.kr/front/conts/107001000000000.do" target="_blank" rel="noopener noreferrer">개인정보처리방침</a>
+			</div>
+		</div>
+	</footer>
+</div>
+
+<script>printSec("HtmlCss");</script>
+
+
+
+
+
+
+
+
+
+
+<script src="/ipms.online/common/o2sdk.js"></script>
+<script>
+	printSec("o2sdk");
+	const CONTEXTPATH = '/ipms.online';
+</script>
+
+
+
+
+
+
+
+
+
+
+
+		
+
+
+
+<script src="/ipms.online/app/app-js-package.js"></script>
+<script src="/ipms.online/app/app-js-loader.js"></script>
+
+<script> printSec("app");</script>
+
+
+
+<script id="server-data" type="application/json">
+    {"MAP_APIKEY_KAKAO":"eb5a7e39227eaedcb9bbf6c125af906c","LINK_SYSTEM_URL":"http://112.216.230.82:53041/ipms.link","IS_PROD":false,"USER_NM":null,"USER_TYPE":null,"O2PLATFORM_URL":"http://192.168.1.101:8081/o2.platform","JIJUK_LAYER_NM":"LSMD_CONT_LDREG","USER_ID":null,"ADMIN_SYSTEM_URL":"http://112.216.230.82:53041/ipms.admin","MAP_APIKEY_VWORLD":"48DAA0A2-3E21-3407-9846-41961F7DA2E6","WEB_URL":"http://192.168.1.104:8080/ipms.online","USER_AUTHRT":null}
+</script>
+
+<script type="module" src="/ipms.online/app/js/App.js"></script>
+</body>
+</html>

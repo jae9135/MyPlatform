@@ -1,0 +1,142 @@
+{
+  "bandit:B101": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "CUSTOM_INJECTION",
+    "category": "security"
+  },
+  "bandit:B102": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "COMMAND_INJECTION",
+    "category": "security"
+  },
+  "bandit:B103": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "WEAK_MESSAGE_DIGEST_MD5",
+    "category": "security"
+  },
+  "bandit:B104": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "HARD_CODE_PASSWORD",
+    "category": "security"
+  },
+  "bandit:B105": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "HARD_CODE_PASSWORD",
+    "category": "security"
+  },
+  "bandit:B106": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "PREDICTABLE_RANDOM",
+    "category": "security"
+  },
+  "bandit:B107": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "HARD_CODE_PASSWORD",
+    "category": "security"
+  },
+  "bandit:B108": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "SERVLET_PARAMETER",
+    "category": "security"
+  },
+  "bandit:B110": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "CUSTOM_INJECTION",
+    "category": "security"
+  },
+  "bandit:B201": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "JAXRS_ENDPOINT",
+    "category": "security"
+  },
+  "bandit:B301": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "CUSTOM_INJECTION",
+    "category": "security"
+  },
+  "bandit:B303": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "WEAK_MESSAGE_DIGEST_MD5",
+    "category": "security"
+  },
+  "bandit:B324": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "PREDICTABLE_RANDOM",
+    "category": "security"
+  },
+  "bandit:B501": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "WEAK_TRUST_MANAGER",
+    "category": "security"
+  },
+  "bandit:B502": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "SSL_CONTEXT",
+    "category": "security"
+  },
+  "bandit:B506": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "YAML_LOAD",
+    "category": "security"
+  },
+  "bandit:B608": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "SQL_INJECTION",
+    "category": "security"
+  },
+  "bandit:B609": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "SQL_INJECTION",
+    "category": "security"
+  },
+  "eslint:security/detect-object-injection": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "CUSTOM_INJECTION",
+    "category": "security"
+  },
+  "eslint:security/detect-non-literal-regexp": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "REDOS",
+    "category": "security"
+  },
+  "eslint:security/detect-eval-with-expression": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "CUSTOM_INJECTION",
+    "category": "security"
+  },
+  "eslint:security/detect-non-literal-require": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "PATH_TRAVERSAL_IN",
+    "category": "security"
+  },
+  "eslint:security/detect-possible-timing-attacks": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "CUSTOM_INJECTION",
+    "category": "security"
+  },
+  "eslint:security/detect-unsafe-regex": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "REDOS",
+    "category": "security"
+  },
+  "eslint:security/detect-buffer-noassert": {
+    "reference_ruleset": "pmd",
+    "rule_id": "AvoidReassigningParameters",
+    "category": "error_prone"
+  },
+  "eslint:security/detect-no-csrf-before-method-override": {
+    "reference_ruleset": "findsecbugs",
+    "rule_id": "SPRING_CSRF_PROTECTION_DISABLED",
+    "category": "security"
+  },
+  "eslint:@typescript-eslint/no-explicit-any": {
+    "reference_ruleset": "pmd",
+    "rule_id": "AvoidReassigningParameters",
+    "category": "code_style"
+  },
+  "eslint:@typescript-eslint/no-unused-vars": {
+    "reference_ruleset": "pmd",
+    "rule_id": "UnusedLocalVariable",
+    "category": "code_style"
+  }
+}

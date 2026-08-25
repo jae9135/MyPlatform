@@ -27,6 +27,7 @@ export function ValidationDialog({ open, items, onClose, onJump }: Props) {
       onClose={onClose}
       className="er-validation-panel"
       width={460}
+      wqState="validation_dialog"
     >
       <div className="er-validation-body">
         {items.length === 0 ? (

@@ -71,6 +71,7 @@ export function ShareLinksDialog({ viewUrl, editUrl, onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-labelledby="share-title"
+        data-wq-state="share_dialog"
       >
         <div className="modal-header">
           <h2 id="share-title">공유 링크</h2>

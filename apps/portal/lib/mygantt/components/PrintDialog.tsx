@@ -13,6 +13,7 @@ export function PrintDialog({ onPick, onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-labelledby="print-title"
+        data-wq-state="print_dialog"
       >
         <div className="modal-header">
           <h2 id="print-title">인쇄</h2>

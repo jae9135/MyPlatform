@@ -192,6 +192,7 @@ export function ExportDialog({
       onCancel={onCancel}
       className={`er-import-modal${showPreview ? " er-export-wide" : ""}`}
       width={showPreview ? 720 : 420}
+      wqState="export_dialog"
     >
         {busy ? (
           exportProgress ? (

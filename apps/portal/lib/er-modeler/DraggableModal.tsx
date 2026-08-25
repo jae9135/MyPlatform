@@ -12,6 +12,7 @@ type Props = {
   onCancel?: () => void;
   className?: string;
   width?: number;
+  wqState?: string;
   children: ReactNode;
 };
 
@@ -25,6 +26,7 @@ export function DraggableModal({
   onCancel,
   className = "",
   width = 420,
+  wqState,
   children,
 }: Props) {
   const [pos, setPos] = useState({ x: 24, y: 72 });
@@ -84,6 +86,7 @@ export function DraggableModal({
         className={`er-modal er-draggable-modal ${className}`.trim()}
         role="dialog"
         aria-labelledby={titleId}
+        {...(wqState ? { "data-wq-state": wqState } : {})}
         style={{
           position: "fixed",
           left: pos.x,

@@ -1,0 +1,870 @@
+[
+  {
+    "id": "PREDICTABLE_RANDOM",
+    "title": "Predictable Random",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#PREDICTABLE_RANDOM"
+  },
+  {
+    "id": "SERVLET_PARAMETER",
+    "title": "Servlet Parameter",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SERVLET_PARAMETER"
+  },
+  {
+    "id": "SERVLET_CONTENT_TYPE",
+    "title": "Servlet Content Type",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SERVLET_CONTENT_TYPE"
+  },
+  {
+    "id": "SERVLET_SERVER_NAME",
+    "title": "Servlet Server Name",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SERVLET_SERVER_NAME"
+  },
+  {
+    "id": "SERVLET_SESSION_ID",
+    "title": "Servlet Session Id",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SERVLET_SESSION_ID"
+  },
+  {
+    "id": "SERVLET_QUERY_STRING",
+    "title": "Servlet Query String",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SERVLET_QUERY_STRING"
+  },
+  {
+    "id": "SERVLET_HEADER",
+    "title": "Servlet Header",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SERVLET_HEADER"
+  },
+  {
+    "id": "SERVLET_HEADER_REFERER",
+    "title": "Servlet Header Referer",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SERVLET_HEADER_REFERER"
+  },
+  {
+    "id": "SERVLET_HEADER_USER_AGENT",
+    "title": "Servlet Header User Agent",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SERVLET_HEADER_USER_AGENT"
+  },
+  {
+    "id": "COOKIE_USAGE",
+    "title": "Cookie Usage",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#COOKIE_USAGE"
+  },
+  {
+    "id": "COMMAND_INJECTION",
+    "title": "Command Injection",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#COMMAND_INJECTION"
+  },
+  {
+    "id": "WEAK_FILENAMEUTILS",
+    "title": "Weak Filenameutils",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#WEAK_FILENAMEUTILS"
+  },
+  {
+    "id": "WEAK_TRUST_MANAGER",
+    "title": "Weak Trust Manager",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#WEAK_TRUST_MANAGER"
+  },
+  {
+    "id": "WEAK_HOSTNAME_VERIFIER",
+    "title": "Weak Hostname Verifier",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#WEAK_HOSTNAME_VERIFIER"
+  },
+  {
+    "id": "JAXWS_ENDPOINT",
+    "title": "Jaxws Endpoint",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#JAXWS_ENDPOINT"
+  },
+  {
+    "id": "JAXRS_ENDPOINT",
+    "title": "Jaxrs Endpoint",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#JAXRS_ENDPOINT"
+  },
+  {
+    "id": "TAPESTRY_ENDPOINT",
+    "title": "Tapestry Endpoint",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#TAPESTRY_ENDPOINT"
+  },
+  {
+    "id": "WICKET_ENDPOINT",
+    "title": "Wicket Endpoint",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#WICKET_ENDPOINT"
+  },
+  {
+    "id": "WEAK_MESSAGE_DIGEST_MD5",
+    "title": "Weak Message Digest Md5",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#WEAK_MESSAGE_DIGEST_MD5"
+  },
+  {
+    "id": "WEAK_MESSAGE_DIGEST_SHA1",
+    "title": "Weak Message Digest Sha1",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#WEAK_MESSAGE_DIGEST_SHA1"
+  },
+  {
+    "id": "DEFAULT_HTTP_CLIENT",
+    "title": "Default Http Client",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#DEFAULT_HTTP_CLIENT"
+  },
+  {
+    "id": "SSL_CONTEXT",
+    "title": "Ssl Context",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SSL_CONTEXT"
+  },
+  {
+    "id": "CUSTOM_MESSAGE_DIGEST",
+    "title": "Custom Message Digest",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#CUSTOM_MESSAGE_DIGEST"
+  },
+  {
+    "id": "FILE_UPLOAD_FILENAME",
+    "title": "File Upload Filename",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#FILE_UPLOAD_FILENAME"
+  },
+  {
+    "id": "XXE_SCHEMA_FACTORY",
+    "title": "Xxe Schema Factory",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#XXE_SCHEMA_FACTORY"
+  },
+  {
+    "id": "XXE_VALIDATOR",
+    "title": "Xxe Validator",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#XXE_VALIDATOR"
+  },
+  {
+    "id": "XPATH_INJECTION",
+    "title": "Xpath Injection",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#XPATH_INJECTION"
+  },
+  {
+    "id": "STRUTS1_ENDPOINT",
+    "title": "Struts1 Endpoint",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#STRUTS1_ENDPOINT"
+  },
+  {
+    "id": "STRUTS2_ENDPOINT",
+    "title": "Struts2 Endpoint",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#STRUTS2_ENDPOINT"
+  },
+  {
+    "id": "SPRING_ENDPOINT",
+    "title": "Spring Endpoint",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SPRING_ENDPOINT"
+  },
+  {
+    "id": "SPRING_CSRF_PROTECTION_DISABLED",
+    "title": "Spring Csrf Protection Disabled",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SPRING_CSRF_PROTECTION_DISABLED"
+  },
+  {
+    "id": "SPRING_CSRF_UNRESTRICTED_REQUEST_MAPPING",
+    "title": "Spring Csrf Unrestricted Request Mapping",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SPRING_CSRF_UNRESTRICTED_REQUEST_MAPPING"
+  },
+  {
+    "id": "SQL_INJECTION",
+    "title": "Sql Injection",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SQL_INJECTION"
+  },
+  {
+    "id": "SQL_INJECTION_TURBINE",
+    "title": "Sql Injection Turbine",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SQL_INJECTION_TURBINE"
+  },
+  {
+    "id": "JDO",
+    "title": "Jdo",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#JDO"
+  },
+  {
+    "id": "JPA",
+    "title": "Jpa",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#JPA"
+  },
+  {
+    "id": "SQL_INJECTION_JDBC",
+    "title": "Sql Injection Jdbc",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SQL_INJECTION_JDBC"
+  },
+  {
+    "id": "SCALA_SQL_INJECTION_SLICK",
+    "title": "Scala Sql Injection Slick",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SCALA_SQL_INJECTION_SLICK"
+  },
+  {
+    "id": "SCALA_SQL_INJECTION_ANORM",
+    "title": "Scala Sql Injection Anorm",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SCALA_SQL_INJECTION_ANORM"
+  },
+  {
+    "id": "SQL_INJECTION_VERTX",
+    "title": "Sql Injection Vertx",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SQL_INJECTION_VERTX"
+  },
+  {
+    "id": "SQL_INJECTION_ANDROID",
+    "title": "Sql Injection Android",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SQL_INJECTION_ANDROID"
+  },
+  {
+    "id": "LDAP_INJECTION",
+    "title": "Ldap Injection",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#LDAP_INJECTION"
+  },
+  {
+    "id": "SCRIPT_ENGINE_INJECTION",
+    "title": "Script Engine Injection",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SCRIPT_ENGINE_INJECTION"
+  },
+  {
+    "id": "SPEL_INJECTION",
+    "title": "Spel Injection",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SPEL_INJECTION"
+  },
+  {
+    "id": "EL",
+    "title": "El",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#EL"
+  },
+  {
+    "id": "SEAM_LOG_INJECTION",
+    "title": "Seam Log Injection",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SEAM_LOG_INJECTION"
+  },
+  {
+    "id": "OGNL_INJECTION",
+    "title": "Ognl Injection",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#OGNL_INJECTION"
+  },
+  {
+    "id": "GROOVY_SHELL",
+    "title": "Groovy Shell",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#GROOVY_SHELL"
+  },
+  {
+    "id": "HTTP_RESPONSE_SPLITTING",
+    "title": "Http Response Splitting",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#HTTP_RESPONSE_SPLITTING"
+  },
+  {
+    "id": "CRLF_INJECTION_LOGS",
+    "title": "Crlf Injection Logs",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#CRLF_INJECTION_LOGS"
+  },
+  {
+    "id": "EXTERNAL_CONFIG_CONTROL",
+    "title": "External Config Control",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#EXTERNAL_CONFIG_CONTROL"
+  },
+  {
+    "id": "BAD_HEXA_CONVERSION",
+    "title": "Bad Hexa Conversion",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#BAD_HEXA_CONVERSION"
+  },
+  {
+    "id": "HAZELCAST_SYMMETRIC_ENCRYPTION",
+    "title": "Hazelcast Symmetric Encryption",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#HAZELCAST_SYMMETRIC_ENCRYPTION"
+  },
+  {
+    "id": "NULL_CIPHER",
+    "title": "Null Cipher",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#NULL_CIPHER"
+  },
+  {
+    "id": "UNENCRYPTED_SOCKET",
+    "title": "Unencrypted Socket",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#UNENCRYPTED_SOCKET"
+  },
+  {
+    "id": "UNENCRYPTED_SERVER_SOCKET",
+    "title": "Unencrypted Server Socket",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#UNENCRYPTED_SERVER_SOCKET"
+  },
+  {
+    "id": "DES_USAGE",
+    "title": "Des Usage",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#DES_USAGE"
+  },
+  {
+    "id": "TDES_USAGE",
+    "title": "Tdes Usage",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#TDES_USAGE"
+  },
+  {
+    "id": "RSA_NO_PADDING",
+    "title": "Rsa No Padding",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#RSA_NO_PADDING"
+  },
+  {
+    "id": "HARD_CODE_PASSWORD",
+    "title": "Hard Code Password",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#HARD_CODE_PASSWORD"
+  },
+  {
+    "id": "HARD_CODE_KEY",
+    "title": "Hard Code Key",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#HARD_CODE_KEY"
+  },
+  {
+    "id": "UNSAFE_HASH_EQUALS",
+    "title": "Unsafe Hash Equals",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#UNSAFE_HASH_EQUALS"
+  },
+  {
+    "id": "STRUTS_FORM_VALIDATION",
+    "title": "Struts Form Validation",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#STRUTS_FORM_VALIDATION"
+  },
+  {
+    "id": "XSS_REQUEST_WRAPPER",
+    "title": "Xss Request Wrapper",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#XSS_REQUEST_WRAPPER"
+  },
+  {
+    "id": "BLOWFISH_KEY_SIZE",
+    "title": "Blowfish Key Size",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#BLOWFISH_KEY_SIZE"
+  },
+  {
+    "id": "RSA_KEY_SIZE",
+    "title": "Rsa Key Size",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#RSA_KEY_SIZE"
+  },
+  {
+    "id": "UNVALIDATED_REDIRECT",
+    "title": "Unvalidated Redirect",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#UNVALIDATED_REDIRECT"
+  },
+  {
+    "id": "SPRING_UNVALIDATED_REDIRECT",
+    "title": "Spring Unvalidated Redirect",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SPRING_UNVALIDATED_REDIRECT"
+  },
+  {
+    "id": "ENTITY_LEAK",
+    "title": "Entity Leak",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#ENTITY_LEAK"
+  },
+  {
+    "id": "ENTITY_MASS_ASSIGNMENT",
+    "title": "Entity Mass Assignment",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#ENTITY_MASS_ASSIGNMENT"
+  },
+  {
+    "id": "JSP_INCLUDE",
+    "title": "Jsp Include",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#JSP_INCLUDE"
+  },
+  {
+    "id": "JSP_SPRING_EVAL",
+    "title": "Jsp Spring Eval",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#JSP_SPRING_EVAL"
+  },
+  {
+    "id": "JSP_JSTL_OUT",
+    "title": "Jsp Jstl Out",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#JSP_JSTL_OUT"
+  },
+  {
+    "id": "XSS_JSP_PRINT",
+    "title": "Xss Jsp Print",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#XSS_JSP_PRINT"
+  },
+  {
+    "id": "XSS_SERVLET",
+    "title": "Xss Servlet",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#XSS_SERVLET"
+  },
+  {
+    "id": "XML_DECODER",
+    "title": "Xml Decoder",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#XML_DECODER"
+  },
+  {
+    "id": "STATIC_IV",
+    "title": "Static Iv",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#STATIC_IV"
+  },
+  {
+    "id": "ECB_MODE",
+    "title": "Ecb Mode",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#ECB_MODE"
+  },
+  {
+    "id": "PADDING_ORACLE",
+    "title": "Padding Oracle",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#PADDING_ORACLE"
+  },
+  {
+    "id": "CIPHER_INTEGRITY",
+    "title": "Cipher Integrity",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#CIPHER_INTEGRITY"
+  },
+  {
+    "id": "ESAPI_ENCRYPTOR",
+    "title": "Esapi Encryptor",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#ESAPI_ENCRYPTOR"
+  },
+  {
+    "id": "INSECURE_COOKIE",
+    "title": "Insecure Cookie",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#INSECURE_COOKIE"
+  },
+  {
+    "id": "HTTPONLY_COOKIE",
+    "title": "Httponly Cookie",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#HTTPONLY_COOKIE"
+  },
+  {
+    "id": "OBJECT_DESERIALIZATION",
+    "title": "Object Deserialization",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#OBJECT_DESERIALIZATION"
+  },
+  {
+    "id": "JACKSON_UNSAFE_DESERIALIZATION",
+    "title": "Jackson Unsafe Deserialization",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#JACKSON_UNSAFE_DESERIALIZATION"
+  },
+  {
+    "id": "DESERIALIZATION_GADGET",
+    "title": "Deserialization Gadget",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#DESERIALIZATION_GADGET"
+  },
+  {
+    "id": "TRUST_BOUNDARY_VIOLATION",
+    "title": "Trust Boundary Violation",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#TRUST_BOUNDARY_VIOLATION"
+  },
+  {
+    "id": "JSP_XSLT",
+    "title": "Jsp Xslt",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#JSP_XSLT"
+  },
+  {
+    "id": "MALICIOUS_XSLT",
+    "title": "Malicious Xslt",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#MALICIOUS_XSLT"
+  },
+  {
+    "id": "SCALA_SENSITIVE_DATA_EXPOSURE",
+    "title": "Scala Sensitive Data Exposure",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SCALA_SENSITIVE_DATA_EXPOSURE"
+  },
+  {
+    "id": "SSRF",
+    "title": "Ssrf",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SSRF"
+  },
+  {
+    "id": "SCALA_XSS_TWIRL",
+    "title": "Scala Xss Twirl",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SCALA_XSS_TWIRL"
+  },
+  {
+    "id": "SCALA_XSS_MVC_API",
+    "title": "Scala Xss Mvc Api",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SCALA_XSS_MVC_API"
+  },
+  {
+    "id": "TEMPLATE_INJECTION_VELOCITY",
+    "title": "Template Injection Velocity",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#TEMPLATE_INJECTION_VELOCITY"
+  },
+  {
+    "id": "TEMPLATE_INJECTION_FREEMARKER",
+    "title": "Template Injection Freemarker",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#TEMPLATE_INJECTION_FREEMARKER"
+  },
+  {
+    "id": "TEMPLATE_INJECTION_PEBBLE",
+    "title": "Template Injection Pebble",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#TEMPLATE_INJECTION_PEBBLE"
+  },
+  {
+    "id": "PERMISSIVE_CORS",
+    "title": "Permissive Cors",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#PERMISSIVE_CORS"
+  },
+  {
+    "id": "LDAP_ANONYMOUS",
+    "title": "Ldap Anonymous",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#LDAP_ANONYMOUS"
+  },
+  {
+    "id": "LDAP_ENTRY_POISONING",
+    "title": "Ldap Entry Poisoning",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#LDAP_ENTRY_POISONING"
+  },
+  {
+    "id": "COOKIE_PERSISTENT",
+    "title": "Cookie Persistent",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#COOKIE_PERSISTENT"
+  },
+  {
+    "id": "URL_REWRITING",
+    "title": "Url Rewriting",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#URL_REWRITING"
+  },
+  {
+    "id": "INSECURE_SMTP_SSL",
+    "title": "Insecure Smtp Ssl",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#INSECURE_SMTP_SSL"
+  },
+  {
+    "id": "AWS_QUERY_INJECTION",
+    "title": "Aws Query Injection",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#AWS_QUERY_INJECTION"
+  },
+  {
+    "id": "BEAN_PROPERTY_INJECTION",
+    "title": "Bean Property Injection",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#BEAN_PROPERTY_INJECTION"
+  },
+  {
+    "id": "STRUTS_FILE_DISCLOSURE",
+    "title": "Struts File Disclosure",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#STRUTS_FILE_DISCLOSURE"
+  },
+  {
+    "id": "SPRING_FILE_DISCLOSURE",
+    "title": "Spring File Disclosure",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SPRING_FILE_DISCLOSURE"
+  },
+  {
+    "id": "REQUESTDISPATCHER_FILE_DISCLOSURE",
+    "title": "Requestdispatcher File Disclosure",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#REQUESTDISPATCHER_FILE_DISCLOSURE"
+  },
+  {
+    "id": "FORMAT_STRING_MANIPULATION",
+    "title": "Format String Manipulation",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#FORMAT_STRING_MANIPULATION"
+  },
+  {
+    "id": "HTTP_PARAMETER_POLLUTION",
+    "title": "Http Parameter Pollution",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#HTTP_PARAMETER_POLLUTION"
+  },
+  {
+    "id": "INFORMATION_EXPOSURE_THROUGH_AN_ERROR_MESSAGE",
+    "title": "Information Exposure Through An Error Message",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#INFORMATION_EXPOSURE_THROUGH_AN_ERROR_MESSAGE"
+  },
+  {
+    "id": "SMTP_HEADER_INJECTION",
+    "title": "Smtp Header Injection",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SMTP_HEADER_INJECTION"
+  },
+  {
+    "id": "RPC_ENABLED_EXTENSIONS",
+    "title": "Rpc Enabled Extensions",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#RPC_ENABLED_EXTENSIONS"
+  },
+  {
+    "id": "WICKET_XSS1",
+    "title": "Wicket Xss1",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#WICKET_XSS1"
+  },
+  {
+    "id": "SAML_IGNORE_COMMENTS",
+    "title": "Saml Ignore Comments",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#SAML_IGNORE_COMMENTS"
+  },
+  {
+    "id": "OVERLY_PERMISSIVE_FILE_PERMISSION",
+    "title": "Overly Permissive File Permission",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#OVERLY_PERMISSIVE_FILE_PERMISSION"
+  },
+  {
+    "id": "IMPROPER_UNICODE",
+    "title": "Improper Unicode",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#IMPROPER_UNICODE"
+  },
+  {
+    "id": "MODIFICATION_AFTER_VALIDATION",
+    "title": "Modification After Validation",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#MODIFICATION_AFTER_VALIDATION"
+  },
+  {
+    "id": "NORMALIZATION_AFTER_VALIDATION",
+    "title": "Normalization After Validation",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#NORMALIZATION_AFTER_VALIDATION"
+  },
+  {
+    "id": "DANGEROUS_PERMISSION_COMBINATION",
+    "title": "Dangerous Permission Combination",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#DANGEROUS_PERMISSION_COMBINATION"
+  },
+  {
+    "id": "POTENTIAL_XML_INJECTION",
+    "title": "Potential Xml Injection",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#POTENTIAL_XML_INJECTION"
+  },
+  {
+    "id": "HTTPS",
+    "title": "Https",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#HTTPS"
+  },
+  {
+    "id": "XXE",
+    "title": "Xxe",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#XXE"
+  },
+  {
+    "id": "JDBC",
+    "title": "Jdbc",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#JDBC"
+  },
+  {
+    "id": "1",
+    "title": "1",
+    "ruleset": "findsecbugs",
+    "category": "security",
+    "reference_url": "https://find-sec-bugs.github.io/bugs.htm#1"
+  }
+]

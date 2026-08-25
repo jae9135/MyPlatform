@@ -1,0 +1,78 @@
+{
+  "SQL_INJECTION": {
+    "fix": "사용자 입력을 SQL 문자열에 직접 연결하지 마세요. PreparedStatement·바인드 변수·ORM 파라미터를 사용하세요.",
+    "example": "PreparedStatement ps = conn.prepareStatement(\"SELECT * FROM t WHERE id = ?\"); ps.setString(1, userId);"
+  },
+  "SQL_INJECTION_JDBC": {
+    "fix": "JDBC에서 문자열 결합 대신 PreparedStatement와 ? 바인딩을 사용하세요."
+  },
+  "COMMAND_INJECTION": {
+    "fix": "Runtime.exec·ProcessBuilder에 사용자 입력을 넣지 마세요. 화이트리스트 검증 후 고정 명령만 실행하세요."
+  },
+  "HARD_CODE_PASSWORD": {
+    "fix": "소스에 비밀번호·API 키를 하드코딩하지 마세요. 환경 변수·Secret Manager·암호화 설정 파일을 사용하세요."
+  },
+  "HARD_CODE_KEY": {
+    "fix": "암호화 키를 코드에 넣지 말고 KMS·키 저장소에서 런타임에 로드하세요."
+  },
+  "PREDICTABLE_RANDOM": {
+    "fix": "java.util.Random 대신 SecureRandom을 사용하세요. 토큰·세션 ID에는 예측 불가능한 난수가 필요합니다."
+  },
+  "WEAK_MESSAGE_DIGEST_MD5": {
+    "fix": "MD5는 비밀번호·무결성 검증에 쓰지 마세요. SHA-256 이상 또는 bcrypt/Argon2를 사용하세요."
+  },
+  "WEAK_MESSAGE_DIGEST_SHA1": {
+    "fix": "SHA-1은 취약합니다. SHA-256·SHA-3 또는 전용 패스워드 해시 함수로 교체하세요."
+  },
+  "XSS_SERVLET": {
+    "fix": "HTTP 응답에 사용자 입력을 그대로 출력하지 마세요. HTML 이스케이프·CSP·입력 검증을 적용하세요."
+  },
+  "XSS_JSP_PRINT": {
+    "fix": "JSP에서 <%= userInput %> 대신 JSTL c:out escapeXml=\"true\" 또는 fn:escapeXml을 사용하세요."
+  },
+  "PATH_TRAVERSAL_IN": {
+    "fix": "파일 경로에 .. 또는 절대경로가 포함되지 않도록 검증하고, 허용 디렉터리 기준으로 resolve하세요."
+  },
+  "WEAK_FILENAMEUTILS": {
+    "fix": "File.getCanonicalPath()로 정규화한 뒤 허용 루트 아래인지 확인하세요."
+  },
+  "XXE_SAX": {
+    "fix": "XML 파서에서 외부 엔티티를 비활성화하세요 (DISALLOW_DOCTYPE, external-general-entities=false)."
+  },
+  "XXE_XMLREADER": {
+    "fix": "XMLReader/SAXParser에 안전한 feature를 설정해 XXE를 차단하세요."
+  },
+  "OBJECT_DESERIALIZATION": {
+    "fix": "신뢰할 수 없는 데이터의 Java 역직렬화를 금지하세요. JSON 등 안전한 포맷으로 대체하세요."
+  },
+  "INSECURE_COOKIE": {
+    "fix": "세션 쿠키에 Secure, HttpOnly, SameSite 속성을 설정하세요."
+  },
+  "HTTPONLY_COOKIE": {
+    "fix": "cookie.setHttpOnly(true)와 Secure 플래그를 설정해 XSS로 쿠키 탈취를 줄이세요."
+  },
+  "SPRING_CSRF_PROTECTION_DISABLED": {
+    "fix": "Spring Security CSRF 보호를 활성화하고 상태 변경 POST에 토큰을 포함하세요."
+  },
+  "LDAP_INJECTION": {
+    "fix": "LDAP 필터 문자열에 사용자 입력을 직접 넣지 말고 이스케이프·파라미터화 API를 사용하세요."
+  },
+  "SSRF": {
+    "fix": "URL·호스트를 화이트리스트 검증하고, 내부 IP(127.0.0.1, 169.254.x) 접근을 차단하세요."
+  },
+  "UNVALIDATED_REDIRECT": {
+    "fix": "redirect URL을 허용 도메인 목록과 대조해 검증하세요."
+  },
+  "DES_USAGE": {
+    "fix": "DES/3DES 대신 AES-256-GCM 등 현대적 알고리즘을 사용하세요."
+  },
+  "ECB_MODE": {
+    "fix": "ECB 모드는 패턴이 드러납니다. GCM·CBC+HMAC 등 AEAD 모드를 사용하세요."
+  },
+  "TRUST_BOUNDARY_VIOLATION": {
+    "fix": "신뢰 경계 밖(요청 파라미터) 데이터를 세션·내부 객체에 검증 없이 저장하지 마세요."
+  },
+  "SERVLET_PARAMETER": {
+    "fix": "request.getParameter() 값은 항상 검증·이스케이프 후 사용하세요."
+  }
+}

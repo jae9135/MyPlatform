@@ -1,0 +1,5 @@
+# Source scan job/history persistence (local dev)
+source_scan_jobs/
+source_scan_history/
+web_quality_history/
+ipms_sessions/

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import os
 import sys
@@ -121,7 +122,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if path in ("/health", "/docs", "/openapi.json", "/redoc"):
+        if path in ("/health", "/health/detail", "/docs", "/openapi.json", "/redoc"):
             return await call_next(request)
         expected = (os.getenv("API_ACCESS_KEY") or "").strip()
         if not expected:
@@ -141,6 +142,19 @@ def _ensure_api_path() -> None:
         sys.path.insert(0, api_parent)
 
 
+def _init_playwright_env() -> None:
+    _ensure_api_path()
+    try:
+        from web_quality.runtime_env import sanitize_playwright_browsers_path  # type: ignore
+
+        sanitize_playwright_browsers_path()
+    except Exception:
+        pass
+
+
+_init_playwright_env()
+
+
 def _db_configured() -> bool:
     try:
         _ensure_api_path()
@@ -152,7 +166,13 @@ def _db_configured() -> bool:
 
 
 @app.get("/health")
-def health() -> dict:
+async def health() -> dict:
+    """Lightweight liveness probe — must never block on scans or DB."""
+    return {"ok": True, "service": "myplatform-api"}
+
+
+@app.get("/health/detail")
+def health_detail() -> dict:
     return {
         "ok": True,
         "chkdbstd_dir": str(DEFAULT_CHK_DIR),
@@ -169,7 +189,15 @@ def health() -> dict:
             if (DBMANAGER_SAMPLES_DIR / s["filename"]).exists()
         ),
         "er_export": "v4-index-key-box",
+        "source_scan": _source_scan_health(),
     }
+
+
+def _source_scan_health() -> dict:
+    _ensure_api_path()
+    from source_scan.service import get_environment_status  # type: ignore
+
+    return get_environment_status()
 
 
 def _load_chk_module():
@@ -1229,3 +1257,666 @@ def dbmanager_apply(body: ApplySqlBody) -> dict:
         "applied_db_name": (body.target_db_name or "").strip() or None,
         **({"pk_allocations": allocations} if allocations is not None else {}),
     }
+
+
+def _load_web_quality():
+    _ensure_api_path()
+    import web_quality.service as wq  # type: ignore
+
+    return wq
+
+
+@app.get("/v1/web-quality/targets")
+def web_quality_targets(mode: str = Query("")) -> dict:
+    from web_quality.manifest import TARGETS  # type: ignore
+
+    _ensure_api_path()
+    items = TARGETS
+    m = (mode or "").strip().lower()
+    if m == "portal":
+        items = [t for t in TARGETS if t.get("mode") == "portal"]
+    elif m == "external":
+        items = [t for t in TARGETS if t.get("mode") == "external"]
+    return {"targets": items}
+
+
+@app.get("/v1/web-quality/rules")
+def web_quality_rules(category: str = Query("")) -> dict:
+    _ensure_api_path()
+    from web_quality.catalog import load_egov_rules, load_kwcag_rules  # type: ignore
+
+    kwcag = load_kwcag_rules()
+    egov = load_egov_rules()
+    if category:
+        cat = category.strip().lower()
+        kwcag = [r for r in kwcag if r.get("category") == cat]
+        egov = [r for r in egov if r.get("category") == cat]
+    return {"kwcag": kwcag, "egov": egov}
+
+
+@app.get("/v1/web-quality/environment")
+def web_quality_environment() -> dict:
+    _ensure_api_path()
+    from web_quality.runtime_env import get_environment_status  # type: ignore
+
+    return {"ok": True, **get_environment_status()}
+
+
+@app.get("/v1/web-quality/scenarios")
+def web_quality_scenarios(
+    target: str = Query("my-gantt"),
+    access: str = Query(""),
+    page_url: str = Query(""),
+) -> dict:
+    _ensure_api_path()
+    cfg_target = (target or "").strip() or "my-gantt"
+
+    if cfg_target == "ipms-online":
+        from web_quality.presets.ipms_online import extract_ipms_scenarios  # type: ignore
+
+        tier = (access or "public").strip().lower() or "public"
+        return extract_ipms_scenarios(base_url=page_url, access=tier)
+
+    from web_quality.scenario_extract import extract_scenarios  # type: ignore
+    from web_quality.manifest import PORTAL_TARGET_IDS  # type: ignore
+
+    if cfg_target not in PORTAL_TARGET_IDS:
+        raise HTTPException(400, detail=f"지원하지 않는 포털 앱: {cfg_target}")
+    return extract_scenarios(cfg_target)
+
+
+@app.post("/v1/web-quality/scenarios/discover")
+async def web_quality_scenarios_discover(
+    page_url: str = Form(""),
+    need_login: str = Form("false"),
+    login_url: str = Form(""),
+    login_username: str = Form(""),
+    login_password: str = Form(""),
+    password: str = Form(""),
+    login_user_selector: str = Form(""),
+    login_password_selector: str = Form(""),
+    login_submit_selector: str = Form(""),
+    session_job_id: str = Form(""),
+    async_progress: str = Form("true"),
+    session_storage: UploadFile | None = File(None),
+) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    session_bytes: bytes | None = None
+    if session_storage is not None:
+        session_bytes = await session_storage.read()
+        if not session_bytes:
+            session_bytes = None
+    need = (need_login or "false").lower() in ("1", "true", "yes")
+    use_async = (async_progress or "true").lower() in ("1", "true", "yes")
+    try:
+        if use_async:
+            return wq.start_discover_external_job(
+                page_url=page_url,
+                need_login=need,
+                login_url=login_url,
+                login_username=login_username,
+                login_password=login_password,
+                portal_password=password,
+                login_user_selector=login_user_selector,
+                login_password_selector=login_password_selector,
+                login_submit_selector=login_submit_selector,
+                session_storage_bytes=session_bytes,
+                session_job_id=session_job_id,
+            )
+        return await asyncio.to_thread(
+            wq.discover_external_scenarios_from_params,
+            page_url=page_url,
+            need_login=need,
+            login_url=login_url,
+            login_username=login_username,
+            login_password=login_password,
+            portal_password=password,
+            login_user_selector=login_user_selector,
+            login_password_selector=login_password_selector,
+            login_submit_selector=login_submit_selector,
+            session_storage_bytes=session_bytes,
+            session_job_id=session_job_id,
+        )
+    except Exception as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@app.post("/v1/web-quality/scenarios/upload")
+async def web_quality_scenarios_upload(
+    file: UploadFile = File(...),
+) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    zip_bytes = await file.read()
+    if not zip_bytes:
+        raise HTTPException(400, detail="empty ZIP file")
+    try:
+        return wq.extract_java_upload_scenarios(zip_bytes)
+    except Exception as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@app.get("/v1/web-quality/jobs/{job_id}")
+def web_quality_job(job_id: str) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    return wq.get_web_quality_job(job_id)
+
+
+@app.post("/v1/web-quality/ipms/session")
+async def web_quality_ipms_session(
+    page_url: str = Form(""),
+) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    return wq.start_ipms_session(page_url)
+
+
+@app.post("/v1/web-quality/session")
+async def web_quality_browser_session(
+    page_url: str = Form(""),
+    detect: str = Form("generic"),
+) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    kind = (detect or "generic").strip().lower()
+    if kind not in ("generic", "ipms"):
+        raise HTTPException(400, detail="detect must be generic|ipms")
+    return wq.start_browser_session(page_url, detect=kind)  # type: ignore[arg-type]
+
+
+@app.get("/v1/web-quality/ipms/session/{job_id}")
+def web_quality_ipms_session_status(job_id: str) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    return wq.get_web_quality_job(job_id)
+
+
+@app.post("/v1/web-quality/validate")
+async def web_quality_validate(
+    mode: str = Form("portal"),
+    target: str = Form("er-modeler"),
+    base_url: str = Form("http://127.0.0.1:3000"),
+    password: str = Form(""),
+    page_url: str = Form(""),
+    include_runtime: str = Form("true"),
+    ipms_access: str = Form("public"),
+) -> dict:
+    wq = _load_web_quality()
+    include_rt = (include_runtime or "true").lower() not in ("0", "false", "no")
+    return await asyncio.to_thread(
+        wq.validate_web_quality,
+        mode,
+        target,
+        base_url,
+        password,
+        page_url,
+        include_runtime=include_rt,
+        ipms_access=ipms_access,
+    )
+
+
+@app.post("/v1/web-quality/run")
+async def web_quality_run(
+    mode: str = Form("portal"),
+    target: str = Form("er-modeler"),
+    base_url: str = Form("http://127.0.0.1:3000"),
+    password: str = Form(""),
+    format: str = Form("json"),
+    include_runtime: str = Form("true"),
+    page_url: str = Form(""),
+    login_url: str = Form(""),
+    login_username: str = Form(""),
+    login_password: str = Form(""),
+    login_user_selector: str = Form(""),
+    login_password_selector: str = Form(""),
+    login_submit_selector: str = Form(""),
+    state_ids: str | None = Form(None),
+    ipms_access: str = Form("public"),
+    need_login: str = Form("false"),
+    async_progress: str = Form("false"),
+    session_job_id: str = Form(""),
+    file: UploadFile | None = File(None),
+    session_storage: UploadFile | None = File(None),
+):
+    fmt = (format or "json").lower().strip()
+    if fmt not in ("json", "xlsx", "html", "zip"):
+        raise HTTPException(400, detail="format must be json|xlsx|html|zip")
+
+    m = (mode or "portal").strip().lower()
+    zip_bytes: bytes | None = None
+    session_bytes: bytes | None = None
+    if m == "java-upload":
+        if file is None:
+            raise HTTPException(400, detail="java-upload mode requires ZIP file")
+        zip_bytes = await file.read()
+        if not zip_bytes:
+            raise HTTPException(400, detail="empty ZIP file")
+    if session_storage is not None:
+        session_bytes = await session_storage.read()
+        if not session_bytes:
+            session_bytes = None
+
+    wq = _load_web_quality()
+    include_rt = (include_runtime or "true").lower() not in ("0", "false", "no")
+    use_async = (async_progress or "false").lower() in ("1", "true", "yes")
+    need = (need_login or "false").lower() in ("1", "true", "yes")
+    try:
+        if use_async and m in ("ipms-public", "ipms-auth", "ipms-online", "external"):
+            if fmt != "json":
+                raise HTTPException(400, detail="async progress는 json 형식만 지원")
+            payload = wq.run_web_quality(
+                mode,
+                target,
+                base_url,
+                password,
+                include_runtime=include_rt,
+                page_url=page_url,
+                state_ids=state_ids,
+                ipms_access=ipms_access,
+                session_storage_bytes=session_bytes,
+                session_job_id=session_job_id,
+                async_progress=True,
+                login_url=login_url,
+                login_username=login_username,
+                login_password=login_password,
+                login_user_selector=login_user_selector,
+                login_password_selector=login_password_selector,
+                login_submit_selector=login_submit_selector,
+                need_login=need,
+            )
+            return JSONResponse(payload)
+        # sync Playwright must not run on FastAPI's asyncio loop
+        payload = await asyncio.to_thread(
+            wq.run_web_quality,
+            mode,
+            target,
+            base_url,
+            password,
+            include_runtime=include_rt,
+            page_url=page_url,
+            login_url=login_url,
+            login_username=login_username,
+            login_password=login_password,
+            login_user_selector=login_user_selector,
+            login_password_selector=login_password_selector,
+            login_submit_selector=login_submit_selector,
+            state_ids=state_ids,
+            zip_bytes=zip_bytes,
+            ipms_access=ipms_access,
+            session_storage_bytes=session_bytes,
+            session_job_id=session_job_id,
+            need_login=need,
+        )
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(500, detail=str(e)) from e
+
+    if fmt == "json":
+        return JSONResponse(payload)
+
+    from web_quality.report import (  # type: ignore
+        build_html_report,
+        build_xlsx_bytes,
+        build_zip_bytes,
+    )
+
+    slug = payload.get("target") or "scan"
+    if fmt == "xlsx":
+        data = build_xlsx_bytes(payload, embed_images=True)
+        fname = f"web_quality_{slug}_{payload.get('scanned_at', '')[:10]}.xlsx"
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
+    if fmt == "zip":
+        data = build_zip_bytes(payload)
+        fname = f"web_quality_{slug}_{payload.get('scanned_at', '')[:10]}.zip"
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
+    html_body = build_html_report(payload, image_mode="embed")
+    fname = f"web_quality_{slug}.html"
+    return StreamingResponse(
+        io.BytesIO(html_body.encode("utf-8")),
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@app.get("/v1/web-quality/fix-guides")
+def web_quality_fix_guides() -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    return wq.get_fix_guides_catalog()
+
+
+@app.post("/v1/web-quality/export")
+async def web_quality_export(request: Request):
+    _ensure_api_path()
+    body = await request.json()
+    fmt = (body.get("format") or "xlsx").lower().strip()
+    payload = body.get("payload")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, detail="payload required")
+    wq = _load_web_quality()
+    try:
+        data, fname, media_type = wq.export_web_quality_payload(payload, fmt)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@app.get("/v1/web-quality/history")
+def web_quality_history(limit: int = Query(30, ge=1, le=100)) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    return {"ok": True, "history": wq.get_web_quality_history(limit=limit)}
+
+
+@app.get("/v1/web-quality/history/{job_id}")
+def web_quality_history_record(job_id: str) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    rec = wq.get_web_quality_history_record(job_id)
+    if not rec:
+        raise HTTPException(404, detail="job not found")
+    return {"ok": True, **rec}
+
+
+@app.get("/v1/web-quality/history/{job_id}/diff")
+def web_quality_history_diff(job_id: str, compare: str = Query("")) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    return wq.get_web_quality_diff(job_id, compare_job_id=compare.strip() or None)
+
+
+@app.post("/v1/web-quality/jobs/{job_id}/cancel")
+def web_quality_job_cancel(job_id: str) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    ok = wq.cancel_web_quality_job(job_id)
+    if not ok:
+        raise HTTPException(409, detail="cancel not available for this job")
+    return {"ok": True, "job_id": job_id, "message": "cancel requested"}
+
+
+@app.get("/v1/web-quality/jobs/{job_id}/export")
+def web_quality_job_export(job_id: str, format: str = Query("xlsx")):
+    _ensure_api_path()
+    wq = _load_web_quality()
+    fmt = (format or "xlsx").lower().strip()
+    try:
+        data, fname, media_type = wq.export_web_quality_job(job_id, fmt)
+    except ValueError as e:
+        raise HTTPException(404, detail=str(e)) from e
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+def _load_source_scan():
+    _ensure_api_path()
+    import source_scan.service as ss  # type: ignore
+
+    return ss
+
+
+@app.get("/v1/source-scan/targets")
+def source_scan_targets() -> dict:
+    from source_scan.manifest import TARGETS  # type: ignore
+
+    _ensure_api_path()
+    return {"targets": [t for t in TARGETS if t.get("mode") == "portal"]}
+
+
+@app.get("/v1/source-scan/rules")
+def source_scan_rules(ruleset: str = Query("")) -> dict:
+    _ensure_api_path()
+    from source_scan.catalog import load_findsecbugs_rules, load_pmd_rules  # type: ignore
+
+    rs = (ruleset or "").strip().lower()
+    if rs == "pmd":
+        return {"rules": load_pmd_rules()}
+    if rs in ("findsecbugs", "fsb", "security"):
+        return {"rules": load_findsecbugs_rules()}
+    return {"pmd": load_pmd_rules(), "findsecbugs": load_findsecbugs_rules()}
+
+
+@app.get("/v1/source-scan/environment")
+def source_scan_environment() -> dict:
+    ss = _load_source_scan()
+    from source_scan.progress import queue_status  # type: ignore
+
+    return {"ok": True, **ss.get_environment_status(), "queue": queue_status()}
+
+
+@app.get("/v1/source-scan/history")
+def source_scan_history(limit: int = Query(30, ge=1, le=100)) -> dict:
+    ss = _load_source_scan()
+    return {"ok": True, "history": ss.get_scan_history(limit=limit)}
+
+
+@app.get("/v1/source-scan/fix-guides")
+def source_scan_fix_guides() -> dict:
+    ss = _load_source_scan()
+    return ss.get_fix_guides_catalog()
+
+
+@app.get("/v1/source-scan/history/{job_id}")
+def source_scan_history_record(job_id: str) -> dict:
+    ss = _load_source_scan()
+    rec = ss.get_scan_history_record(job_id)
+    if not rec:
+        raise HTTPException(404, detail="job not found")
+    return {"ok": True, **rec}
+
+
+@app.get("/v1/source-scan/history/{job_id}/diff")
+def source_scan_history_diff(job_id: str, compare: str = Query("")) -> dict:
+    ss = _load_source_scan()
+    try:
+        return ss.get_scan_diff(job_id, compare_job_id=compare or None)
+    except ValueError as e:
+        raise HTTPException(404, detail=str(e)) from e
+
+
+@app.get("/v1/source-scan/queue")
+def source_scan_queue() -> dict:
+    from source_scan.progress import queue_status  # type: ignore
+
+    return {"ok": True, **queue_status()}
+
+
+@app.post("/v1/source-scan/jobs/{job_id}/cancel")
+def source_scan_job_cancel(job_id: str) -> dict:
+    from source_scan.progress import request_cancel  # type: ignore
+
+    ok = request_cancel(job_id)
+    if not ok:
+        raise HTTPException(409, detail="cancel not available for this job")
+    return {"ok": True, "job_id": job_id, "message": "cancel requested"}
+
+
+@app.post("/v1/source-scan/validate")
+async def source_scan_validate(
+    mode: str = Form("portal"),
+    target: str = Form("er-modeler"),
+    file: UploadFile | None = File(None),
+) -> dict:
+    ss = _load_source_scan()
+    from source_scan.scan_options import ScanOptions  # type: ignore
+
+    opts = ScanOptions()
+    zip_bytes: bytes | None = None
+    if (mode or "").strip().lower() == "upload" and file is not None:
+        zip_bytes = await file.read()
+    return ss.validate_source_scan(mode, target, zip_bytes=zip_bytes, options=opts)
+
+
+@app.post("/v1/source-scan/run")
+async def source_scan_run(
+    mode: str = Form("portal"),
+    target: str = Form("er-modeler"),
+    format: str = Form("json"),
+    try_java_build: str = Form("true"),
+    try_eslint_zip: str = Form("false"),
+    pmd_rulesets: str = Form(""),
+    exclude_paths: str = Form(""),
+    spotbugs_effort: str = Form("max"),
+    spotbugs_threshold: str = Form("low"),
+    use_prebuilt_classes: str = Form("true"),
+    progress: str = Form("true"),
+    file: UploadFile | None = File(None),
+):
+    fmt = (format or "json").lower().strip()
+    if fmt not in ("json", "xlsx", "html", "zip", "sarif"):
+        raise HTTPException(400, detail="format must be json|xlsx|html|zip|sarif")
+
+    m = (mode or "portal").strip().lower()
+    zip_bytes: bytes | None = None
+    if m == "upload":
+        if file is None:
+            raise HTTPException(400, detail="upload mode requires ZIP file")
+        zip_bytes = await file.read()
+        if not zip_bytes:
+            raise HTTPException(400, detail="empty ZIP file")
+
+    ss = _load_source_scan()
+    from source_scan.progress import create_job, get_job, job_to_dict  # type: ignore
+    from source_scan.scan_options import ScanOptions  # type: ignore
+
+    opts = ScanOptions.from_form(
+        try_java_build=try_java_build,
+        try_eslint_zip=try_eslint_zip,
+        pmd_rulesets=pmd_rulesets,
+        exclude_paths=exclude_paths,
+        spotbugs_effort=spotbugs_effort,
+        spotbugs_threshold=spotbugs_threshold,
+        use_prebuilt_classes=use_prebuilt_classes,
+    )
+    job_id = create_job()
+    ss.schedule_source_scan_job(
+        job_id,
+        m,
+        target,
+        zip_bytes=zip_bytes,
+        try_java_build=opts.try_java_build,
+        options=opts,
+    )
+    job = get_job(job_id)
+    return JSONResponse(
+        {
+            "ok": True,
+            "async": True,
+            "job_id": job_id,
+            "export_format": fmt if fmt != "json" else None,
+            **(job_to_dict(job) if job else {"status": "queued", "pct": 0, "steps": []}),
+        }
+    )
+
+
+@app.get("/v1/source-scan/jobs/{job_id}")
+async def source_scan_job(job_id: str) -> dict:
+    from source_scan.progress import get_job, job_to_dict  # type: ignore
+
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(404, detail="job not found")
+    return job_to_dict(job)
+
+
+@app.get("/v1/source-scan/jobs/{job_id}/export")
+def source_scan_job_export(job_id: str, format: str = Query("xlsx")):
+    from source_scan.progress import get_job  # type: ignore
+    from source_scan.report import (  # type: ignore
+        build_cover_html,
+        build_html_report,
+        build_sarif_bytes,
+        build_xlsx_bytes,
+        build_zip_bytes,
+    )
+
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(404, detail="job not found")
+    if job.status != "done" or not job.result:
+        raise HTTPException(409, detail="job not finished")
+
+    fmt = (format or "xlsx").lower().strip()
+    payload = job.result
+    slug = payload.get("target") or "scan"
+    date_part = (payload.get("scanned_at") or "")[:10]
+    if fmt == "xlsx":
+        data = build_xlsx_bytes(payload)
+        fname = f"source_scan_{slug}_{date_part}.xlsx"
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+    if fmt == "zip":
+        data = build_zip_bytes(payload)
+        fname = f"source_scan_{slug}_{date_part}.zip"
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+    if fmt == "html":
+        html_body = build_html_report(payload)
+        fname = f"source_scan_{slug}.html"
+        return StreamingResponse(
+            io.BytesIO(html_body.encode("utf-8")),
+            media_type="text/html; charset=utf-8",
+            headers={"Content-Disposition": f'inline; filename="{fname}"'},
+        )
+    if fmt == "cover":
+        html_body = build_cover_html(payload)
+        fname = f"source_scan_{slug}_cover.html"
+        return StreamingResponse(
+            io.BytesIO(html_body.encode("utf-8")),
+            media_type="text/html; charset=utf-8",
+            headers={"Content-Disposition": f'inline; filename="{fname}"'},
+        )
+    if fmt == "sarif":
+        data = build_sarif_bytes(payload)
+        fname = f"source_scan_{slug}_{date_part}.sarif.json"
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type="application/sarif+json",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+    raise HTTPException(400, detail="format must be xlsx|html|zip|sarif|cover")
+
+
+@app.post("/v1/source-scan/export")
+async def source_scan_export(request: Request):
+    body = await request.json()
+    fmt = (body.get("format") or "xlsx").lower().strip()
+    payload = body.get("payload")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, detail="payload required")
+    ss = _load_source_scan()
+    try:
+        data, fname, media_type = ss.export_scan_payload(payload, fmt)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )

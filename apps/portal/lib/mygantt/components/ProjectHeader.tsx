@@ -205,6 +205,7 @@ export function ProjectHeader({
             type="button"
             className="btn btn-primary"
             disabled={shareBusy}
+            data-wq-target="share_create"
             onClick={onCreateShare}
             title={
               shareConfigured
@@ -221,6 +222,7 @@ export function ProjectHeader({
               className="btn"
               disabled={shareBusy}
               title="읽기 전용 주소를 복사하거나 엽니다"
+              data-wq-target="share_dialog"
               onClick={() => onCopyShareLink("view")}
             >
               보기 링크
@@ -241,7 +243,12 @@ export function ProjectHeader({
             </button>
           </>
         )}
-        <button type="button" className="btn" onClick={onOpenHolidays}>
+        <button
+          type="button"
+          className="btn"
+          data-wq-target="holiday_dialog"
+          onClick={onOpenHolidays}
+        >
           휴일목록 ({project.holidays.length})
         </button>
         <a
@@ -271,7 +278,7 @@ export function ProjectHeader({
         <button type="button" className="btn" onClick={onExportJson}>
           JSON
         </button>
-        <button type="button" className="btn" onClick={onPrint}>
+        <button type="button" className="btn" data-wq-target="print_dialog" onClick={onPrint}>
           인쇄
         </button>
         <button

@@ -95,7 +95,7 @@ import {
   rewriteFkRefsForRenamedTable,
   type EdgePathLayout,
   type ErColumn,
-  type ErProject,
+  type ErProject, 
   type ErRelation,
   type ErTable,
   type HandleSide,
@@ -1973,6 +1973,7 @@ function ErModelerInner() {
             type="button"
             className="btn er-btn-sm"
             disabled={busy}
+            data-wq-target="import_dialog"
             onClick={() => setImportOpen(true)}
           >
             가져오기
@@ -1981,6 +1982,7 @@ function ErModelerInner() {
             type="button"
             className="btn er-btn-sm"
             disabled={busy}
+            data-wq-target="export_dialog"
             onClick={() => setExportOpen(true)}
           >
             내보내기
@@ -2005,6 +2007,7 @@ function ErModelerInner() {
             type="button"
             className="btn ghost er-btn-sm"
             disabled={busy || !project.tables.length}
+            data-wq-target="validation_dialog"
             onClick={handleValidateEr}
           >
             검증
@@ -2420,6 +2423,7 @@ function ErModelerInner() {
                 type="button"
                 className={`er-canvas-tool${canvasTool === "table" ? " active" : ""}`}
                 title="새 테이블 — 캔버스 클릭 위치에 untitled 생성"
+                data-wq-target="add_table"
                 onClick={handleAddTable}
               >
                 <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden>

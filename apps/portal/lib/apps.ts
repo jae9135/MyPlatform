@@ -12,6 +12,22 @@ export type PlatformApp = {
 /** Supabase apps 테이블과 동기화되는 포털 기본 목록(오프라인 폴백). */
 export const APPS: PlatformApp[] = [
   {
+    id: "source-scan",
+    name: "소스코드·보안 진단",
+    description: "PMD · FindSecBugs 기준 — Python/TS/Java 소스 점검·보고서",
+    status: "beta",
+    href: "/apps/source-scan",
+    category: "quality",
+  },
+  {
+    id: "web-quality",
+    name: "웹 품질 진단",
+    description: "KWCAG 2.2 · 웹표준/호환/접근성 — ER Modeler 진단·보고서",
+    status: "beta",
+    href: "/apps/web-quality",
+    category: "quality",
+  },
+  {
     id: "chk-db-std",
     name: "DB 표준 점검 도구",
     description: "행안부 공통표준 단어/용어/도메인/코드 점검",

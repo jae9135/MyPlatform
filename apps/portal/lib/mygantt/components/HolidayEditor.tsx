@@ -37,6 +37,7 @@ export function HolidayEditor({
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-labelledby="holiday-title"
+        data-wq-state="holiday_dialog"
       >
         <div className="modal-header">
           <h2 id="holiday-title">휴일목록</h2>

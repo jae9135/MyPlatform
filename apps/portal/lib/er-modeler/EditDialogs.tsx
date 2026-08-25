@@ -14,6 +14,7 @@ function PopoverShell({
   onClose,
   error,
   className,
+  wqState,
   children,
 }: {
   title: string;
@@ -22,6 +23,7 @@ function PopoverShell({
   onClose: () => void;
   error?: string | null;
   className?: string;
+  wqState?: string;
   children: React.ReactNode;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -79,6 +81,7 @@ function PopoverShell({
       className={`er-edit-popover${className ? ` ${className}` : ""}`}
       role="dialog"
       aria-labelledby={titleId}
+      {...(wqState ? { "data-wq-state": wqState } : {})}
       style={{ left, top }}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -127,6 +130,7 @@ export function TableEditDialog({
       anchor={anchor}
       onClose={onClose}
       error={saveError}
+      wqState="table_edit"
     >
       <div className="er-meta-fields">
         <label>
@@ -213,6 +217,7 @@ export function ColumnEditDialog({
       anchor={anchor}
       onClose={onClose}
       error={saveError}
+      wqState="column_edit"
     >
       <div className="er-meta-fields">
         <div className="er-check-row">
