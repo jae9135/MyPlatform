@@ -94,6 +94,19 @@ type ScenarioCandidate = {
   source?: { files?: string[]; evidence?: string };
 };
 
+type ScenarioPayload = Record<string, unknown> & {
+  candidates?: ScenarioCandidate[];
+  extractable?: boolean;
+  warnings?: string[];
+  defaults_selected?: string[];
+  static_only_hint?: string;
+  file_stats?: { java?: number; views?: number };
+};
+
+function candidatesFromPayload(j: Record<string, unknown>): ScenarioCandidate[] {
+  return Array.isArray(j.candidates) ? (j.candidates as ScenarioCandidate[]) : [];
+}
+
 const KIND_LABEL: Record<string, string> = {
   page: "화면",
   tab: "탭",
@@ -527,9 +540,7 @@ export default function WebQualityPage() {
   }, []);
 
   const applyScenarioPayload = useCallback((j: Record<string, unknown>) => {
-    const list = Array.isArray(j.candidates)
-      ? (j.candidates as ScenarioCandidate[])
-      : [];
+    const list = candidatesFromPayload(j);
     setExtractable(Boolean(j.extractable));
     setScenarios(list);
     setScenarioLoaded(true);
@@ -601,12 +612,9 @@ export default function WebQualityPage() {
         ? await pollDiscoverJob(j.job_id as string)
         : (j as Record<string, unknown>);
       applyScenarioPayload(payload);
-      const selectable = (payload.candidates as ScenarioCandidate[] | undefined)?.filter(
-        (c) => c.selectable
-      ).length;
-      setMsg(
-        `실시간 시나리오 ${payload.candidates?.length ?? 0}개 (선택 가능 ${selectable ?? 0}개)`
-      );
+      const candidates = candidatesFromPayload(payload);
+      const selectable = candidates.filter((c) => c.selectable).length;
+      setMsg(`실시간 시나리오 ${candidates.length}개 (선택 가능 ${selectable}개)`);
     } catch (e) {
       setExtractable(false);
       setScenarios([]);
@@ -639,14 +647,19 @@ export default function WebQualityPage() {
         method: "POST",
         body: fd,
       });
-      const j = await res.json();
+      const j = (await res.json()) as ScenarioPayload & {
+        ok?: boolean;
+        detail?: string;
+        message?: string;
+      };
       if (!res.ok || !j.ok) {
         throw new Error(j.detail || j.message || `시나리오 읽기 실패 (HTTP ${res.status})`);
       }
       applyScenarioPayload(j);
-      const stats = j.file_stats as { java?: number; views?: number } | undefined;
+      const candidates = candidatesFromPayload(j);
+      const stats = j.file_stats;
       setMsg(
-        `Java 시나리오 ${j.candidates?.length ?? 0}개 · Java ${stats?.java ?? 0} · JSP/HTML ${stats?.views ?? 0}`
+        `Java 시나리오 ${candidates.length}개 · Java ${stats?.java ?? 0} · JSP/HTML ${stats?.views ?? 0}`
       );
     } catch (e) {
       setExtractable(false);
@@ -670,13 +683,18 @@ export default function WebQualityPage() {
         page_url: ipmsUrl.trim(),
       });
       const res = await fetch(`${API_BASE}/v1/web-quality/scenarios?${q}`);
-      const j = await res.json();
+      const j = (await res.json()) as ScenarioPayload & {
+        ok?: boolean;
+        detail?: string;
+        message?: string;
+      };
       if (!res.ok || !j.ok) {
         throw new Error(j.detail || j.message || `시나리오 읽기 실패 (HTTP ${res.status})`);
       }
       applyScenarioPayload(j);
+      const candidates = candidatesFromPayload(j);
       setMsg(
-        `IPMS ${access === "public" ? "공개" : "로그인"} 시나리오 ${j.candidates?.length ?? 0}개`
+        `IPMS ${access === "public" ? "공개" : "로그인"} 시나리오 ${candidates.length}개`
       );
     } catch (e) {
       setExtractable(false);
