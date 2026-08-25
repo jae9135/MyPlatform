@@ -1,6 +1,6 @@
-# Source Scan API — PMD, SpotBugs, JDK 8, Maven
-# Build: docker build -f docker/source-scan/Dockerfile -t myplatform-api-source-scan .
-# Run:   docker run --rm -p 8001:8001 -e PMD_HOME=/opt/pmd -e SPOTBUGS_HOME=/opt/spotbugs myplatform-api-source-scan
+# Source Scan API — PMD, SpotBugs, JDK 8, Maven, Playwright
+# Build: docker build -f docker/source-scan/Dockerfile -t myplatform-api .
+# Render: Dockerfile Path = docker/source-scan/Dockerfile, Docker Context = .
 
 FROM eclipse-temurin:8-jdk-jammy
 
@@ -8,9 +8,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PMD_HOME=/opt/pmd \
     SPOTBUGS_HOME=/opt/spotbugs \
     MAVEN_HOME=/opt/maven \
+    FINDSEC_BUGS_PLUGIN_JAR=/opt/findsecbugs-plugin.jar \
+    SOURCE_SCAN_TOOLS_DIR=/opt \
+    PORT=8001 \
     PATH="/opt/maven/bin:/opt/pmd/bin:/opt/spotbugs/bin:${PATH}"
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl unzip python3 python3-pip python3-venv \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl unzip python3 python3-pip python3-venv \
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libdbus-1-3 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 \
+    libpango-1.0-0 libcairo2 libatspi2.0-0 libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Maven
@@ -26,25 +33,32 @@ RUN curl -fsSL "https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PM
     && mv /opt/pmd-bin-${PMD_VERSION} /opt/pmd \
     && rm /tmp/pmd.zip
 
-# SpotBugs + findsecbugs plugin
+# SpotBugs (GitHub release asset)
 ARG SPOTBUGS_VERSION=4.10.4
-ARG FINDSEC_VERSION=1.14.0
 RUN curl -fsSL "https://github.com/spotbugs/spotbugs/releases/download/${SPOTBUGS_VERSION}/spotbugs-${SPOTBUGS_VERSION}.zip" -o /tmp/sb.zip \
     && unzip -q /tmp/sb.zip -d /opt \
     && mv /opt/spotbugs-${SPOTBUGS_VERSION} /opt/spotbugs \
-    && curl -fsSL "https://github.com/find-sec-bugs/find-sec-bugs/releases/download/version-${FINDSEC_VERSION}/findsecbugs-plugin-${FINDSEC_VERSION}.jar" \
-       -o /opt/findsecbugs-plugin.jar \
     && rm /tmp/sb.zip
 
-ENV FINDSEC_BUGS_PLUGIN_JAR=/opt/findsecbugs-plugin.jar
+# findsecbugs-plugin — GitHub release 1.14.0 has no standalone .jar (404); use Maven Central
+ARG FINDSEC_VERSION=1.14.0
+RUN curl -fsSL "https://repo1.maven.org/maven2/com/h3xstream/findsecbugs/findsecbugs-plugin/${FINDSEC_VERSION}/findsecbugs-plugin-${FINDSEC_VERSION}.jar" \
+    -o /opt/findsecbugs-plugin.jar
 
 WORKDIR /app
 COPY apps/api/requirements.txt /app/apps/api/requirements.txt
-RUN pip3 install --no-cache-dir -r /app/apps/api/requirements.txt
+RUN pip3 install --no-cache-dir -r /app/apps/api/requirements.txt \
+    && pip3 install --no-cache-dir playwright \
+    && playwright install chromium
 
 COPY apps/api /app/apps/api
+COPY apps/portal /app/apps/portal
 COPY package.json /app/package.json
 
 WORKDIR /app/apps/api
 EXPOSE 8001
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
+
+CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port ${PORT}"]

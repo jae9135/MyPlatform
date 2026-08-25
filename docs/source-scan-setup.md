@@ -72,12 +72,16 @@ npm run dev:portal       # repo root에서
 - **제외 경로** 기본: `test/`, `target/`, `node_modules/` 등
 - **Windows**: `mvn`은 `.CMD` 전체 경로로 실행 (API 코드 반영)
 
-## Docker (PMD + SpotBugs + JDK8 포함)
+## Docker (PMD + SpotBugs + JDK8 + Playwright)
 
 ```powershell
-docker build -f docker/source-scan/Dockerfile -t myplatform-api-source-scan .
-docker run --rm -p 8001:8001 myplatform-api-source-scan
+docker build -f docker/source-scan/Dockerfile -t myplatform-api .
+docker run --rm -p 8001:8001 -e PORT=8001 myplatform-api
 ```
+
+**Render Docker:** Settings → Dockerfile Path `docker/source-scan/Dockerfile`, Docker Context `.` (repo root)
+
+findsecbugs-plugin은 GitHub release에 standalone JAR이 없어 **Maven Central**에서 받습니다 (Dockerfile 반영).
 
 ## API
 
