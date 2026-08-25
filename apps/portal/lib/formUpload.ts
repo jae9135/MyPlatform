@@ -1,5 +1,5 @@
 import { API_BASE } from "@/lib/apiBase";
-import { isLocalPortalHost, type LocalFetchErrorOpts, wrapScanFetchError } from "@/lib/localScanApi";
+import { isLocalPortalHost, wrapScanFetchError } from "@/lib/localScanApi";
 
 /** Vercel serverless proxy body limit (~4.5MB). Stay under for safety. */
 export const PROXY_SAFE_UPLOAD_BYTES = 4 * 1024 * 1024;
@@ -100,7 +100,7 @@ export async function stageLargeZip(file: File): Promise<{ staging_id: string; s
   return { staging_id, size_bytes: Number(j.size_bytes || file.size) };
 }
 
-export function wrapFetchError(e: unknown, _opts?: LocalFetchErrorOpts): Error {
+export function wrapFetchError(e: unknown): Error {
   return wrapScanFetchError(e);
 }
 

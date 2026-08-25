@@ -7,7 +7,6 @@ import {
   clientSideZipValidate,
   readJsonResponse,
   shouldUploadDirect,
-  wrapFetchError,
 } from "@/lib/formUpload";
 import {
   fetchScanApi,
