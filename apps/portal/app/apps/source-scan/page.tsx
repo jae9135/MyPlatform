@@ -9,6 +9,7 @@ import {
   type FixGuidesCatalog,
 } from "@/lib/sourceScanFix";
 import { loadSourceScanPrefs, saveSourceScanPrefs } from "@/lib/sourceScanPrefs";
+import { postMultipart, readJsonResponse } from "@/lib/formUpload";
 
 const PAGE_SIZE = 80;
 
@@ -102,6 +103,18 @@ type ScanProgress = {
 };
 
 type DesignCheck = { checking: boolean; canRun: boolean; message: string; warnings?: string[] };
+
+const IDLE_UPLOAD_CHECK: DesignCheck = {
+  checking: false,
+  canRun: false,
+  message: "ZIP 파일을 선택하세요",
+};
+
+const IDLE_PORTAL_CHECK: DesignCheck = {
+  checking: false,
+  canRun: true,
+  message: "",
+};
 type PortalTarget = { id: string; name: string };
 type ModeState = { result: ScanResult | null; jobId: string | null; scanFingerprint: string | null };
 type EnvStatus = Record<string, unknown>;
@@ -250,11 +263,7 @@ export default function SourceScanPage() {
   const [spotbugsEffort, setSpotbugsEffort] = useState("max");
   const [spotbugsThreshold, setSpotbugsThreshold] = useState("low");
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [designCheck, setDesignCheck] = useState<DesignCheck>({
-    checking: false,
-    canRun: false,
-    message: "준비 중…",
-  });
+  const [designCheck, setDesignCheck] = useState<DesignCheck>(IDLE_UPLOAD_CHECK);
   const [busy, setBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -280,6 +289,12 @@ export default function SourceScanPage() {
   const forceRescanRef = useRef(false);
   const validateTimer = useRef<number | null>(null);
   const pollTimer = useRef<number | null>(null);
+  const validateRef = useRef<() => Promise<void>>(async () => {});
+
+  const validateWatchKey = useMemo(
+    () => [mode, target, zipFile?.name ?? "", zipFile?.size ?? 0, zipFile?.lastModified ?? 0].join("|"),
+    [mode, target, zipFile]
+  );
 
   const scanOpts = useMemo(
     () => ({
@@ -396,19 +411,31 @@ export default function SourceScanPage() {
   }, []);
 
   const validate = useCallback(async () => {
+    if (mode === "upload" && !zipFile) {
+      setDesignCheck(IDLE_UPLOAD_CHECK);
+      return;
+    }
     setDesignCheck({ checking: true, canRun: false, message: "사전 검증 중…" });
     try {
       const fd = new FormData();
       fd.append("mode", mode);
       fd.append("target", mode === "upload" ? "upload" : target);
       if (mode === "upload" && zipFile) fd.append("file", zipFile);
-      const res = await fetch(`${API_BASE}/v1/source-scan/validate`, { method: "POST", body: fd });
-      const j = await res.json();
+      const res = await postMultipart("v1/source-scan/validate", fd, zipFile);
+      const j = await readJsonResponse(res);
+      if (!res.ok) {
+        setDesignCheck({
+          checking: false,
+          canRun: false,
+          message: String(j.detail || j.message || `검증 실패 (HTTP ${res.status})`),
+        });
+        return;
+      }
       setDesignCheck({
         checking: false,
         canRun: Boolean(j.can_run),
-        message: j.message || (j.can_run ? "진단 가능" : "진단 불가"),
-        warnings: j.warnings || [],
+        message: String(j.message || (j.can_run ? "진단 가능" : "진단 불가")),
+        warnings: Array.isArray(j.warnings) ? (j.warnings as string[]) : [],
       });
     } catch (e) {
       setDesignCheck({
@@ -419,13 +446,25 @@ export default function SourceScanPage() {
     }
   }, [mode, target, zipFile]);
 
+  validateRef.current = validate;
+
   useEffect(() => {
     if (validateTimer.current) window.clearTimeout(validateTimer.current);
-    validateTimer.current = window.setTimeout(() => void validate(), 300);
+    validateTimer.current = window.setTimeout(() => void validateRef.current(), 300);
     return () => {
       if (validateTimer.current) window.clearTimeout(validateTimer.current);
     };
-  }, [validate]);
+  }, [validateWatchKey]);
+
+  useEffect(() => {
+    if (mode === "upload" && !zipFile) {
+      setDesignCheck(IDLE_UPLOAD_CHECK);
+    } else if (mode === "portal") {
+      setDesignCheck((prev) =>
+        prev.message === IDLE_UPLOAD_CHECK.message ? IDLE_PORTAL_CHECK : prev
+      );
+    }
+  }, [mode, zipFile]);
 
   useEffect(() => {
     return () => {
@@ -597,9 +636,14 @@ export default function SourceScanPage() {
       fd.append("format", "json");
       appendScanOptions(fd);
       if (mode === "upload" && zipFile) fd.append("file", zipFile);
-      const res = await fetch(`${API_BASE}/v1/source-scan/run`, { method: "POST", body: fd });
-      const start = (await res.json()) as { async?: boolean; job_id?: string; detail?: string; steps?: ScanStep[] };
-      if (!res.ok) throw new Error(start.detail || `진단 실패 (HTTP ${res.status})`);
+      const res = await postMultipart("v1/source-scan/run", fd, zipFile);
+      const start = (await readJsonResponse(res)) as {
+        async?: boolean;
+        job_id?: string;
+        detail?: string;
+        steps?: ScanStep[];
+      };
+      if (!res.ok) throw new Error(String(start.detail || `진단 실패 (HTTP ${res.status})`));
       if (!start.async || !start.job_id) throw new Error("진행률 API 응답 없음");
 
       setScanProgress({
