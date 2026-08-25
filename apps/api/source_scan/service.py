@@ -242,14 +242,25 @@ def _java_progress_bridge(progress: ProgressReporter):
         if phase == "pmd":
             progress.start("pmd", detail)
         elif phase == "pmd_done":
-            progress.done("pmd", detail)
+            if detail.startswith("PMD 완료"):
+                progress.done("pmd", detail)
+            else:
+                progress.error("pmd", detail)
         elif phase == "java_build":
             progress.start("java_build", detail)
+        elif phase == "java_build_done":
+            if detail.startswith("빌드 완료"):
+                progress.done("java_build", detail)
+            else:
+                progress.error("java_build", detail)
         elif phase == "findsecbugs":
-            progress.done("java_build")
+            progress.done("java_build", "빌드 완료")
             progress.start("findsecbugs", detail)
         elif phase == "findsecbugs_done":
-            progress.done("findsecbugs", detail)
+            if detail.startswith("FindSecBugs 완료"):
+                progress.done("findsecbugs", detail)
+            else:
+                progress.error("findsecbugs", detail)
 
     return handler
 
@@ -268,14 +279,22 @@ def _scanner_meta(
     if not available:
         return {"available": False, "ran": False, "fail_count": 0, "error": error or "미설정", "summary": f"{name}: {error or '미설정'}"}
     if ran:
+        label = "결함 없음" if fail_count == 0 else f"결함 {fail_count}건"
         return {
             "available": True,
             "ran": True,
             "fail_count": fail_count,
             "error": error,
-            "summary": f"{name}: 분석 완료 ({fail_count}건)",
+            "summary": f"{name}: 분석 완료 · {label}",
         }
-    return {"available": True, "ran": False, "fail_count": 0, "error": error, "summary": f"{name}: 도구 OK · 분석 미실행"}
+    reason = (error or "원인 미상")[:120]
+    return {
+        "available": True,
+        "ran": False,
+        "fail_count": 0,
+        "error": error,
+        "summary": f"{name}: 분석 불가 — {reason}",
+    }
 
 
 def _scan_paths(
@@ -416,7 +435,7 @@ def _scan_paths(
 
     if progress:
         progress.start("finalize", "결과 정리 중…")
-        progress.done("finalize")
+        progress.done("finalize", "완료")
 
     return {
         "ok": True,

@@ -10,14 +10,16 @@ import {
   wrapFetchError,
 } from "@/lib/formUpload";
 import {
-  DEFAULT_LOCAL_SCAN_API,
   fetchLocalApi,
   getLocalScanApiBase,
   isLocalScanEnabled,
   postLocalMultipart,
-  setLocalScanApiBase,
-  setLocalScanEnabled,
 } from "@/lib/localScanApi";
+import {
+  EnvSourceBadge,
+  EnvToolsSkeleton,
+  LocalScanSettings,
+} from "@/components/LocalScanSettings";
 import {
   type FixGuideEntry,
   resolveFindingFix,
@@ -428,8 +430,9 @@ export default function WebQualityPage() {
   const [scenarioWarnings, setScenarioWarnings] = useState<string[]>([]);
   const [envStatus, setEnvStatus] = useState<EnvStatus | null>(null);
   const [envLoadError, setEnvLoadError] = useState("");
-  const [useLocalScan, setUseLocalScan] = useState(false);
-  const [localApiUrl, setLocalApiUrl] = useState(DEFAULT_LOCAL_SCAN_API);
+  const [useLocalScan, setUseLocalScan] = useState(() => isLocalScanEnabled());
+  const [localApiUrl, setLocalApiUrl] = useState(() => getLocalScanApiBase());
+  const [envLoading, setEnvLoading] = useState(true);
   const [fixGuides, setFixGuides] = useState<Record<string, FixGuideEntry>>({});
   const [designCheck, setDesignCheck] = useState<DesignCheck>(IDLE_CHECK);
   const [busy, setBusy] = useState(false);
@@ -479,33 +482,39 @@ export default function WebQualityPage() {
     }
   }, []);
 
-  useEffect(() => {
-    setUseLocalScan(isLocalScanEnabled());
-    setLocalApiUrl(getLocalScanApiBase());
-  }, []);
+  const apiUsesLocal = javaUploadUsesLocal(mode, useLocalScan);
 
   const loadWqEnvironment = useCallback(async () => {
-    const useLocal = javaUploadUsesLocal(mode, useLocalScan);
+    const local = javaUploadUsesLocal(mode, useLocalScan);
+    setEnvLoading(true);
     setEnvLoadError("");
+    if (local) setEnvStatus(null);
+
     try {
-      const [envRes, guidesRes] = await Promise.all([
-        fetchLocalApi(useLocal, "v1/web-quality/environment", undefined, API_BASE),
-        fetchLocalApi(useLocal, "v1/web-quality/fix-guides", undefined, API_BASE),
-      ]);
+      const envRes = await fetchLocalApi(local, "v1/web-quality/environment", undefined, API_BASE);
       const envJ = await readJsonResponse(envRes);
-      if (envRes.ok) setEnvStatus(envJ as EnvStatus);
-      else if (useLocal) {
-        setEnvLoadError(
-          `로컬 API 연결 실패 (${localApiUrl}). scripts\\start-local-scan.bat 실행 및 CORS_ORIGINS 확인.`
-        );
-      }
-      const guidesJ = await readJsonResponse(guidesRes);
-      if (guidesRes.ok && guidesJ.guides) {
-        setFixGuides(guidesJ.guides as Record<string, FixGuideEntry>);
+      if (envRes.ok) {
+        setEnvStatus(envJ as EnvStatus);
+      } else if (local) {
+        setEnvLoadError(`로컬 API에 연결되지 않음 (${localApiUrl}). start-local-scan.bat 실행 후 새로고침.`);
       }
     } catch (e) {
-      setEnvLoadError(wrapFetchError(e).message);
+      setEnvLoadError(wrapFetchError(e, { local, localApiUrl }).message);
+    } finally {
+      setEnvLoading(false);
     }
+
+    void (async () => {
+      try {
+        const guidesRes = await fetchLocalApi(local, "v1/web-quality/fix-guides", undefined, API_BASE);
+        const guidesJ = await readJsonResponse(guidesRes);
+        if (guidesRes.ok && guidesJ.guides) {
+          setFixGuides(guidesJ.guides as Record<string, FixGuideEntry>);
+        }
+      } catch {
+        /* non-blocking */
+      }
+    })();
   }, [mode, useLocalScan, localApiUrl]);
 
   useEffect(() => {
@@ -674,7 +683,7 @@ export default function WebQualityPage() {
       setMsg("ZIP 파일을 선택하세요.");
       return;
     }
-    const useLocal = javaUploadUsesLocal(mode, useLocalScan);
+    const useLocal = apiUsesLocal;
     setScenarioBusy(true);
     setScenarioLoaded(false);
     try {
@@ -704,11 +713,11 @@ export default function WebQualityPage() {
       setExtractable(false);
       setScenarios([]);
       setSelectedIds([]);
-      setMsg(wrapFetchError(e).message);
+      setMsg(wrapFetchError(e, { local: useLocal, localApiUrl }).message);
     } finally {
       setScenarioBusy(false);
     }
-  }, [applyScenarioPayload, zipFile, mode, useLocalScan]);
+  }, [applyScenarioPayload, zipFile, apiUsesLocal, localApiUrl]);
 
   const loadIpmsScenarios = useCallback(async () => {
     const access = ipmsAccessForMode(mode);
@@ -978,7 +987,7 @@ export default function WebQualityPage() {
   );
 
   const validate = useCallback(async () => {
-    const useLocal = javaUploadUsesLocal(mode, useLocalScan);
+    const useLocal = apiUsesLocal;
     if (mode === "java-upload" && zipFile && shouldUploadDirect(zipFile) && !useLocal) {
       const local = clientSideZipValidate(zipFile, false);
       setDesignCheck({
@@ -1016,10 +1025,10 @@ export default function WebQualityPage() {
       setDesignCheck({
         checking: false,
         canRun: false,
-        message: wrapFetchError(e).message,
+        message: wrapFetchError(e, { local: useLocal, localApiUrl }).message,
       });
     }
-  }, [appendCommonFields, mode, useLocalScan, zipFile]);
+  }, [appendCommonFields, mode, apiUsesLocal, localApiUrl, zipFile]);
 
   validateRef.current = validate;
 
@@ -1152,7 +1161,7 @@ export default function WebQualityPage() {
       );
       void refreshHistory(useLocal);
     } catch (e) {
-      setMsg(wrapFetchError(e).message);
+      setMsg(wrapFetchError(e, { local: apiUsesLocal, localApiUrl }).message);
     } finally {
       setBusy(false);
       setBusyMode(null);
@@ -1168,7 +1177,7 @@ export default function WebQualityPage() {
   ) {
     const cached = resultsByMode[mode];
     const jobId = lastJobId;
-    const useLocal = javaUploadUsesLocal(mode, useLocalScan);
+    const useLocal = apiUsesLocal;
     if (!cached && !jobId) {
       setMsg("먼저 진단을 실행하거나 이력에서 결과를 불러오세요.");
       return;
@@ -1625,6 +1634,10 @@ python scripts/save_ipms_session.py --url ${ipmsUrl.trim() || IPMS_DEFAULT_URL} 
           </div>
         ) : mode === "java-upload" ? (
           <div className="wq-step-block">
+            <div className="env-panel-head">
+              <EnvSourceBadge local={apiUsesLocal} />
+              {apiUsesLocal && envLoading ? <EnvToolsSkeleton /> : null}
+            </div>
             <p className="hint">
               Java/WAR <strong>ZIP</strong> — JSP·HTML <strong>정적</strong> 품질 진단 (URL
               불필요). Spring 배포 URL이 있으면 「화면 진단 포함」으로 Playwright 캡처 가능.
@@ -1644,50 +1657,19 @@ python scripts/save_ipms_session.py --url ${ipmsUrl.trim() || IPMS_DEFAULT_URL} 
                 />
               </label>
             </div>
-            <div className="source-scan-local-panel" style={{ marginTop: "0.75rem" }}>
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={useLocalScan}
-                  onChange={(e) => {
-                    const on = e.target.checked;
-                    setUseLocalScan(on);
-                    setLocalScanEnabled(on);
-                    void loadWqEnvironment();
-                    void refreshHistory(on);
-                  }}
-                />
-                <span>내 PC에서 검사 (ZIP·Playwright는 로컬 API — Render 업로드 없음)</span>
-              </label>
-              {useLocalScan ? (
-                <div style={{ marginTop: "0.5rem" }}>
-                  <label>
-                    로컬 API URL
-                    <input
-                      value={localApiUrl}
-                      onChange={(e) => setLocalApiUrl(e.target.value)}
-                      onBlur={() => {
-                        setLocalScanApiBase(localApiUrl);
-                        void loadWqEnvironment();
-                      }}
-                      placeholder={DEFAULT_LOCAL_SCAN_API}
-                      style={{ width: "100%", maxWidth: "28rem" }}
-                    />
-                  </label>
-                  <p className="hint" style={{ marginTop: "0.35rem" }}>
-                    <code>scripts\start-local-scan.bat</code> 또는{" "}
-                    <code>.\scripts\start-api-source-scan.ps1</code> 실행. 화면 진단 시 Playwright
-                    Chromium이 로컬 PC에서 배포 URL을 엽니다. Vercel 포털 사용 시{" "}
-                    <code>CORS_ORIGINS=https://your-app.vercel.app</code> 설정.
-                  </p>
-                  {envLoadError ? <p className="error-text">{envLoadError}</p> : null}
-                </div>
-              ) : (
-                <p className="hint" style={{ marginTop: "0.35rem" }}>
-                  4MB 초과 ZIP은 Render 업로드 시 502가 날 수 있습니다 — 로컬 검사 권장 (A안).
-                </p>
-              )}
-            </div>
+            <LocalScanSettings
+              useLocal={useLocalScan}
+              localApiUrl={localApiUrl}
+              envLoadError={useLocalScan ? envLoadError : undefined}
+              envLoading={useLocalScan ? envLoading : false}
+              onToggle={(on) => {
+                setUseLocalScan(on);
+                void loadWqEnvironment();
+                void refreshHistory(on);
+              }}
+              onUrlChange={setLocalApiUrl}
+              onUrlBlur={() => void loadWqEnvironment()}
+            />
             <div className="btn-row">
               <button
                 type="button"

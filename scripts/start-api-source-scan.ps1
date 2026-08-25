@@ -133,6 +133,24 @@ if ($plugin) {
 
 $env:PATH = "$env:JAVA_HOME\bin;$mavenBin;$env:PATH"
 
+# Vercel 포털 → 로컬 API CORS (localhost + .env.local NEXT_PUBLIC_PORTAL_URL)
+if (-not $env:CORS_ORIGINS) {
+    $corsList = [System.Collections.Generic.List[string]]::new()
+    [void]$corsList.Add("http://127.0.0.1:3000")
+    [void]$corsList.Add("http://localhost:3000")
+    $envLocal = Join-Path $repoRoot "apps\portal\.env.local"
+    if (Test-Path $envLocal) {
+        Get-Content $envLocal -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_ -match '^\s*NEXT_PUBLIC_PORTAL_URL\s*=\s*(.+)\s*$') {
+                $u = $Matches[1].Trim().Trim('"').Trim("'")
+                if ($u -match '^https?://') { [void]$corsList.Add($u) }
+            }
+        }
+    }
+    $env:CORS_ORIGINS = ($corsList | Select-Object -Unique) -join ','
+    Write-Host "CORS_ORIGINS (auto):" $env:CORS_ORIGINS
+}
+
 Write-Host "JAVA_HOME:" $env:JAVA_HOME
 Write-Host "PMD_HOME:" $env:PMD_HOME
 Write-Host "SPOTBUGS_HOME:" $env:SPOTBUGS_HOME

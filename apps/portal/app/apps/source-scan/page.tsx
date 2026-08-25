@@ -4,14 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PortalNav } from "@/lib/PortalNav";
 import { API_BASE } from "@/lib/apiBase";
 import {
-  DEFAULT_LOCAL_SCAN_API,
-  fetchSourceScan,
+  fetchLocalApi,
   getLocalScanApiBase,
   isLocalScanEnabled,
-  postSourceScanMultipart,
-  setLocalScanApiBase,
-  setLocalScanEnabled,
+  postLocalMultipart,
 } from "@/lib/localScanApi";
+import {
+  EnvSourceBadge,
+  EnvToolsSkeleton,
+  LocalScanSettings,
+} from "@/components/LocalScanSettings";
 import {
   normalizeFixGuides,
   resolveSourceScanFix,
@@ -166,15 +168,41 @@ const REF_RULESET_LABEL: Record<string, string> = {
 };
 
 const STATUS_LABEL: Record<string, string> = {
-  fail: "미흡",
-  not_scanned: "미실행",
+  fail: "결함",
+  not_scanned: "분석 불가",
   pass: "통과",
 };
+
+function formatScanCompleteMessage(stats?: ScanResult["stats"]): string {
+  const fail = stats?.fail ?? 0;
+  const notScanned = stats?.not_scanned ?? 0;
+  return `진단 완료 — 결함 ${fail}건 · 분석 불가 ${notScanned}건`;
+}
+
+function formatStepDetail(step: ScanStep): string | null {
+  if (!step.detail) return null;
+  if (step.status === "done" && /중(\.\.\.|…)\s*$/.test(step.detail.trim())) {
+    return "완료";
+  }
+  return step.detail;
+}
+
+function normalizeDoneSteps(steps: ScanStep[]): ScanStep[] {
+  return steps.map((step) => {
+    const detail = formatStepDetail(step);
+    if (detail === step.detail) return step;
+    return { ...step, detail: detail ?? "" };
+  });
+}
 
 const DEFAULT_PMD_RULESETS_DISPLAY =
   "category/java/bestpractices.xml, category/java/errorprone.xml, category/java/security.xml";
 const DEFAULT_EXCLUDE_DISPLAY =
   "**/test/**, **/tests/**, **/target/**, **/node_modules/**, **/build/**, …";
+
+function zipScanUsesLocal(mode: "portal" | "upload", useLocalScan: boolean): boolean {
+  return mode === "upload" && useLocalScan;
+}
 
 const SEV_LABEL: Record<string, string> = {
   high: "높음",
@@ -302,8 +330,9 @@ export default function SourceScanPage() {
     pmd: {},
     bandit: {},
   });
-  const [useLocalScan, setUseLocalScan] = useState(false);
-  const [localApiUrl, setLocalApiUrl] = useState(DEFAULT_LOCAL_SCAN_API);
+  const [useLocalScan, setUseLocalScan] = useState(() => isLocalScanEnabled());
+  const [localApiUrl, setLocalApiUrl] = useState(() => getLocalScanApiBase());
+  const [envLoading, setEnvLoading] = useState(true);
   const prefsLoaded = useRef(false);
   const forceRescanRef = useRef(false);
   const validateTimer = useRef<number | null>(null);
@@ -404,60 +433,71 @@ export default function SourceScanPage() {
     showAdvanced,
   ]);
 
-  useEffect(() => {
-    setUseLocalScan(isLocalScanEnabled());
-    setLocalApiUrl(getLocalScanApiBase());
-  }, []);
+  const apiUsesLocal = zipScanUsesLocal(mode, useLocalScan);
 
   const loadScanEnvironment = useCallback(async () => {
+    const local = zipScanUsesLocal(mode, useLocalScan);
+    setEnvLoading(true);
     setEnvLoadError("");
-    try {
-      const [tRes, eRes, detailRes, hRes, gRes] = await Promise.all([
-        fetchSourceScan(useLocalScan, "v1/source-scan/targets", undefined, API_BASE),
-        fetchSourceScan(useLocalScan, "v1/source-scan/environment", undefined, API_BASE),
-        useLocalScan
-          ? fetchSourceScan(true, "health/detail", undefined, API_BASE)
-          : fetch(`${API_BASE}/health/detail`),
-        fetchSourceScan(useLocalScan, "v1/source-scan/history?limit=15", undefined, API_BASE),
-        fetchSourceScan(useLocalScan, "v1/source-scan/fix-guides", undefined, API_BASE),
-      ]);
-      const tj = await readJsonResponse(tRes);
-      if (tRes.ok && Array.isArray(tj.targets)) setTargets(tj.targets as PortalTarget[]);
+    if (local) setEnvStatus(null);
 
+    try {
+      const eRes = await fetchLocalApi(local, "v1/source-scan/environment", undefined, API_BASE);
       let env: EnvStatus | null = null;
       if (eRes.ok) {
         env = (await readJsonResponse(eRes)) as EnvStatus;
-      } else if (detailRes.ok) {
-        const detail = (await readJsonResponse(detailRes)) as { source_scan?: EnvStatus };
-        if (detail.source_scan) {
-          env = { ok: true, ...detail.source_scan } as EnvStatus;
-          if (!useLocalScan) {
+      } else if (!local) {
+        const detailRes = await fetch(`${API_BASE}/health/detail`);
+        if (detailRes.ok) {
+          const detail = (await readJsonResponse(detailRes)) as { source_scan?: EnvStatus };
+          if (detail.source_scan) {
+            env = { ok: true, ...detail.source_scan } as EnvStatus;
             setEnvLoadError(
-              `환경 API HTTP ${eRes.status} — health/detail의 source_scan으로 표시 중. API_ACCESS_KEY 확인.`
+              `환경 API HTTP ${eRes.status} — health/detail fallback. API_ACCESS_KEY 확인.`
             );
           }
         }
+      }
+      if (env) {
+        setEnvStatus(env);
+      } else if (local) {
+        setEnvLoadError(
+          `로컬 API에 연결되지 않음 (${localApiUrl}). start-local-scan.bat 실행 후 새로고침.`
+        );
       } else {
         setEnvLoadError(
-          useLocalScan
-            ? `로컬 API 연결 실패 (${localApiUrl}). start-api-source-scan.ps1 실행 및 CORS_ORIGINS(배포 포털 URL) 확인.`
-            : `API 연결 실패 (environment HTTP ${eRes.status}). Vercel NEXT_PUBLIC_API_BASE_URL·API_ACCESS_KEY 확인.`
+          `API 연결 실패 (HTTP ${eRes.status}). NEXT_PUBLIC_API_BASE_URL·API_ACCESS_KEY 확인.`
         );
       }
-      if (env) setEnvStatus(env);
-
-      if (hRes.ok) {
-        const hj = await readJsonResponse(hRes);
-        setHistory((hj.history as HistoryItem[]) || []);
-      }
-      if (gRes.ok) {
-        const gj = await readJsonResponse(gRes);
-        setFixGuides(normalizeFixGuides(gj));
-      }
     } catch (e) {
-      setEnvLoadError(wrapFetchError(e).message);
+      setEnvLoadError(wrapFetchError(e, { local, localApiUrl }).message);
+    } finally {
+      setEnvLoading(false);
     }
-  }, [useLocalScan, localApiUrl]);
+
+    const bgLocal = local;
+    void (async () => {
+      try {
+        const [tRes, hRes, gRes] = await Promise.all([
+          fetchLocalApi(bgLocal, "v1/source-scan/targets", undefined, API_BASE),
+          fetchLocalApi(bgLocal, "v1/source-scan/history?limit=15", undefined, API_BASE),
+          fetchLocalApi(bgLocal, "v1/source-scan/fix-guides", undefined, API_BASE),
+        ]);
+        const tj = await readJsonResponse(tRes);
+        if (tRes.ok && Array.isArray(tj.targets)) setTargets(tj.targets as PortalTarget[]);
+        if (hRes.ok) {
+          const hj = await readJsonResponse(hRes);
+          setHistory((hj.history as HistoryItem[]) || []);
+        }
+        if (gRes.ok) {
+          const gj = await readJsonResponse(gRes);
+          setFixGuides(normalizeFixGuides(gj));
+        }
+      } catch {
+        /* non-blocking */
+      }
+    })();
+  }, [mode, useLocalScan, localApiUrl]);
 
   useEffect(() => {
     void loadScanEnvironment();
@@ -468,7 +508,7 @@ export default function SourceScanPage() {
       setDesignCheck(IDLE_UPLOAD_CHECK);
       return;
     }
-    if (mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !useLocalScan) {
+    if (mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !apiUsesLocal) {
       const local = clientSideZipValidate(zipFile, false);
       setDesignCheck({
         checking: false,
@@ -484,8 +524,8 @@ export default function SourceScanPage() {
       fd.append("mode", mode);
       fd.append("target", mode === "upload" ? "upload" : target);
       if (mode === "upload" && zipFile) fd.append("file", zipFile);
-      const res = useLocalScan
-        ? await postSourceScanMultipart(true, "v1/source-scan/validate", fd, API_BASE)
+      const res = apiUsesLocal
+        ? await postLocalMultipart(true, "v1/source-scan/validate", fd, API_BASE)
         : await postMultipart("v1/source-scan/validate", fd, zipFile);
       const j = await readJsonResponse(res);
       if (!res.ok) {
@@ -506,10 +546,10 @@ export default function SourceScanPage() {
       setDesignCheck({
         checking: false,
         canRun: false,
-        message: wrapFetchError(e).message,
+        message: wrapFetchError(e, { local: apiUsesLocal, localApiUrl }).message,
       });
     }
-  }, [mode, target, zipFile, useLocalScan]);
+  }, [mode, target, zipFile, apiUsesLocal, localApiUrl]);
 
   validateRef.current = validate;
 
@@ -555,7 +595,7 @@ export default function SourceScanPage() {
     return new Promise((resolve, reject) => {
       const poll = async () => {
         try {
-          const res = await fetchSourceScan(localScan, `v1/source-scan/jobs/${jobId}`, undefined, API_BASE);
+          const res = await fetchLocalApi(localScan, `v1/source-scan/jobs/${jobId}`, undefined, API_BASE);
           const j = await readJsonResponse(res);
           if (!res.ok) throw new Error(String(j.detail || "진행 상태 조회 실패"));
           setScanProgress({
@@ -569,6 +609,14 @@ export default function SourceScanPage() {
           });
           if (j.status === "done") {
             if (pollTimer.current) window.clearInterval(pollTimer.current);
+            const steps = normalizeDoneSteps((j.steps as ScanStep[]) || []);
+            setScanProgress({
+              job_id: jobId,
+              status: "done",
+              pct: 100,
+              message: String(j.message || "진단 완료"),
+              steps,
+            });
             resolve(j.result as ScanResult);
           } else if (j.status === "error" || j.status === "cancelled") {
             if (pollTimer.current) window.clearInterval(pollTimer.current);
@@ -587,8 +635,8 @@ export default function SourceScanPage() {
   async function cancelScan() {
     if (!scanProgress?.job_id) return;
     try {
-      await fetchSourceScan(
-        useLocalScan,
+      await fetchLocalApi(
+        zipScanUsesLocal(mode, useLocalScan),
         `v1/source-scan/jobs/${scanProgress.job_id}/cancel`,
         { method: "POST" },
         API_BASE
@@ -693,7 +741,7 @@ export default function SourceScanPage() {
       job_id: "",
       status: "running",
       pct: 0,
-      message: mode === "upload" ? (useLocalScan ? "로컬 API로 ZIP 전송 중…" : "ZIP 업로드 중…") : "진단 요청 전송 중…",
+      message: mode === "upload" ? (apiUsesLocal ? "로컬 API로 ZIP 전송 중…" : "ZIP 업로드 중…") : "진단 요청 전송 중…",
       steps: [
         { id: "prepare", label: "준비", status: "running", detail: "" },
         { id: "finalize", label: "결과 정리", status: "pending", detail: "" },
@@ -706,7 +754,7 @@ export default function SourceScanPage() {
       fd.append("format", "json");
       appendScanOptions(fd);
 
-      if (mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !useLocalScan) {
+      if (mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !apiUsesLocal) {
         setScanProgress((prev) =>
           prev
             ? { ...prev, message: `Render로 ZIP 업로드 중… (${(zipFile.size / (1024 * 1024)).toFixed(1)}MB)` }
@@ -747,10 +795,8 @@ export default function SourceScanPage() {
           },
         }));
         setTab("all");
-        setMsg(
-          `진단 완료 — ${scanResult.findings.length}건 · 미흡 ${scanResult.stats?.fail ?? 0} · 미실행 ${scanResult.stats?.not_scanned ?? 0}`
-        );
-        const hRes = await fetchSourceScan(false, "v1/source-scan/history?limit=15", undefined, API_BASE);
+        setMsg(formatScanCompleteMessage(scanResult.stats));
+        const hRes = await fetchLocalApi(false, "v1/source-scan/history?limit=15", undefined, API_BASE);
         if (hRes.ok) {
           const hj = await readJsonResponse(hRes);
           setHistory((hj.history as HistoryItem[]) || []);
@@ -760,8 +806,8 @@ export default function SourceScanPage() {
       }
 
       if (mode === "upload" && zipFile) fd.append("file", zipFile);
-      const res = useLocalScan
-        ? await postSourceScanMultipart(true, "v1/source-scan/run", fd, API_BASE)
+      const res = apiUsesLocal
+        ? await postLocalMultipart(true, "v1/source-scan/run", fd, API_BASE)
         : await postMultipart("v1/source-scan/run", fd, zipFile);
       const start = (await readJsonResponse(res)) as {
         async?: boolean;
@@ -780,7 +826,7 @@ export default function SourceScanPage() {
         steps: start.steps || [],
       });
 
-      const scanResult = await pollJob(start.job_id, useLocalScan);
+      const scanResult = await pollJob(start.job_id, apiUsesLocal);
       if (!scanResult) throw new Error("진단 결과 없음");
 
       forceRescanRef.current = false;
@@ -793,9 +839,7 @@ export default function SourceScanPage() {
         },
       }));
       setTab("all");
-      setMsg(
-        `진단 완료 — ${scanResult.findings.length}건 · 미흡 ${scanResult.stats?.fail ?? 0} · 미실행 ${scanResult.stats?.not_scanned ?? 0}`
-      );
+      setMsg(formatScanCompleteMessage(scanResult.stats));
       const hRes = await fetch(`${API_BASE}/v1/source-scan/history?limit=15`);
       if (hRes.ok) {
         const hj = await hRes.json();
@@ -804,7 +848,7 @@ export default function SourceScanPage() {
       window.setTimeout(() => setScanProgress(null), 800);
     } catch (e) {
       forceRescanRef.current = false;
-      setMsg(wrapFetchError(e).message);
+      setMsg(wrapFetchError(e, { local: apiUsesLocal, localApiUrl }).message);
       setScanProgress(null);
     } finally {
       setBusy(false);
@@ -887,44 +931,58 @@ export default function SourceScanPage() {
         <p>PMD · FindSecBugs · Bandit/ESLint Analog — 포털 앱 또는 ZIP 업로드 소스 점검</p>
       </section>
 
-      {envStatus ? (
-        <section className="panel">
+      <section className="panel">
+        <div className="env-panel-head">
           <h2>도구·환경 상태</h2>
-          {envLoadError ? <p className="msg err">{envLoadError}</p> : null}
-          {!envStatus.pmd && !envStatus.spotbugs ? (
-            <p className="msg err">
-              PMD·SpotBugs 미설정 — Vercel <code>NEXT_PUBLIC_API_BASE_URL</code>이 Docker Render URL(예:{" "}
-              <code>https://myplatform-9ukz.onrender.com</code>)인지 확인하세요. Python-only Render에는 Java
-              도구가 없습니다.
-            </p>
-          ) : null}
-          <ul className="source-scan-env-grid">
-            <li>
-              <strong>revision</strong> {String(envStatus.revision || "-")}
-            </li>
-            <li>
-              <strong>JAVA_HOME</strong> {String(envStatus.java_home || "(미설정)")}
-            </li>
-            <li>
-              <strong>mvn</strong> {envStatus.mvn_ok ? "✓" : "✕"}{" "}
-              <span>{String(envStatus.mvn_path || "-")}</span>
-            </li>
-            <li>
-              <strong>PMD</strong> {envStatus.pmd ? "✓" : "✕"} · <strong>SpotBugs</strong>{" "}
-              {envStatus.spotbugs ? "✓" : "✕"}
-            </li>
-            <li>
-              <strong>plugin</strong> {String(envStatus.findsecbugs_plugin || "(미설정)")}
-            </li>
-            {envStatus.queue && typeof envStatus.queue === "object" ? (
-              <li>
-                <strong>대기열</strong> {String((envStatus.queue as { queue_length?: number }).queue_length ?? 0)}건
-              </li>
+          <EnvSourceBadge local={apiUsesLocal} />
+        </div>
+        {envLoading ? <EnvToolsSkeleton /> : null}
+        {envLoadError ? <p className="msg err">{envLoadError}</p> : null}
+        {!envLoading && envStatus ? (
+          <>
+            {!apiUsesLocal && !envStatus.pmd && !envStatus.spotbugs ? (
+              <p className="msg err">
+                Render에 Java 도구 없음 — ZIP 검사는 「내 PC에서 검사」 사용 또는 Docker Render URL 확인.
+              </p>
             ) : null}
-          </ul>
-          {envStatus.jdk_hint ? <p className="hint">{String(envStatus.jdk_hint)}</p> : null}
-        </section>
-      ) : null}
+            {apiUsesLocal && (!envStatus.pmd || !envStatus.spotbugs) ? (
+              <p className="msg err">
+                이 PC에 PMD/SpotBugs 미설정 — <code>start-api-source-scan.ps1</code> 상단{" "}
+                <code>C:\tools</code> 경로를 본인 PC에 맞게 수정하세요.
+              </p>
+            ) : null}
+            <ul className="source-scan-env-grid">
+              <li>
+                <strong>revision</strong>
+                <span className="env-path">{String(envStatus.revision || "-")}</span>
+              </li>
+              <li>
+                <strong>JAVA_HOME</strong>
+                <span className="env-path">{String(envStatus.java_home || "(미설정)")}</span>
+              </li>
+              <li>
+                <strong>mvn</strong> {envStatus.mvn_ok ? "✓" : "✕"}
+                <span className="env-path">{String(envStatus.mvn_path || "-")}</span>
+              </li>
+              <li>
+                <strong>PMD</strong> {envStatus.pmd ? "✓" : "✕"} · <strong>SpotBugs</strong>{" "}
+                {envStatus.spotbugs ? "✓" : "✕"}
+              </li>
+              <li>
+                <strong>plugin</strong>
+                <span className="env-path">{String(envStatus.findsecbugs_plugin || "(미설정)")}</span>
+              </li>
+              {envStatus.queue && typeof envStatus.queue === "object" ? (
+                <li>
+                  <strong>대기열</strong>{" "}
+                  {String((envStatus.queue as { queue_length?: number }).queue_length ?? 0)}건
+                </li>
+              ) : null}
+            </ul>
+            {envStatus.jdk_hint ? <p className="hint">{String(envStatus.jdk_hint)}</p> : null}
+          </>
+        ) : null}
+      </section>
 
       <section className="panel">
         <h2>진단 설정</h2>
@@ -953,47 +1011,18 @@ export default function SourceScanPage() {
               소스 ZIP
               <input type="file" accept=".zip,application/zip" onChange={(e) => setZipFile(e.target.files?.[0] ?? null)} />
             </label>
-            <div className="source-scan-local-panel" style={{ marginTop: "0.75rem" }}>
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={useLocalScan}
-                  onChange={(e) => {
-                    const on = e.target.checked;
-                    setUseLocalScan(on);
-                    setLocalScanEnabled(on);
-                    void loadScanEnvironment();
-                  }}
-                />
-                <span>내 PC에서 검사 (PMD/SpotBugs/ZIP — 로컬 API, 웹표준과 설정 공유)</span>
-              </label>
-              {useLocalScan ? (
-                <div style={{ marginTop: "0.5rem" }}>
-                  <label>
-                    로컬 API URL
-                    <input
-                      value={localApiUrl}
-                      onChange={(e) => setLocalApiUrl(e.target.value)}
-                      onBlur={() => {
-                        setLocalScanApiBase(localApiUrl);
-                        void loadScanEnvironment();
-                      }}
-                      placeholder={DEFAULT_LOCAL_SCAN_API}
-                      style={{ width: "100%", maxWidth: "28rem" }}
-                    />
-                  </label>
-                  <p className="hint" style={{ marginTop: "0.35rem" }}>
-                    PowerShell: <code>scripts\start-local-scan.bat</code> 또는{" "}
-                    <code>.\scripts\start-api-source-scan.ps1</code> 실행 후 진단하세요. 배포 포털(Vercel)에서
-                    쓸 때는 로컬 API에 <code>CORS_ORIGINS=https://your-app.vercel.app</code> 를 추가하세요.
-                  </p>
-                </div>
-              ) : (
-                <p className="hint" style={{ marginTop: "0.35rem" }}>
-                  4MB 초과 ZIP은 Render로 업로드됩니다. 502 오류 시 위 옵션(로컬 검사)을 사용하세요.
-                </p>
-              )}
-            </div>
+            <LocalScanSettings
+              useLocal={useLocalScan}
+              localApiUrl={localApiUrl}
+              envLoadError={mode === "upload" && useLocalScan ? envLoadError : undefined}
+              envLoading={mode === "upload" && useLocalScan ? envLoading : false}
+              onToggle={(on) => {
+                setUseLocalScan(on);
+                void loadScanEnvironment();
+              }}
+              onUrlChange={setLocalApiUrl}
+              onUrlBlur={() => void loadScanEnvironment()}
+            />
           </>
         )}
         <ul className="source-scan-option-list">
@@ -1134,13 +1163,16 @@ export default function SourceScanPage() {
               {scanProgress.queue_position ? ` · 대기 ${scanProgress.queue_position}번째` : ""}
             </p>
             <ol className="scan-step-list">
-              {scanProgress.steps.map((step) => (
+              {scanProgress.steps.map((step) => {
+                const stepDetail = formatStepDetail(step);
+                return (
                 <li key={step.id} className={`scan-step scan-step-${step.status}`} aria-current={step.status === "running" ? "step" : undefined}>
                   <span className="scan-step-icon">{STEP_STATUS_ICON[step.status] || "○"}</span>
                   <span className="scan-step-label">{step.label}</span>
-                  {step.detail ? <span className="scan-step-detail">{step.detail}</span> : null}
+                  {stepDetail ? <span className="scan-step-detail">{stepDetail}</span> : null}
                 </li>
-              ))}
+                );
+              })}
             </ol>
           </div>
         ) : null}
@@ -1157,7 +1189,7 @@ export default function SourceScanPage() {
                   <th>일시</th>
                   <th>대상</th>
                   <th>모드</th>
-                  <th>미흡</th>
+                  <th>결함</th>
                 </tr>
               </thead>
               <tbody>
@@ -1234,15 +1266,15 @@ export default function SourceScanPage() {
           ))}
           <div className="stats-grid">
             <div className="stat-card">
-              <span className="stat-label">전체</span>
+              <span className="stat-label">전체 항목</span>
               <strong>{result.stats?.total ?? 0}</strong>
             </div>
-            <div className="stat-card">
-              <span className="stat-label">미흡</span>
+            <div className="stat-card" title="PMD·FindSecBugs 등에서 발견된 코드 결함">
+              <span className="stat-label">결함</span>
               <strong>{result.stats?.fail ?? 0}</strong>
             </div>
-            <div className="stat-card">
-              <span className="stat-label">미실행</span>
+            <div className="stat-card" title="도구 미실행·빌드 실패 등으로 분석하지 못한 항목">
+              <span className="stat-label">분석 불가</span>
               <strong>{result.stats?.not_scanned ?? 0}</strong>
             </div>
             <div className="stat-card">
@@ -1250,6 +1282,9 @@ export default function SourceScanPage() {
               <strong>{result.stats?.by_severity?.high ?? 0}</strong>
             </div>
           </div>
+          <p className="hint stats-legend">
+            <strong>결함</strong> = 규칙 위반 발견 · <strong>분석 불가</strong> = 스캐너가 실행되지 않음(설정·빌드 오류 등)
+          </p>
           {result.stats?.by_language ? (
             <p className="hint">
               언어별:{" "}
@@ -1288,7 +1323,7 @@ export default function SourceScanPage() {
                 ["severity_medium", "심각도中"],
                 ["severity_low", "심각도↓"],
                 ["diff", "Diff 신규"],
-                ["not_scanned", "미실행"],
+                ["not_scanned", "분석 불가"],
               ] as const
             ).map(([id, label]) => (
               <button key={id} type="button" className={`tab ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}>

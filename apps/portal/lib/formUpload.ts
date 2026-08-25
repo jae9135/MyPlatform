@@ -1,4 +1,5 @@
 import { API_BASE } from "@/lib/apiBase";
+import { type LocalFetchErrorOpts, wrapLocalFetchError } from "@/lib/localScanApi";
 
 /** Vercel serverless proxy body limit (~4.5MB). Stay under for safety. */
 export const PROXY_SAFE_UPLOAD_BYTES = 4 * 1024 * 1024;
@@ -99,14 +100,8 @@ export async function stageLargeZip(file: File): Promise<{ staging_id: string; s
   return { staging_id, size_bytes: Number(j.size_bytes || file.size) };
 }
 
-export function wrapFetchError(e: unknown): Error {
-  const msg = String((e as Error).message || e);
-  if (msg === "Failed to fetch" || msg.includes("NetworkError")) {
-    return new Error(
-      "Render API 연결 실패(CORS). Render를 재배포하고 CORS_ORIGINS에 Vercel URL을 추가하세요. (진단 실행 시 대용량 ZIP 직접 업로드)"
-    );
-  }
-  return e instanceof Error ? e : new Error(msg);
+export function wrapFetchError(e: unknown, opts?: LocalFetchErrorOpts): Error {
+  return wrapLocalFetchError(e, opts);
 }
 
 /** Large ZIP: skip cloud validate upload; check size client-side only. */

@@ -7,6 +7,9 @@ const LOCAL_API_KEY = "localScanLocalApi";
 const LEGACY_USE_LOCAL_KEY = "sourceScanUseLocal";
 const LEGACY_LOCAL_API_KEY = "sourceScanLocalApi";
 
+const LOCAL_FETCH_TIMEOUT_MS = 4500;
+const PROXY_FETCH_TIMEOUT_MS = 20000;
+
 export function isLocalScanEnabled(): boolean {
   if (typeof window === "undefined") return false;
   const v =
@@ -45,6 +48,40 @@ export function localApiUrl(useLocal: boolean, apiPath: string, proxyBase = "/ap
   return `${localApiBase(useLocal, proxyBase)}/${path}`;
 }
 
+export type LocalFetchErrorOpts = {
+  local?: boolean;
+  localApiUrl?: string;
+};
+
+export function wrapLocalFetchError(e: unknown, opts?: LocalFetchErrorOpts): Error {
+  const msg = String((e as Error).message || e);
+  const timedOut = msg.includes("aborted") || msg.includes("timeout");
+  if (msg === "Failed to fetch" || msg.includes("NetworkError") || timedOut) {
+    if (opts?.local) {
+      const base = opts.localApiUrl || DEFAULT_LOCAL_SCAN_API;
+      return new Error(
+        timedOut
+          ? `로컬 API 응답 없음 (${base}) — start-local-scan.bat 실행 여부 확인.`
+          : `로컬 API 연결 실패 (${base}). API 실행 + Vercel 사용 시 CORS_ORIGINS에 포털 URL 추가. localhost:3000 은 CORS 불필요.`
+      );
+    }
+    return new Error(
+      "Render API 연결 실패. NEXT_PUBLIC_API_BASE_URL·API_ACCESS_KEY 또는 「내 PC에서 검사」 사용."
+    );
+  }
+  return e instanceof Error ? e : new Error(msg);
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 export async function fetchLocalApi(
   useLocal: boolean,
   apiPath: string,
@@ -52,10 +89,15 @@ export async function fetchLocalApi(
   proxyBase = "/api/backend"
 ): Promise<Response> {
   const url = localApiUrl(useLocal, apiPath, proxyBase);
-  return fetch(url, {
-    ...init,
-    mode: useLocal ? "cors" : init?.mode,
-  });
+  const timeout = useLocal ? LOCAL_FETCH_TIMEOUT_MS : PROXY_FETCH_TIMEOUT_MS;
+  return fetchWithTimeout(
+    url,
+    {
+      ...init,
+      mode: useLocal ? "cors" : init?.mode,
+    },
+    timeout
+  );
 }
 
 export async function postLocalMultipart(

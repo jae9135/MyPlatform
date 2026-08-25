@@ -250,13 +250,18 @@ def scan_java_tree(
             1 for f in result.findings if f.get("scanner") == "pmd" and f.get("status") == "fail"
         )
         if on_progress:
-            on_progress("pmd_done", f"PMD 완료 — 미흡 {result.pmd_fail_count}건")
+            if result.pmd_ran:
+                label = f"결함 {result.pmd_fail_count}건" if result.pmd_fail_count else "결함 없음"
+                on_progress("pmd_done", f"PMD 완료 — {label}")
+            else:
+                reason = (result.pmd_error or "분석 실패")[:240]
+                on_progress("pmd_done", f"PMD 분석 불가 — {reason}")
     else:
         msg = "PMD CLI 없음 — PMD_HOME 또는 PATH 설정 (docs/source-scan-setup.md)"
         result.pmd_error = msg
         result.findings.append(not_scanned_finding(scanner="pmd", reason=msg))
         if on_progress:
-            on_progress("pmd_done", msg)
+            on_progress("pmd_done", f"PMD 분석 불가 — {msg}")
 
     sb = spotbugs_executable()
     plugin = findsecbugs_plugin()
@@ -279,6 +284,8 @@ def scan_java_tree(
         )
         result.spotbugs_available = True
         if classes_dir:
+            if on_progress:
+                on_progress("java_build_done", "빌드 완료")
             if _cancelled():
                 return result
             if on_progress:
@@ -308,37 +315,43 @@ def scan_java_tree(
                 1 for f in result.findings if f.get("rule_set") == "findsecbugs" and f.get("status") == "fail"
             )
             if on_progress:
-                on_progress("findsecbugs_done", f"FindSecBugs 완료 — 미흡 {result.spotbugs_fail_count}건")
+                if result.spotbugs_ran:
+                    label = f"결함 {result.spotbugs_fail_count}건" if result.spotbugs_fail_count else "결함 없음"
+                    on_progress("findsecbugs_done", f"FindSecBugs 완료 — {label}")
+                else:
+                    reason = (result.spotbugs_error or "분석 실패")[:240]
+                    on_progress("findsecbugs_done", f"FindSecBugs 분석 불가 — {reason}")
         else:
             reason = compile_error or "컴파일 실패 또는 pom.xml/build.gradle 없음"
             result.spotbugs_error = f"Java 컴파일 실패 — {reason}"
             result.findings.append(not_scanned_finding(scanner="spotbugs", reason=reason))
             if on_progress:
-                on_progress("findsecbugs_done", f"FindSecBugs 미실행 — {reason}")
+                on_progress("java_build_done", reason[:240])
+                on_progress("findsecbugs_done", f"FindSecBugs 분석 불가 — {reason[:200]}")
     elif not sb and not plugin:
         msg = "SpotBugs·findsecbugs-plugin 미설정 — SPOTBUGS_HOME, FINDSEC_BUGS_PLUGIN_JAR"
         result.spotbugs_error = msg
         result.findings.append(not_scanned_finding(scanner="spotbugs", reason=msg))
         if on_progress:
-            on_progress("findsecbugs_done", msg)
+            on_progress("findsecbugs_done", f"FindSecBugs 분석 불가 — {msg}")
     elif not sb:
         msg = "SpotBugs 없음 — SPOTBUGS_HOME 또는 PATH 설정"
         result.spotbugs_error = msg
         result.findings.append(not_scanned_finding(scanner="spotbugs", reason=msg))
         if on_progress:
-            on_progress("findsecbugs_done", msg)
+            on_progress("findsecbugs_done", f"FindSecBugs 분석 불가 — {msg}")
     elif not plugin:
         msg = "findsecbugs-plugin JAR 없음 — FINDSEC_BUGS_PLUGIN_JAR 설정"
         result.spotbugs_error = msg
         result.findings.append(not_scanned_finding(scanner="spotbugs", reason=msg))
         if on_progress:
-            on_progress("findsecbugs_done", msg)
+            on_progress("findsecbugs_done", f"FindSecBugs 분석 불가 — {msg}")
     elif not try_build:
         msg = "FindSecBugs 빌드 옵션 꺼짐"
         result.spotbugs_error = msg
         result.findings.append(not_scanned_finding(scanner="spotbugs", reason=msg))
         if on_progress:
-            on_progress("findsecbugs_done", msg)
+            on_progress("findsecbugs_done", f"FindSecBugs 분석 불가 — {msg}")
 
     for rel in rel_set:
         full = f"{rel_prefix}/{rel}".lstrip("/") if rel_prefix else rel

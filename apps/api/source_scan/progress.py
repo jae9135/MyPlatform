@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -59,6 +60,15 @@ _jobs: dict[str, ScanJob] = {}
 
 class ScanCancelled(Exception):
     pass
+
+
+_IN_PROGRESS_DETAIL = re.compile(r"중(\.\.\.|…)\s*$")
+
+
+def _finalize_step_detail(status: StepStatus, detail: str) -> str:
+    if status == "done" and _IN_PROGRESS_DETAIL.search(detail):
+        return "완료"
+    return detail
 
 
 def create_job(step_ids: list[str] | None = None) -> str:
@@ -244,6 +254,18 @@ class ProgressReporter:
                     s.status = "done"
                     if detail:
                         s.detail = detail
+                    else:
+                        s.detail = _finalize_step_detail("done", s.detail)
+
+        self._update(_fn)
+
+    def error(self, step_id: str, detail: str = "") -> None:
+        def _fn(job: ScanJob) -> None:
+            for s in job.steps:
+                if s.id == step_id:
+                    s.status = "error"
+                    if detail:
+                        s.detail = detail
 
         self._update(_fn)
 
@@ -275,6 +297,8 @@ class ProgressReporter:
             for s in job.steps:
                 if s.status in ("pending", "running"):
                     s.status = "done"
+                if s.status == "done":
+                    s.detail = _finalize_step_detail("done", s.detail)
             _persist_job(job)
 
     def fail(self, error: str) -> None:
