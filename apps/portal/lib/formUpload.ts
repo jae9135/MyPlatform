@@ -62,6 +62,11 @@ export async function readJsonResponse(res: Response): Promise<Record<string, un
   const text = await res.text();
   if (!text.trim()) {
     if (!res.ok) {
+      if (res.status === 502 || res.status === 504) {
+        throw new Error(
+          `API 오류 (HTTP ${res.status}) — Render 대용량 ZIP 처리 실패. 「내 PC에서 검사」 옵션 또는 Render 유료 플랜·재배포를 확인하세요.`
+        );
+      }
       throw new Error(`API 오류 (HTTP ${res.status}) — 응답 본문 없음`);
     }
     return {};
@@ -104,8 +109,8 @@ export function wrapFetchError(e: unknown): Error {
   return e instanceof Error ? e : new Error(msg);
 }
 
-/** Large ZIP: skip Vercel proxy validate upload; check size client-side only. */
-export function clientSideZipValidate(file: File): DesignCheckResult {
+/** Large ZIP: skip cloud validate upload; check size client-side only. */
+export function clientSideZipValidate(file: File, localMode = false): DesignCheckResult {
   if (file.size > ZIP_MAX_BYTES) {
     return {
       ok: false,
@@ -119,9 +124,12 @@ export function clientSideZipValidate(file: File): DesignCheckResult {
       `대용량 ZIP (${formatMb(file.size)}MB) — 업로드·진단에 수 분 걸릴 수 있습니다.`
     );
   }
+  const cloudHint = localMode
+    ? `진단 가능 — ZIP ${formatMb(file.size)}MB (로컬 API로 업로드)`
+    : `진단 가능 — ZIP ${formatMb(file.size)}MB (실행 시 Render로 직접 업로드)`;
   return {
     ok: true,
-    message: `진단 가능 — ZIP ${formatMb(file.size)}MB (실행 시 Render로 직접 업로드)`,
+    message: cloudHint,
     warnings,
   };
 }

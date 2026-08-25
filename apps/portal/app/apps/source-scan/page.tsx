@@ -4,6 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PortalNav } from "@/lib/PortalNav";
 import { API_BASE } from "@/lib/apiBase";
 import {
+  DEFAULT_LOCAL_SCAN_API,
+  fetchSourceScan,
+  getLocalScanApiBase,
+  isLocalScanEnabled,
+  postSourceScanMultipart,
+  setLocalScanApiBase,
+  setLocalScanEnabled,
+} from "@/lib/localScanApi";
+import {
   normalizeFixGuides,
   resolveSourceScanFix,
   type FixGuidesCatalog,
@@ -293,6 +302,8 @@ export default function SourceScanPage() {
     pmd: {},
     bandit: {},
   });
+  const [useLocalScan, setUseLocalScan] = useState(false);
+  const [localApiUrl, setLocalApiUrl] = useState(DEFAULT_LOCAL_SCAN_API);
   const prefsLoaded = useRef(false);
   const forceRescanRef = useRef(false);
   const validateTimer = useRef<number | null>(null);
@@ -300,8 +311,9 @@ export default function SourceScanPage() {
   const validateRef = useRef<() => Promise<void>>(async () => {});
 
   const validateWatchKey = useMemo(
-    () => [mode, target, zipFile?.name ?? "", zipFile?.size ?? 0, zipFile?.lastModified ?? 0].join("|"),
-    [mode, target, zipFile]
+    () =>
+      [mode, target, zipFile?.name ?? "", zipFile?.size ?? 0, zipFile?.lastModified ?? 0, useLocalScan].join("|"),
+    [mode, target, zipFile, useLocalScan]
   );
 
   const scanOpts = useMemo(
@@ -393,58 +405,71 @@ export default function SourceScanPage() {
   ]);
 
   useEffect(() => {
-    void (async () => {
-      setEnvLoadError("");
-      try {
-        const [tRes, eRes, detailRes, hRes, gRes] = await Promise.all([
-          fetch(`${API_BASE}/v1/source-scan/targets`),
-          fetch(`${API_BASE}/v1/source-scan/environment`),
-          fetch(`${API_BASE}/health/detail`),
-          fetch(`${API_BASE}/v1/source-scan/history?limit=15`),
-          fetch(`${API_BASE}/v1/source-scan/fix-guides`),
-        ]);
-        const tj = await tRes.json();
-        if (tRes.ok && Array.isArray(tj.targets)) setTargets(tj.targets);
+    setUseLocalScan(isLocalScanEnabled());
+    setLocalApiUrl(getLocalScanApiBase());
+  }, []);
 
-        let env: EnvStatus | null = null;
-        if (eRes.ok) {
-          env = (await eRes.json()) as EnvStatus;
-        } else if (detailRes.ok) {
-          const detail = (await detailRes.json()) as { source_scan?: EnvStatus };
-          if (detail.source_scan) {
-            env = { ok: true, ...detail.source_scan } as EnvStatus;
+  const loadScanEnvironment = useCallback(async () => {
+    setEnvLoadError("");
+    try {
+      const [tRes, eRes, detailRes, hRes, gRes] = await Promise.all([
+        fetchSourceScan(useLocalScan, "v1/source-scan/targets", undefined, API_BASE),
+        fetchSourceScan(useLocalScan, "v1/source-scan/environment", undefined, API_BASE),
+        useLocalScan
+          ? fetchSourceScan(true, "health/detail", undefined, API_BASE)
+          : fetch(`${API_BASE}/health/detail`),
+        fetchSourceScan(useLocalScan, "v1/source-scan/history?limit=15", undefined, API_BASE),
+        fetchSourceScan(useLocalScan, "v1/source-scan/fix-guides", undefined, API_BASE),
+      ]);
+      const tj = await readJsonResponse(tRes);
+      if (tRes.ok && Array.isArray(tj.targets)) setTargets(tj.targets as PortalTarget[]);
+
+      let env: EnvStatus | null = null;
+      if (eRes.ok) {
+        env = (await readJsonResponse(eRes)) as EnvStatus;
+      } else if (detailRes.ok) {
+        const detail = (await readJsonResponse(detailRes)) as { source_scan?: EnvStatus };
+        if (detail.source_scan) {
+          env = { ok: true, ...detail.source_scan } as EnvStatus;
+          if (!useLocalScan) {
             setEnvLoadError(
               `환경 API HTTP ${eRes.status} — health/detail의 source_scan으로 표시 중. API_ACCESS_KEY 확인.`
             );
           }
-        } else {
-          setEnvLoadError(
-            `API 연결 실패 (environment HTTP ${eRes.status}). Vercel NEXT_PUBLIC_API_BASE_URL·API_ACCESS_KEY 확인.`
-          );
         }
-        if (env) setEnvStatus(env);
-
-        if (hRes.ok) {
-          const hj = await hRes.json();
-          setHistory(hj.history || []);
-        }
-        if (gRes.ok) {
-          const gj = await gRes.json();
-          setFixGuides(normalizeFixGuides(gj));
-        }
-      } catch (e) {
-        setEnvLoadError(wrapFetchError(e).message);
+      } else {
+        setEnvLoadError(
+          useLocalScan
+            ? `로컬 API 연결 실패 (${localApiUrl}). start-api-source-scan.ps1 실행 및 CORS_ORIGINS(배포 포털 URL) 확인.`
+            : `API 연결 실패 (environment HTTP ${eRes.status}). Vercel NEXT_PUBLIC_API_BASE_URL·API_ACCESS_KEY 확인.`
+        );
       }
-    })();
-  }, []);
+      if (env) setEnvStatus(env);
+
+      if (hRes.ok) {
+        const hj = await readJsonResponse(hRes);
+        setHistory((hj.history as HistoryItem[]) || []);
+      }
+      if (gRes.ok) {
+        const gj = await readJsonResponse(gRes);
+        setFixGuides(normalizeFixGuides(gj));
+      }
+    } catch (e) {
+      setEnvLoadError(wrapFetchError(e).message);
+    }
+  }, [useLocalScan, localApiUrl]);
+
+  useEffect(() => {
+    void loadScanEnvironment();
+  }, [loadScanEnvironment]);
 
   const validate = useCallback(async () => {
     if (mode === "upload" && !zipFile) {
       setDesignCheck(IDLE_UPLOAD_CHECK);
       return;
     }
-    if (mode === "upload" && zipFile && shouldUploadDirect(zipFile)) {
-      const local = clientSideZipValidate(zipFile);
+    if (mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !useLocalScan) {
+      const local = clientSideZipValidate(zipFile, false);
       setDesignCheck({
         checking: false,
         canRun: local.ok,
@@ -459,7 +484,9 @@ export default function SourceScanPage() {
       fd.append("mode", mode);
       fd.append("target", mode === "upload" ? "upload" : target);
       if (mode === "upload" && zipFile) fd.append("file", zipFile);
-      const res = await postMultipart("v1/source-scan/validate", fd, zipFile);
+      const res = useLocalScan
+        ? await postSourceScanMultipart(true, "v1/source-scan/validate", fd, API_BASE)
+        : await postMultipart("v1/source-scan/validate", fd, zipFile);
       const j = await readJsonResponse(res);
       if (!res.ok) {
         setDesignCheck({
@@ -482,7 +509,7 @@ export default function SourceScanPage() {
         message: wrapFetchError(e).message,
       });
     }
-  }, [mode, target, zipFile]);
+  }, [mode, target, zipFile, useLocalScan]);
 
   validateRef.current = validate;
 
@@ -524,11 +551,11 @@ export default function SourceScanPage() {
     }
   }
 
-  async function pollJob(jobId: string): Promise<ScanResult | null> {
+  async function pollJob(jobId: string, localScan: boolean): Promise<ScanResult | null> {
     return new Promise((resolve, reject) => {
       const poll = async () => {
         try {
-          const res = await fetch(`${API_BASE}/v1/source-scan/jobs/${jobId}`);
+          const res = await fetchSourceScan(localScan, `v1/source-scan/jobs/${jobId}`, undefined, API_BASE);
           const j = await readJsonResponse(res);
           if (!res.ok) throw new Error(String(j.detail || "진행 상태 조회 실패"));
           setScanProgress({
@@ -560,7 +587,12 @@ export default function SourceScanPage() {
   async function cancelScan() {
     if (!scanProgress?.job_id) return;
     try {
-      await fetch(`${API_BASE}/v1/source-scan/jobs/${scanProgress.job_id}/cancel`, { method: "POST" });
+      await fetchSourceScan(
+        useLocalScan,
+        `v1/source-scan/jobs/${scanProgress.job_id}/cancel`,
+        { method: "POST" },
+        API_BASE
+      );
       setMsg("진단 취소 요청됨");
     } catch (e) {
       setMsg(String((e as Error).message || e));
@@ -661,7 +693,7 @@ export default function SourceScanPage() {
       job_id: "",
       status: "running",
       pct: 0,
-      message: mode === "upload" ? "ZIP 업로드 중…" : "진단 요청 전송 중…",
+      message: mode === "upload" ? (useLocalScan ? "로컬 API로 ZIP 전송 중…" : "ZIP 업로드 중…") : "진단 요청 전송 중…",
       steps: [
         { id: "prepare", label: "준비", status: "running", detail: "" },
         { id: "finalize", label: "결과 정리", status: "pending", detail: "" },
@@ -674,7 +706,7 @@ export default function SourceScanPage() {
       fd.append("format", "json");
       appendScanOptions(fd);
 
-      if (mode === "upload" && zipFile && shouldUploadDirect(zipFile)) {
+      if (mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !useLocalScan) {
         setScanProgress((prev) =>
           prev
             ? { ...prev, message: `Render로 ZIP 업로드 중… (${(zipFile.size / (1024 * 1024)).toFixed(1)}MB)` }
@@ -693,7 +725,9 @@ export default function SourceScanPage() {
           steps?: ScanStep[];
         };
         if (!res.ok) throw new Error(String(start.detail || `진단 실패 (HTTP ${res.status})`));
-        if (!start.async || !start.job_id) throw new Error("진행률 API 응답 없음 — Render·Vercel 재배포 후 다시 시도하세요.");
+        if (!start.async || !start.job_id) {
+          throw new Error("진행률 API 응답 없음 — Render·Vercel 재배포 후 다시 시도하세요.");
+        }
         setScanProgress({
           job_id: start.job_id,
           status: "running",
@@ -701,7 +735,7 @@ export default function SourceScanPage() {
           message: "진단 시작…",
           steps: start.steps || [],
         });
-        const scanResult = await pollJob(start.job_id);
+        const scanResult = await pollJob(start.job_id, false);
         if (!scanResult) throw new Error("진단 결과 없음");
         forceRescanRef.current = false;
         setModeState((prev) => ({
@@ -716,7 +750,7 @@ export default function SourceScanPage() {
         setMsg(
           `진단 완료 — ${scanResult.findings.length}건 · 미흡 ${scanResult.stats?.fail ?? 0} · 미실행 ${scanResult.stats?.not_scanned ?? 0}`
         );
-        const hRes = await fetch(`${API_BASE}/v1/source-scan/history?limit=15`);
+        const hRes = await fetchSourceScan(false, "v1/source-scan/history?limit=15", undefined, API_BASE);
         if (hRes.ok) {
           const hj = await readJsonResponse(hRes);
           setHistory((hj.history as HistoryItem[]) || []);
@@ -726,7 +760,9 @@ export default function SourceScanPage() {
       }
 
       if (mode === "upload" && zipFile) fd.append("file", zipFile);
-      const res = await postMultipart("v1/source-scan/run", fd, zipFile);
+      const res = useLocalScan
+        ? await postSourceScanMultipart(true, "v1/source-scan/run", fd, API_BASE)
+        : await postMultipart("v1/source-scan/run", fd, zipFile);
       const start = (await readJsonResponse(res)) as {
         async?: boolean;
         job_id?: string;
@@ -744,7 +780,7 @@ export default function SourceScanPage() {
         steps: start.steps || [],
       });
 
-      const scanResult = await pollJob(start.job_id);
+      const scanResult = await pollJob(start.job_id, useLocalScan);
       if (!scanResult) throw new Error("진단 결과 없음");
 
       forceRescanRef.current = false;
@@ -912,10 +948,53 @@ export default function SourceScanPage() {
             </select>
           </label>
         ) : (
-          <label className="file-field">
-            소스 ZIP
-            <input type="file" accept=".zip,application/zip" onChange={(e) => setZipFile(e.target.files?.[0] ?? null)} />
-          </label>
+          <>
+            <label className="file-field">
+              소스 ZIP
+              <input type="file" accept=".zip,application/zip" onChange={(e) => setZipFile(e.target.files?.[0] ?? null)} />
+            </label>
+            <div className="source-scan-local-panel" style={{ marginTop: "0.75rem" }}>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={useLocalScan}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setUseLocalScan(on);
+                    setLocalScanEnabled(on);
+                    void loadScanEnvironment();
+                  }}
+                />
+                <span>내 PC에서 검사 (PMD/SpotBugs/ZIP — 로컬 API, 웹표준과 설정 공유)</span>
+              </label>
+              {useLocalScan ? (
+                <div style={{ marginTop: "0.5rem" }}>
+                  <label>
+                    로컬 API URL
+                    <input
+                      value={localApiUrl}
+                      onChange={(e) => setLocalApiUrl(e.target.value)}
+                      onBlur={() => {
+                        setLocalScanApiBase(localApiUrl);
+                        void loadScanEnvironment();
+                      }}
+                      placeholder={DEFAULT_LOCAL_SCAN_API}
+                      style={{ width: "100%", maxWidth: "28rem" }}
+                    />
+                  </label>
+                  <p className="hint" style={{ marginTop: "0.35rem" }}>
+                    PowerShell: <code>scripts\start-local-scan.bat</code> 또는{" "}
+                    <code>.\scripts\start-api-source-scan.ps1</code> 실행 후 진단하세요. 배포 포털(Vercel)에서
+                    쓸 때는 로컬 API에 <code>CORS_ORIGINS=https://your-app.vercel.app</code> 를 추가하세요.
+                  </p>
+                </div>
+              ) : (
+                <p className="hint" style={{ marginTop: "0.35rem" }}>
+                  4MB 초과 ZIP은 Render로 업로드됩니다. 502 오류 시 위 옵션(로컬 검사)을 사용하세요.
+                </p>
+              )}
+            </div>
+          </>
         )}
         <ul className="source-scan-option-list">
           <li>
