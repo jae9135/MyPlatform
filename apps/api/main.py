@@ -1807,6 +1807,22 @@ async def source_scan_validate(
     return ss.validate_source_scan(mode, target, zip_bytes=zip_bytes, options=opts)
 
 
+@app.post("/v1/source-scan/staging")
+async def source_scan_staging(file: UploadFile = File(...)) -> dict:
+    """Stream large ZIP to disk; client then calls /run with staging_id (small request)."""
+    from source_scan.scan_options import ScanOptions  # type: ignore
+    from source_scan.staging import save_upload  # type: ignore
+
+    opts = ScanOptions()
+    if not file.filename:
+        raise HTTPException(400, detail="ZIP file required")
+    try:
+        staging_id, size_bytes = await save_upload(file, max_bytes=opts.zip_max_bytes)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    return {"ok": True, "staging_id": staging_id, "size_bytes": size_bytes}
+
+
 @app.post("/v1/source-scan/run")
 async def source_scan_run(
     mode: str = Form("portal"),
@@ -1820,6 +1836,7 @@ async def source_scan_run(
     spotbugs_threshold: str = Form("low"),
     use_prebuilt_classes: str = Form("true"),
     progress: str = Form("true"),
+    staging_id: str = Form(""),
     file: UploadFile | None = File(None),
 ):
     fmt = (format or "json").lower().strip()
@@ -1827,13 +1844,20 @@ async def source_scan_run(
         raise HTTPException(400, detail="format must be json|xlsx|html|zip|sarif")
 
     m = (mode or "portal").strip().lower()
+    sid = (staging_id or "").strip()
     zip_bytes: bytes | None = None
     if m == "upload":
-        if file is None:
-            raise HTTPException(400, detail="upload mode requires ZIP file")
-        zip_bytes = await file.read()
-        if not zip_bytes:
-            raise HTTPException(400, detail="empty ZIP file")
+        if sid:
+            from source_scan.staging import staged_path  # type: ignore
+
+            if not staged_path(sid).is_file():
+                raise HTTPException(400, detail="staging_id not found — ZIP 업로드를 다시 하세요")
+        elif file is None:
+            raise HTTPException(400, detail="upload mode requires ZIP file or staging_id")
+        else:
+            zip_bytes = await file.read()
+            if not zip_bytes:
+                raise HTTPException(400, detail="empty ZIP file")
 
     ss = _load_source_scan()
     from source_scan.progress import create_job, get_job, job_to_dict  # type: ignore
@@ -1854,6 +1878,7 @@ async def source_scan_run(
         m,
         target,
         zip_bytes=zip_bytes,
+        staging_id=sid or None,
         try_java_build=opts.try_java_build,
         options=opts,
     )

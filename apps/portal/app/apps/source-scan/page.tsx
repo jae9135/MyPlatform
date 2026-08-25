@@ -14,6 +14,7 @@ import {
   postMultipart,
   readJsonResponse,
   shouldUploadDirect,
+  stageLargeZip,
   wrapFetchError,
 } from "@/lib/formUpload";
 
@@ -528,23 +529,23 @@ export default function SourceScanPage() {
       const poll = async () => {
         try {
           const res = await fetch(`${API_BASE}/v1/source-scan/jobs/${jobId}`);
-          const j = await res.json();
-          if (!res.ok) throw new Error(j.detail || "진행 상태 조회 실패");
+          const j = await readJsonResponse(res);
+          if (!res.ok) throw new Error(String(j.detail || "진행 상태 조회 실패"));
           setScanProgress({
             job_id: jobId,
-            status: j.status,
-            pct: j.pct ?? 0,
-            message: j.message || "",
-            queue_position: j.queue_position,
-            steps: j.steps || [],
-            error: j.error,
+            status: String(j.status || ""),
+            pct: Number(j.pct ?? 0),
+            message: String(j.message || ""),
+            queue_position: j.queue_position as number | undefined,
+            steps: (j.steps as ScanStep[]) || [],
+            error: j.error as string | undefined,
           });
           if (j.status === "done") {
             if (pollTimer.current) window.clearInterval(pollTimer.current);
             resolve(j.result as ScanResult);
           } else if (j.status === "error" || j.status === "cancelled") {
             if (pollTimer.current) window.clearInterval(pollTimer.current);
-            reject(new Error(j.error || j.message || "진단 실패"));
+            reject(new Error(String(j.error || j.message || "진단 실패")));
           }
         } catch (e) {
           if (pollTimer.current) window.clearInterval(pollTimer.current);
@@ -672,6 +673,58 @@ export default function SourceScanPage() {
       fd.append("target", mode === "upload" ? "upload" : target);
       fd.append("format", "json");
       appendScanOptions(fd);
+
+      if (mode === "upload" && zipFile && shouldUploadDirect(zipFile)) {
+        setScanProgress((prev) =>
+          prev
+            ? { ...prev, message: `Render로 ZIP 업로드 중… (${(zipFile.size / (1024 * 1024)).toFixed(1)}MB)` }
+            : prev
+        );
+        const staged = await stageLargeZip(zipFile);
+        fd.append("staging_id", staged.staging_id);
+        setScanProgress((prev) =>
+          prev ? { ...prev, message: "진단 작업 시작 요청 중…" } : prev
+        );
+        const res = await fetch(`${API_BASE}/v1/source-scan/run`, { method: "POST", body: fd });
+        const start = (await readJsonResponse(res)) as {
+          async?: boolean;
+          job_id?: string;
+          detail?: string;
+          steps?: ScanStep[];
+        };
+        if (!res.ok) throw new Error(String(start.detail || `진단 실패 (HTTP ${res.status})`));
+        if (!start.async || !start.job_id) throw new Error("진행률 API 응답 없음 — Render·Vercel 재배포 후 다시 시도하세요.");
+        setScanProgress({
+          job_id: start.job_id,
+          status: "running",
+          pct: 0,
+          message: "진단 시작…",
+          steps: start.steps || [],
+        });
+        const scanResult = await pollJob(start.job_id);
+        if (!scanResult) throw new Error("진단 결과 없음");
+        forceRescanRef.current = false;
+        setModeState((prev) => ({
+          ...prev,
+          [mode]: {
+            result: scanResult,
+            jobId: start.job_id!,
+            scanFingerprint: currentFingerprint,
+          },
+        }));
+        setTab("all");
+        setMsg(
+          `진단 완료 — ${scanResult.findings.length}건 · 미흡 ${scanResult.stats?.fail ?? 0} · 미실행 ${scanResult.stats?.not_scanned ?? 0}`
+        );
+        const hRes = await fetch(`${API_BASE}/v1/source-scan/history?limit=15`);
+        if (hRes.ok) {
+          const hj = await readJsonResponse(hRes);
+          setHistory((hj.history as HistoryItem[]) || []);
+        }
+        window.setTimeout(() => setScanProgress(null), 800);
+        return;
+      }
+
       if (mode === "upload" && zipFile) fd.append("file", zipFile);
       const res = await postMultipart("v1/source-scan/run", fd, zipFile);
       const start = (await readJsonResponse(res)) as {
@@ -715,7 +768,7 @@ export default function SourceScanPage() {
       window.setTimeout(() => setScanProgress(null), 800);
     } catch (e) {
       forceRescanRef.current = false;
-      setMsg(String((e as Error).message || e));
+      setMsg(wrapFetchError(e).message);
       setScanProgress(null);
     } finally {
       setBusy(false);

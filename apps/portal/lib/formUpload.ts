@@ -18,9 +18,9 @@ let directConfigPromise: Promise<DirectApiConfig | null> | null = null;
 async function loadDirectApiConfig(): Promise<DirectApiConfig | null> {
   const res = await fetch("/api/backend/direct-api");
   if (!res.ok) return null;
-  const j = (await res.json()) as { apiBase?: string; apiKey?: string };
-  const apiBase = j.apiBase?.trim().replace(/\/$/, "");
-  const apiKey = j.apiKey?.trim();
+  const j = await readJsonResponse(res);
+  const apiBase = String(j.apiBase || "").trim().replace(/\/$/, "");
+  const apiKey = String(j.apiKey || "").trim();
   if (!apiBase || !apiKey) return null;
   return { apiBase, apiKey };
 }
@@ -60,7 +60,12 @@ export async function postMultipart(
 
 export async function readJsonResponse(res: Response): Promise<Record<string, unknown>> {
   const text = await res.text();
-  if (!text) return {};
+  if (!text.trim()) {
+    if (!res.ok) {
+      throw new Error(`API 오류 (HTTP ${res.status}) — 응답 본문 없음`);
+    }
+    return {};
+  }
   try {
     return JSON.parse(text) as Record<string, unknown>;
   } catch {
@@ -71,6 +76,22 @@ export async function readJsonResponse(res: Response): Promise<Record<string, un
     }
     throw new Error(text.length > 240 ? `${text.slice(0, 240)}…` : text);
   }
+}
+
+/** Large ZIP: upload to /staging on Render, then /run with staging_id via portal proxy. */
+export async function stageLargeZip(file: File): Promise<{ staging_id: string; size_bytes: number }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await postMultipart("v1/source-scan/staging", fd, file);
+  const j = await readJsonResponse(res);
+  if (!res.ok) {
+    throw new Error(String(j.detail || `ZIP 업로드 실패 (HTTP ${res.status})`));
+  }
+  const staging_id = String(j.staging_id || "");
+  if (!staging_id) {
+    throw new Error("ZIP 업로드 응답에 staging_id 없음 — Render API 재배포 후 다시 시도하세요.");
+  }
+  return { staging_id, size_bytes: Number(j.size_bytes || file.size) };
 }
 
 export function wrapFetchError(e: unknown): Error {

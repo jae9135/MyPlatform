@@ -525,14 +525,20 @@ def run_source_scan_job(
     target: str,
     *,
     zip_bytes: bytes | None = None,
+    staging_id: str | None = None,
     try_java_build: bool = True,
     options: ScanOptions | None = None,
 ) -> None:
+    from source_scan.staging import cleanup_staging, read_staged_bytes
+
     progress = ProgressReporter(job_id)
+    loaded_staging = staging_id
     try:
         if is_cancelled(job_id):
             progress.cancelled()
             return
+        if loaded_staging:
+            zip_bytes = read_staged_bytes(loaded_staging)
         result = run_source_scan(
             mode,
             target,
@@ -546,6 +552,9 @@ def run_source_scan_job(
         progress.cancelled()
     except Exception as e:
         progress.fail(str(e))
+    finally:
+        if loaded_staging:
+            cleanup_staging(loaded_staging)
 
 
 def schedule_source_scan_job(
@@ -554,6 +563,7 @@ def schedule_source_scan_job(
     target: str,
     *,
     zip_bytes: bytes | None = None,
+    staging_id: str | None = None,
     try_java_build: bool = True,
     options: ScanOptions | None = None,
 ) -> None:
@@ -563,6 +573,7 @@ def schedule_source_scan_job(
         mode,
         target,
         zip_bytes=zip_bytes,
+        staging_id=staging_id,
         try_java_build=try_java_build,
         options=options,
     )
