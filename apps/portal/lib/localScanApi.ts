@@ -1,9 +1,14 @@
-/** Portal → API via same-origin proxy (/api/backend). Large ZIP may use direct Render upload. */
+/** Portal → API: localhost uses /api/backend proxy; Vercel uses Render direct when configured. */
 
 import { API_BASE } from "@/lib/apiBase";
 
 const FETCH_TIMEOUT_MS = 20000;
+const JOB_POLL_TIMEOUT_MS = 45000;
 const MULTIPART_UPLOAD_TIMEOUT_MS = 180000;
+
+type DirectApiConfig = { apiBase: string; apiKey: string };
+
+let directConfigPromise: Promise<DirectApiConfig | null> | null = null;
 
 export function isLocalPortalHost(): boolean {
   if (typeof window === "undefined") return false;
@@ -11,19 +16,58 @@ export function isLocalPortalHost(): boolean {
   return h === "localhost" || h === "127.0.0.1";
 }
 
+export async function getDirectScanApiConfig(): Promise<DirectApiConfig | null> {
+  if (isLocalPortalHost()) return null;
+  if (!directConfigPromise) {
+    directConfigPromise = (async () => {
+      const res = await fetch("/api/backend/direct-api");
+      if (!res.ok) return null;
+      const j = (await res.json()) as { apiBase?: string; apiKey?: string };
+      const apiBase = String(j.apiBase || "").trim().replace(/\/$/, "");
+      const apiKey = String(j.apiKey || "").trim();
+      if (!apiBase || !apiKey) return null;
+      return { apiBase, apiKey };
+    })().catch(() => null);
+  }
+  return directConfigPromise;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit | undefined, timeoutMs: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...(init ?? {}), signal: ctrl.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function resolveScanApiUrl(apiPath: string, init?: RequestInit): Promise<{ url: string; init: RequestInit }> {
+  const path = apiPath.replace(/^\//, "");
+  const direct = await getDirectScanApiConfig();
+  if (direct) {
+    const headers = new Headers(init?.headers);
+    headers.set("X-Api-Key", direct.apiKey);
+    return {
+      url: `${direct.apiBase}/${path}`,
+      init: { ...init, headers, mode: "cors" },
+    };
+  }
+  return { url: `${API_BASE}/${path}`, init: init ?? {} };
+}
+
 export async function fetchScanApi(
   apiPath: string,
   init?: RequestInit,
   timeoutMs = FETCH_TIMEOUT_MS
 ): Promise<Response> {
-  const path = apiPath.replace(/^\//, "");
-  const ctrl = new AbortController();
-  const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    return await fetch(`${API_BASE}/${path}`, { ...init, signal: ctrl.signal });
-  } finally {
-    window.clearTimeout(timer);
-  }
+  const { url, init: resolved } = await resolveScanApiUrl(apiPath, init);
+  return fetchWithTimeout(url, resolved, timeoutMs);
+}
+
+/** Job status polling — longer timeout for Render cold start. */
+export async function fetchScanJobApi(apiPath: string, init?: RequestInit): Promise<Response> {
+  return fetchScanApi(apiPath, init, JOB_POLL_TIMEOUT_MS);
 }
 
 export async function postScanMultipart(apiPath: string, fd: FormData): Promise<Response> {
@@ -42,7 +86,9 @@ export function wrapScanFetchError(e: unknown): Error {
       );
     }
     return new Error(
-      "API 연결 실패. Render·Vercel 환경 변수 또는 대용량 ZIP은 localhost:3000 로컬 포털 사용."
+      timedOut
+        ? "Render API 응답 시간 초과 — cold start·진단 중일 수 있습니다. 1~2분 후 재시도하거나 localhost:3000 로컬 포털을 사용하세요."
+        : "Render API 연결 실패 — Vercel에 NEXT_PUBLIC_API_BASE_URL·API_ACCESS_KEY 설정 후 재배포했는지 확인하세요. (로컬: start-local-scan.bat)"
     );
   }
   return e instanceof Error ? e : new Error(msg);

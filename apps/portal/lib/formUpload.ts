@@ -1,5 +1,4 @@
-import { API_BASE } from "@/lib/apiBase";
-import { isLocalPortalHost, wrapScanFetchError } from "@/lib/localScanApi";
+import { isLocalPortalHost, postScanMultipart, wrapScanFetchError } from "@/lib/localScanApi";
 
 /** Vercel serverless proxy body limit (~4.5MB). Stay under for safety. */
 export const PROXY_SAFE_UPLOAD_BYTES = 4 * 1024 * 1024;
@@ -12,51 +11,18 @@ function formatMb(bytes: number): string {
 
 type DesignCheckResult = { ok: boolean; message: string; warnings: string[] };
 
-type DirectApiConfig = { apiBase: string; apiKey: string };
-
-let directConfigPromise: Promise<DirectApiConfig | null> | null = null;
-
-async function loadDirectApiConfig(): Promise<DirectApiConfig | null> {
-  const res = await fetch("/api/backend/direct-api");
-  if (!res.ok) return null;
-  const j = await readJsonResponse(res);
-  const apiBase = String(j.apiBase || "").trim().replace(/\/$/, "");
-  const apiKey = String(j.apiKey || "").trim();
-  if (!apiBase || !apiKey) return null;
-  return { apiBase, apiKey };
-}
-
-function getDirectConfig(): Promise<DirectApiConfig | null> {
-  if (!directConfigPromise) {
-    directConfigPromise = loadDirectApiConfig().catch(() => null);
-  }
-  return directConfigPromise;
-}
-
 export function shouldUploadDirect(file: File | null | undefined): boolean {
   return Boolean(file && file.size > PROXY_SAFE_UPLOAD_BYTES);
 }
 
-/** POST multipart — large files bypass Vercel proxy and go to Render directly. */
+/** POST multipart — cloud uses Render direct when API_ACCESS_KEY is configured on Vercel. */
 export async function postMultipart(
   apiPath: string,
   fd: FormData,
   file?: File | null
 ): Promise<Response> {
-  const path = apiPath.replace(/^\//, "");
-  if (!shouldUploadDirect(file)) {
-    return fetch(`${API_BASE}/${path}`, { method: "POST", body: fd });
-  }
-  const cfg = await getDirectConfig();
-  if (!cfg) {
-    return fetch(`${API_BASE}/${path}`, { method: "POST", body: fd });
-  }
-  return fetch(`${cfg.apiBase}/${path}`, {
-    method: "POST",
-    headers: { "X-Api-Key": cfg.apiKey },
-    body: fd,
-    mode: "cors",
-  });
+  void file;
+  return postScanMultipart(apiPath, fd);
 }
 
 export async function readJsonResponse(res: Response): Promise<Record<string, unknown>> {
@@ -128,7 +94,7 @@ export function clientSideZipValidate(file: File, localMode = false): DesignChec
   const cloudHint =
     localMode || isLocalPortalHost()
       ? `진단 가능 — ZIP ${formatMb(file.size)}MB`
-      : `진단 가능 — ZIP ${formatMb(file.size)}MB (Vercel: staging 업로드 후 진단)`;
+      : `진단 가능 — ZIP ${formatMb(file.size)}MB (Render 직접 업로드 후 진단)`;
   return {
     ok: true,
     message: cloudHint,

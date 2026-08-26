@@ -5,6 +5,7 @@ import { PortalNav } from "@/lib/PortalNav";
 import { API_BASE } from "@/lib/apiBase";
 import {
   fetchScanApi,
+  fetchScanJobApi,
   isLocalPortalHost,
   postScanMultipart,
   wrapScanFetchError,
@@ -304,7 +305,6 @@ export default function SourceScanPage() {
   const prefsLoaded = useRef(false);
   const forceRescanRef = useRef(false);
   const validateTimer = useRef<number | null>(null);
-  const pollTimer = useRef<number | null>(null);
   const validateRef = useRef<() => Promise<void>>(async () => {});
 
   const validateWatchKey = useMemo(
@@ -507,17 +507,14 @@ export default function SourceScanPage() {
     }
   }, [zipFile]);
 
-  useEffect(() => {
-    return () => {
-      if (pollTimer.current) window.clearInterval(pollTimer.current);
-    };
-  }, []);
-
   async function pollJob(jobId: string): Promise<ScanResult | null> {
-    return new Promise((resolve, reject) => {
-      const poll = async () => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    for (let attempt = 0; attempt < 900; attempt++) {
+      let lastErr: unknown;
+      for (let retry = 0; retry < 4; retry++) {
         try {
-          const res = await fetchScanApi(`v1/source-scan/jobs/${jobId}`);
+          const res = await fetchScanJobApi(`v1/source-scan/jobs/${jobId}`);
           const j = await readJsonResponse(res);
           if (!res.ok) throw new Error(String(j.detail || "진행 상태 조회 실패"));
           setScanProgress({
@@ -530,7 +527,6 @@ export default function SourceScanPage() {
             error: j.error as string | undefined,
           });
           if (j.status === "done") {
-            if (pollTimer.current) window.clearInterval(pollTimer.current);
             const steps = normalizeDoneSteps((j.steps as ScanStep[]) || []);
             setScanProgress({
               job_id: jobId,
@@ -539,19 +535,25 @@ export default function SourceScanPage() {
               message: String(j.message || "진단 완료"),
               steps,
             });
-            resolve(j.result as ScanResult);
-          } else if (j.status === "error" || j.status === "cancelled") {
-            if (pollTimer.current) window.clearInterval(pollTimer.current);
-            reject(new Error(String(j.error || j.message || "진단 실패")));
+            return j.result as ScanResult;
           }
+          if (j.status === "error" || j.status === "cancelled") {
+            throw new Error(String(j.error || j.message || "진단 실패"));
+          }
+          lastErr = null;
+          break;
         } catch (e) {
-          if (pollTimer.current) window.clearInterval(pollTimer.current);
-          reject(e);
+          lastErr = e;
+          if (retry < 3) {
+            await sleep(1200 * (retry + 1));
+            continue;
+          }
         }
-      };
-      void poll();
-      pollTimer.current = window.setInterval(() => void poll(), 450);
-    });
+      }
+      if (lastErr) throw lastErr;
+      await sleep(1500);
+    }
+    throw new Error("진단 시간 초과");
   }
 
   async function cancelScan() {
@@ -702,7 +704,7 @@ export default function SourceScanPage() {
         setScanProgress((prev) =>
           prev ? { ...prev, message: "진단 작업 시작 요청 중…" } : prev
         );
-        const res = await fetch(`${API_BASE}/v1/source-scan/run`, { method: "POST", body: fd });
+        const res = await postScanMultipart("v1/source-scan/run", fd);
         const start = (await readJsonResponse(res)) as {
           async?: boolean;
           job_id?: string;
