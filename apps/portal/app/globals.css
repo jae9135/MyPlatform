@@ -774,6 +774,44 @@ input[type="password"] {
   margin: 0;
 }
 
+.source-scan-popout {
+  width: min(100%, calc(100% - 24px));
+  max-width: none;
+  margin: 0 auto;
+  padding: 12px 0 16px;
+}
+
+.source-scan-popout-panel {
+  margin-top: 0;
+}
+
+.source-scan-popout-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.source-scan-popout-head h1 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.source-scan-popout-table {
+  max-height: calc(100vh - 180px);
+  overflow: auto;
+}
+
+.source-scan-history-row {
+  cursor: pointer;
+}
+
+.source-scan-history-row:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
 .file-field input[type="file"] {
   max-width: min(100%, 420px);
 }

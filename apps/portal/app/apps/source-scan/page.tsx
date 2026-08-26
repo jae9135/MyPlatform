@@ -22,11 +22,14 @@ import {
 import { loadSourceScanPrefs, saveSourceScanPrefs } from "@/lib/sourceScanPrefs";
 import {
   clientSideZipValidate,
-  postMultipart,
   readJsonResponse,
-  shouldUploadDirect,
+  shouldStageZipOnCloud,
   stageLargeZip,
 } from "@/lib/formUpload";
+import {
+  openSourceScanHistoryPopout,
+  openSourceScanRulesPopout,
+} from "@/lib/sourceScanPopout";
 
 const PAGE_SIZE = 80;
 
@@ -127,22 +130,8 @@ const IDLE_UPLOAD_CHECK: DesignCheck = {
   message: "ZIP 파일을 선택하세요",
 };
 
-const IDLE_PORTAL_CHECK: DesignCheck = {
-  checking: false,
-  canRun: true,
-  message: "",
-};
-type PortalTarget = { id: string; name: string };
-type ModeState = { result: ScanResult | null; jobId: string | null; scanFingerprint: string | null };
+type ScanState = { result: ScanResult | null; jobId: string | null; scanFingerprint: string | null };
 type EnvStatus = Record<string, unknown>;
-type HistoryItem = {
-  job_id?: string;
-  target_name?: string;
-  scanned_at?: string;
-  fail?: number;
-  mode?: string;
-};
-type RuleItem = { id: string; name?: string; category?: string; reference_url?: string };
 
 const STEP_STATUS_ICON: Record<string, string> = {
   pending: "○",
@@ -205,13 +194,11 @@ const SEV_LABEL: Record<string, string> = {
   low: "낮음",
 };
 
-function emptyModeState(): ModeState {
+function emptyScanState(): ScanState {
   return { result: null, jobId: null, scanFingerprint: null };
 }
 
 function buildScanFingerprint(
-  mode: "portal" | "upload",
-  target: string,
   zipFile: File | null,
   opts: {
     tryJavaBuild: boolean;
@@ -225,8 +212,7 @@ function buildScanFingerprint(
 ): string {
   const zipKey = zipFile ? `${zipFile.name}|${zipFile.size}|${zipFile.lastModified}` : "";
   return [
-    mode,
-    target,
+    "upload",
     zipKey,
     opts.tryJavaBuild,
     opts.tryEslintZip,
@@ -290,9 +276,6 @@ function FindingFixCell({
 }
 
 export default function SourceScanPage() {
-  const [mode, setMode] = useState<"portal" | "upload">("upload");
-  const [targets, setTargets] = useState<PortalTarget[]>([]);
-  const [target, setTarget] = useState("er-modeler");
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [tryJavaBuild, setTryJavaBuild] = useState(true);
   const [tryEslintZip, setTryEslintZip] = useState(false);
@@ -307,19 +290,11 @@ export default function SourceScanPage() {
   const [exportBusy, setExportBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
-  const [modeState, setModeState] = useState<{ portal: ModeState; upload: ModeState }>({
-    portal: emptyModeState(),
-    upload: emptyModeState(),
-  });
+  const [scanState, setScanState] = useState<ScanState>(emptyScanState());
   const [tab, setTab] = useState<TabId>("all");
   const [query, setQuery] = useState("");
   const [envStatus, setEnvStatus] = useState<EnvStatus | null>(null);
   const [envLoadError, setEnvLoadError] = useState("");
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [showRules, setShowRules] = useState(false);
-  const [rulesPmd, setRulesPmd] = useState<RuleItem[]>([]);
-  const [rulesFsb, setRulesFsb] = useState<RuleItem[]>([]);
-  const [rulesQuery, setRulesQuery] = useState("");
   const [fixGuides, setFixGuides] = useState<FixGuidesCatalog>({
     findsecbugs: {},
     pmd: {},
@@ -333,9 +308,8 @@ export default function SourceScanPage() {
   const validateRef = useRef<() => Promise<void>>(async () => {});
 
   const validateWatchKey = useMemo(
-    () =>
-      [mode, target, zipFile?.name ?? "", zipFile?.size ?? 0, zipFile?.lastModified ?? 0].join("|"),
-    [mode, target, zipFile]
+    () => [zipFile?.name ?? "", zipFile?.size ?? 0, zipFile?.lastModified ?? 0].join("|"),
+    [zipFile]
   );
 
   const scanOpts = useMemo(
@@ -359,12 +333,12 @@ export default function SourceScanPage() {
     ]
   );
 
-  const result = modeState[mode].result;
-  const lastJobId = modeState[mode].jobId;
-  const lastScanFingerprint = modeState[mode].scanFingerprint;
+  const result = scanState.result;
+  const lastJobId = scanState.jobId;
+  const lastScanFingerprint = scanState.scanFingerprint;
   const currentFingerprint = useMemo(
-    () => buildScanFingerprint(mode, target, zipFile, scanOpts),
-    [mode, target, zipFile, scanOpts]
+    () => buildScanFingerprint(zipFile, scanOpts),
+    [zipFile, scanOpts]
   );
 
   const needsNewScan =
@@ -386,8 +360,6 @@ export default function SourceScanPage() {
 
   useEffect(() => {
     const prefs = loadSourceScanPrefs();
-    setMode(prefs.mode);
-    setTarget(prefs.target);
     setTryJavaBuild(prefs.tryJavaBuild);
     setTryEslintZip(prefs.tryEslintZip);
     setUsePrebuiltClasses(prefs.usePrebuiltClasses);
@@ -402,8 +374,6 @@ export default function SourceScanPage() {
   useEffect(() => {
     if (!prefsLoaded.current) return;
     saveSourceScanPrefs({
-      mode,
-      target,
       tryJavaBuild,
       tryEslintZip,
       usePrebuiltClasses,
@@ -414,8 +384,6 @@ export default function SourceScanPage() {
       showAdvanced,
     });
   }, [
-    mode,
-    target,
     tryJavaBuild,
     tryEslintZip,
     usePrebuiltClasses,
@@ -462,17 +430,7 @@ export default function SourceScanPage() {
 
     void (async () => {
       try {
-        const [tRes, hRes, gRes] = await Promise.all([
-          fetchScanApi("v1/source-scan/targets"),
-          fetchScanApi("v1/source-scan/history?limit=15"),
-          fetchScanApi("v1/source-scan/fix-guides"),
-        ]);
-        const tj = await readJsonResponse(tRes);
-        if (tRes.ok && Array.isArray(tj.targets)) setTargets(tj.targets as PortalTarget[]);
-        if (hRes.ok) {
-          const hj = await readJsonResponse(hRes);
-          setHistory((hj.history as HistoryItem[]) || []);
-        }
+        const gRes = await fetchScanApi("v1/source-scan/fix-guides");
         if (gRes.ok) {
           const gj = await readJsonResponse(gRes);
           setFixGuides(normalizeFixGuides(gj));
@@ -488,11 +446,11 @@ export default function SourceScanPage() {
   }, [loadScanEnvironment]);
 
   const validate = useCallback(async () => {
-    if (mode === "upload" && !zipFile) {
+    if (!zipFile) {
       setDesignCheck(IDLE_UPLOAD_CHECK);
       return;
     }
-    if (mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !isLocalPortalHost()) {
+    if (shouldStageZipOnCloud(zipFile)) {
       const check = clientSideZipValidate(zipFile, false);
       setDesignCheck({
         checking: false,
@@ -505,13 +463,10 @@ export default function SourceScanPage() {
     setDesignCheck({ checking: true, canRun: false, message: "사전 검증 중…" });
     try {
       const fd = new FormData();
-      fd.append("mode", mode);
-      fd.append("target", mode === "upload" ? "upload" : target);
-      if (mode === "upload" && zipFile) fd.append("file", zipFile);
-      const res =
-        mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !isLocalPortalHost()
-          ? await postMultipart("v1/source-scan/validate", fd, zipFile)
-          : await postScanMultipart("v1/source-scan/validate", fd);
+      fd.append("mode", "upload");
+      fd.append("target", "upload");
+      fd.append("file", zipFile);
+      const res = await postScanMultipart("v1/source-scan/validate", fd);
       const j = await readJsonResponse(res);
       if (!res.ok) {
         setDesignCheck({
@@ -534,7 +489,7 @@ export default function SourceScanPage() {
         message: wrapScanFetchError(e).message,
       });
     }
-  }, [mode, target, zipFile]);
+  }, [zipFile]);
 
   validateRef.current = validate;
 
@@ -547,34 +502,16 @@ export default function SourceScanPage() {
   }, [validateWatchKey]);
 
   useEffect(() => {
-    if (mode === "upload" && !zipFile) {
+    if (!zipFile) {
       setDesignCheck(IDLE_UPLOAD_CHECK);
-    } else if (mode === "portal") {
-      setDesignCheck((prev) =>
-        prev.message === IDLE_UPLOAD_CHECK.message ? IDLE_PORTAL_CHECK : prev
-      );
     }
-  }, [mode, zipFile]);
+  }, [zipFile]);
 
   useEffect(() => {
     return () => {
       if (pollTimer.current) window.clearInterval(pollTimer.current);
     };
   }, []);
-
-  async function loadRules() {
-    if (rulesPmd.length) {
-      setShowRules(true);
-      return;
-    }
-    const res = await fetch(`${API_BASE}/v1/source-scan/rules`);
-    const j = await res.json();
-    if (res.ok) {
-      setRulesPmd(j.pmd || []);
-      setRulesFsb(j.findsecbugs || []);
-      setShowRules(true);
-    }
-  }
 
   async function pollJob(jobId: string): Promise<ScanResult | null> {
     return new Promise((resolve, reject) => {
@@ -679,7 +616,7 @@ export default function SourceScanPage() {
     }
   }
 
-  async function loadHistoryRecord(jobId: string, recordMode?: string) {
+  const loadHistoryRecord = useCallback(async (jobId: string) => {
     setBusy(true);
     setMsg("");
     try {
@@ -689,31 +626,48 @@ export default function SourceScanPage() {
         throw new Error(j.detail || `이력 불러오기 실패 (HTTP ${res.status})`);
       }
       const payload = j.payload as ScanResult;
-      const scanMode =
-        (recordMode as "portal" | "upload") || (payload.mode as "portal" | "upload") || mode;
-      if (scanMode === "portal" || scanMode === "upload") {
-        setMode(scanMode);
-        setModeState((prev) => ({
-          ...prev,
-          [scanMode]: {
-            result: { ...payload, job_id: jobId, ok: true },
-            jobId,
-            scanFingerprint: null,
-          },
-        }));
-        setTab("all");
-        setMsg(
-          `이력 불러옴 — ${payload.findings?.length ?? 0}건 (${payload.scanned_at?.slice(0, 19) || ""})`
-        );
-      }
+      setScanState({
+        result: { ...payload, job_id: jobId, ok: true },
+        jobId,
+        scanFingerprint: null,
+      });
+      setTab("all");
+      setMsg(
+        `이력 불러옴 — ${payload.findings?.length ?? 0}건 (${payload.scanned_at?.slice(0, 19) || ""})`
+      );
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
     } catch (e) {
       setMsg(String((e as Error).message || e));
     } finally {
       setBusy(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as { type?: string; jobId?: string };
+      if (data?.type === "source-scan-load-history" && data.jobId) {
+        void loadHistoryRecord(data.jobId);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [loadHistoryRecord]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const loadId = params.get("load");
+    if (!loadId) return;
+    void loadHistoryRecord(loadId);
+    window.history.replaceState({}, "", "/apps/source-scan");
+  }, [loadHistoryRecord]);
 
   async function runScan(force = false) {
+    if (!zipFile) {
+      setMsg("ZIP 파일을 선택하세요");
+      return;
+    }
     if (force) forceRescanRef.current = true;
     setBusy(true);
     setMsg("");
@@ -721,7 +675,7 @@ export default function SourceScanPage() {
       job_id: "",
       status: "running",
       pct: 0,
-      message: mode === "upload" ? "ZIP 업로드 중…" : "진단 요청 전송 중…",
+      message: "ZIP 업로드 중…",
       steps: [
         { id: "prepare", label: "준비", status: "running", detail: "" },
         { id: "finalize", label: "결과 정리", status: "pending", detail: "" },
@@ -729,15 +683,18 @@ export default function SourceScanPage() {
     });
     try {
       const fd = new FormData();
-      fd.append("mode", mode);
-      fd.append("target", mode === "upload" ? "upload" : target);
+      fd.append("mode", "upload");
+      fd.append("target", "upload");
       fd.append("format", "json");
       appendScanOptions(fd);
 
-      if (mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !isLocalPortalHost()) {
+      if (shouldStageZipOnCloud(zipFile)) {
         setScanProgress((prev) =>
           prev
-            ? { ...prev, message: `Render로 ZIP 업로드 중… (${(zipFile.size / (1024 * 1024)).toFixed(1)}MB)` }
+            ? {
+                ...prev,
+                message: `Render에 ZIP 업로드 중… (${(zipFile.size / (1024 * 1024)).toFixed(2)}MB)`,
+              }
             : prev
         );
         const staged = await stageLargeZip(zipFile);
@@ -766,30 +723,19 @@ export default function SourceScanPage() {
         const scanResult = await pollJob(start.job_id);
         if (!scanResult) throw new Error("진단 결과 없음");
         forceRescanRef.current = false;
-        setModeState((prev) => ({
-          ...prev,
-          [mode]: {
-            result: scanResult,
-            jobId: start.job_id!,
-            scanFingerprint: currentFingerprint,
-          },
-        }));
+        setScanState({
+          result: scanResult,
+          jobId: start.job_id!,
+          scanFingerprint: currentFingerprint,
+        });
         setTab("all");
         setMsg(formatScanCompleteMessage(scanResult.stats));
-        const hRes = await fetchScanApi("v1/source-scan/history?limit=15");
-        if (hRes.ok) {
-          const hj = await readJsonResponse(hRes);
-          setHistory((hj.history as HistoryItem[]) || []);
-        }
         window.setTimeout(() => setScanProgress(null), 800);
         return;
       }
 
-      if (mode === "upload" && zipFile) fd.append("file", zipFile);
-      const res =
-        mode === "upload" && zipFile && shouldUploadDirect(zipFile) && !isLocalPortalHost()
-          ? await postMultipart("v1/source-scan/run", fd, zipFile)
-          : await postScanMultipart("v1/source-scan/run", fd);
+      fd.append("file", zipFile);
+      const res = await postScanMultipart("v1/source-scan/run", fd);
       const start = (await readJsonResponse(res)) as {
         async?: boolean;
         job_id?: string;
@@ -811,21 +757,13 @@ export default function SourceScanPage() {
       if (!scanResult) throw new Error("진단 결과 없음");
 
       forceRescanRef.current = false;
-      setModeState((prev) => ({
-        ...prev,
-        [mode]: {
-          result: scanResult,
-          jobId: start.job_id!,
-          scanFingerprint: currentFingerprint,
-        },
-      }));
+      setScanState({
+        result: scanResult,
+        jobId: start.job_id!,
+        scanFingerprint: currentFingerprint,
+      });
       setTab("all");
       setMsg(formatScanCompleteMessage(scanResult.stats));
-      const hRes = await fetch(`${API_BASE}/v1/source-scan/history?limit=15`);
-      if (hRes.ok) {
-        const hj = await hRes.json();
-        setHistory(hj.history || []);
-      }
       window.setTimeout(() => setScanProgress(null), 800);
     } catch (e) {
       forceRescanRef.current = false;
@@ -857,23 +795,6 @@ export default function SourceScanPage() {
         (f.fix || "").toLowerCase().includes(q)
     );
   }, [result, tab, query]);
-
-  const filteredRules = useMemo(() => {
-    const q = rulesQuery.trim().toLowerCase();
-    const all = [
-      ...rulesPmd.map((r) => ({ ...r, ruleset: "PMD" })),
-      ...rulesFsb.map((r) => ({ ...r, ruleset: "FindSecBugs" })),
-    ];
-    if (!q) return all.slice(0, 200);
-    return all
-      .filter(
-        (r) =>
-          r.id.toLowerCase().includes(q) ||
-          (r.name || "").toLowerCase().includes(q) ||
-          (r.category || "").toLowerCase().includes(q)
-      )
-      .slice(0, 200);
-  }, [rulesPmd, rulesFsb, rulesQuery]);
 
   const exportButtons = (
     <div className="source-scan-export-block">
@@ -984,34 +905,11 @@ export default function SourceScanPage() {
 
       <section className="panel">
         <h2>진단 설정</h2>
-        <div className="tabs" role="tablist" style={{ marginBottom: "1rem" }}>
-          <button type="button" className={`tab ${mode === "upload" ? "active" : ""}`} onClick={() => setMode("upload")}>
-            ZIP 업로드
-          </button>
-          <button type="button" className={`tab ${mode === "portal" ? "active" : ""}`} onClick={() => setMode("portal")}>
-            포털 앱
-          </button>
-        </div>
-        {mode === "portal" ? (
-          <label>
-            진단 대상
-            <select value={target} onChange={(e) => setTarget(e.target.value)}>
-              {targets.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <>
-            <label className="file-field">
-              소스 ZIP
-              <input type="file" accept=".zip,application/zip" onChange={(e) => setZipFile(e.target.files?.[0] ?? null)} />
-            </label>
-            <CloudLargeZipHint />
-          </>
-        )}
+        <label className="file-field">
+          소스 ZIP
+          <input type="file" accept=".zip,application/zip" onChange={(e) => setZipFile(e.target.files?.[0] ?? null)} />
+        </label>
+        <CloudLargeZipHint />
         <ul className="source-scan-option-list">
           <li>
             <label className="check-row">
@@ -1022,15 +920,13 @@ export default function SourceScanPage() {
               기본은 JDK로 재컴파일합니다. ZIP class가 실행 JDK와 맞지 않으면 자동 재컴파일합니다.
             </p>
           </li>
-          {mode === "upload" ? (
-            <li>
-              <label className="check-row">
-                <input type="checkbox" checked={tryEslintZip} onChange={(e) => setTryEslintZip(e.target.checked)} />
-                <span>ZIP 내 TS/JS ESLint 실행</span>
-              </label>
-              <p className="source-scan-option-desc">Java-only ZIP이면 체크해도 효과 없습니다.</p>
-            </li>
-          ) : null}
+          <li>
+            <label className="check-row">
+              <input type="checkbox" checked={tryEslintZip} onChange={(e) => setTryEslintZip(e.target.checked)} />
+              <span>ZIP 내 TS/JS ESLint 실행</span>
+            </label>
+            <p className="source-scan-option-desc">Java-only ZIP이면 체크해도 효과 없습니다.</p>
+          </li>
           <li>
             <label className="check-row">
               <input
@@ -1136,7 +1032,10 @@ export default function SourceScanPage() {
             <button type="button" className="btn ghost" disabled={!scanProgress?.job_id} onClick={() => void cancelScan()}>
               취소
             </button>
-            <button type="button" className="btn ghost" onClick={() => void loadRules()}>
+            <button type="button" className="btn ghost" onClick={() => openSourceScanHistoryPopout()}>
+              진단 이력
+            </button>
+            <button type="button" className="btn ghost" onClick={() => openSourceScanRulesPopout()}>
               규칙 카탈로그
             </button>
           </div>
@@ -1167,78 +1066,6 @@ export default function SourceScanPage() {
         ) : null}
         {msg ? <p className={`msg ${msg.includes("완료") ? "ok" : "err"}`}>{msg}</p> : null}
       </section>
-
-      {history.length ? (
-        <section className="panel">
-          <h2>진단 이력</h2>
-          <div className="table-wrap">
-            <table className="result-table">
-              <thead>
-                <tr>
-                  <th>일시</th>
-                  <th>대상</th>
-                  <th>모드</th>
-                  <th>결함</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((h) => (
-                  <tr
-                    key={h.job_id}
-                    style={{ cursor: h.job_id ? "pointer" : undefined }}
-                    onClick={() => h.job_id && void loadHistoryRecord(h.job_id, h.mode)}
-                  >
-                    <td>{h.scanned_at?.slice(0, 19) || "-"}</td>
-                    <td>{h.target_name}</td>
-                    <td>{h.mode}</td>
-                    <td>{h.fail ?? 0}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
-
-      {showRules ? (
-        <section className="panel">
-          <h2>규칙 카탈로그</h2>
-          <label className="search-row">
-            검색
-            <input value={rulesQuery} onChange={(e) => setRulesQuery(e.target.value)} placeholder="규칙 ID, 이름, 분류" />
-          </label>
-          <div className="table-wrap">
-            <table className="result-table">
-              <thead>
-                <tr>
-                  <th>룰셋</th>
-                  <th>ID</th>
-                  <th>분류</th>
-                  <th>참조</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRules.map((r) => (
-                  <tr key={`${r.ruleset}-${r.id}`}>
-                    <td>{r.ruleset}</td>
-                    <td>{r.id}</td>
-                    <td>{r.category || ""}</td>
-                    <td>
-                      {r.reference_url ? (
-                        <a href={r.reference_url} target="_blank" rel="noreferrer">
-                          문서
-                        </a>
-                      ) : (
-                        ""
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
 
       {result ? (
         <section className="panel">

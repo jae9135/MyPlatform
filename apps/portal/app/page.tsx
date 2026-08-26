@@ -24,6 +24,7 @@ export default function HomePage() {
               href={item.href}
               target="_blank"
               rel="noopener noreferrer"
+              title={item.href}
             >
               {item.label}
             </a>

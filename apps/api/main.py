@@ -1543,9 +1543,11 @@ async def web_quality_run(
     use_async = (async_progress or "false").lower() in ("1", "true", "yes")
     need = (need_login or "false").lower() in ("1", "true", "yes")
     try:
-        if use_async and m in ("ipms-public", "ipms-auth", "ipms-online", "external"):
+        if use_async and m in ("ipms-public", "ipms-auth", "ipms-online", "external", "java-upload"):
             if fmt != "json":
                 raise HTTPException(400, detail="async progress는 json 형식만 지원")
+            if m == "java-upload" and not zip_bytes:
+                raise HTTPException(400, detail="java-upload mode requires ZIP file")
             payload = wq.run_web_quality(
                 mode,
                 target,
@@ -1565,6 +1567,7 @@ async def web_quality_run(
                 login_password_selector=login_password_selector,
                 login_submit_selector=login_submit_selector,
                 need_login=need,
+                zip_bytes=zip_bytes,
             )
             return JSONResponse(payload)
         # sync Playwright must not run on FastAPI's asyncio loop

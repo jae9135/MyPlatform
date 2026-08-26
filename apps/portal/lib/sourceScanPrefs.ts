@@ -1,8 +1,4 @@
-export type SourceScanMode = "portal" | "upload";
-
 export type SourceScanPrefs = {
-  mode: SourceScanMode;
-  target: string;
   tryJavaBuild: boolean;
   tryEslintZip: boolean;
   usePrebuiltClasses: boolean;
@@ -13,11 +9,9 @@ export type SourceScanPrefs = {
   showAdvanced: boolean;
 };
 
-const STORAGE_KEY = "source-scan-prefs-v2";
+const STORAGE_KEY = "source-scan-prefs-v3";
 
 const DEFAULTS: SourceScanPrefs = {
-  mode: "upload",
-  target: "er-modeler",
   tryJavaBuild: true,
   tryEslintZip: false,
   usePrebuiltClasses: false,

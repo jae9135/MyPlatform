@@ -65,7 +65,8 @@ export async function readJsonResponse(res: Response): Promise<Record<string, un
     if (!res.ok) {
       if (res.status === 502 || res.status === 504) {
         throw new Error(
-          `API 오류 (HTTP ${res.status}) — Render 대용량 ZIP 처리 실패. localhost:3000 로컬 포털 또는 Render 재배포를 확인하세요.`
+          `API 오류 (HTTP ${res.status}) — Render API 타임아웃·cold start 가능. ` +
+            `잠시 후 재시도하거나 PC에서 start-local-scan.bat + localhost:3000 사용.`
         );
       }
       throw new Error(`API 오류 (HTTP ${res.status}) — 응답 본문 없음`);
@@ -84,7 +85,12 @@ export async function readJsonResponse(res: Response): Promise<Record<string, un
   }
 }
 
-/** Large ZIP: upload to /staging on Render, then /run with staging_id via portal proxy. */
+/** Cloud(Vercel): ZIP을 Render staging에 올린 뒤 run은 staging_id만 전송 (프록시 타임아웃 방지). */
+export function shouldStageZipOnCloud(file: File | null | undefined): boolean {
+  return Boolean(file && !isLocalPortalHost());
+}
+
+/** Upload ZIP to /staging on Render (proxy if ≤4MB, direct if larger). */
 export async function stageLargeZip(file: File): Promise<{ staging_id: string; size_bytes: number }> {
   const fd = new FormData();
   fd.append("file", file);
@@ -122,7 +128,7 @@ export function clientSideZipValidate(file: File, localMode = false): DesignChec
   const cloudHint =
     localMode || isLocalPortalHost()
       ? `진단 가능 — ZIP ${formatMb(file.size)}MB`
-      : `진단 가능 — ZIP ${formatMb(file.size)}MB (실행 시 Render로 직접 업로드)`;
+      : `진단 가능 — ZIP ${formatMb(file.size)}MB (Vercel: staging 업로드 후 진단)`;
   return {
     ok: true,
     message: cloudHint,

@@ -1,14 +1,13 @@
-# MyPlatform API — PMD, SpotBugs, JDK 8, Maven, Playwright
+# MyPlatform API — PMD, SpotBugs, JDK 11, Maven, Playwright
 # Render: Dockerfile Path = docker/source-scan/Dockerfile, Docker Context = .
 
-FROM eclipse-temurin:8-jdk-jammy
+FROM eclipse-temurin:11-jdk-jammy
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PMD_HOME=/opt/pmd \
     PMD_BIN=/opt/pmd/bin/pmd \
     SPOTBUGS_HOME=/opt/spotbugs \
     SPOTBUGS_BIN=/opt/spotbugs/bin/spotbugs \
-    SPOTBUGS_JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64 \
     MAVEN_HOME=/opt/maven \
     FINDSEC_BUGS_PLUGIN_JAR=/opt/findsecbugs-plugin.jar \
     SOURCE_SCAN_TOOLS_DIR=/opt \
@@ -17,7 +16,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl unzip python3 python3-pip python3-venv \
-    openjdk-11-jre-headless \
     libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libdbus-1-3 \
     libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 \
     libpango-1.0-0 libcairo2 libatspi2.0-0 libxshmfence1 \

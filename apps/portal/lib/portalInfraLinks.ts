@@ -13,21 +13,14 @@ function isLocalHost(url: string): boolean {
   }
 }
 
-/** Vercel · Portal — 배포 URL 또는 Vercel 대시보드 */
+/** Vercel 대시보드 (배포 포털 URL과 구분 — NEXT_PUBLIC_PORTAL_URL은 여기 쓰지 않음) */
 function portalHref(): string {
   const infra = process.env.NEXT_PUBLIC_INFRA_VERCEL_URL?.trim();
   if (infra) return trimUrl(infra);
-
-  const portal = process.env.NEXT_PUBLIC_PORTAL_URL?.trim();
-  if (portal && !isLocalHost(portal)) return trimUrl(portal);
-
-  const vercel = process.env.VERCEL_URL?.trim();
-  if (vercel) return `https://${vercel.replace(/^https?:\/\//, "")}`;
-
   return "https://vercel.com/dashboard";
 }
 
-/** Render · API — Render 서비스 URL(배포) 또는 Render 대시보드. 로컬 API 주소는 사용하지 않음 */
+/** Render 대시보드 또는 공개 API URL. 로컬 127.0.0.1 API 주소는 사용하지 않음 */
 function renderHref(): string {
   const infra = process.env.NEXT_PUBLIC_INFRA_RENDER_URL?.trim();
   if (infra) return trimUrl(infra);
@@ -38,6 +31,15 @@ function renderHref(): string {
   }
 
   return "https://dashboard.render.com";
+}
+
+/** 배포된 포털 공개 URL (배지와 별도 — 필요 시 다른 UI에서 사용) */
+export function deployedPortalHref(): string | null {
+  const portal = process.env.NEXT_PUBLIC_PORTAL_URL?.trim();
+  if (portal && !isLocalHost(portal)) return trimUrl(portal);
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) return `https://${vercel.replace(/^https?:\/\//, "")}`;
+  return null;
 }
 
 /** Supabase · DB/Storage — 프로젝트 대시보드 */

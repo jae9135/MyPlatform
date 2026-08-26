@@ -233,6 +233,19 @@ def run_web_quality(
     if mode == "java-upload":
         if not zip_bytes:
             raise ValueError("java-upload mode requires ZIP file")
+        if async_progress:
+            return start_java_upload_run_job(
+                zip_bytes=zip_bytes,
+                page_url=page_url,
+                include_runtime=include_runtime,
+                state_ids=state_ids,
+                login_url=login_url,
+                login_username=login_username,
+                login_password=login_password,
+                login_user_selector=login_user_selector,
+                login_password_selector=login_password_selector,
+                login_submit_selector=login_submit_selector,
+            )
         return _finalize_scan_result(
             _run_java_upload(
             zip_bytes,
@@ -516,8 +529,12 @@ def _run_java_upload(
     login_user_selector: str = "",
     login_password_selector: str = "",
     login_submit_selector: str = "",
+    progress_job_id: str | None = None,
 ) -> dict[str, Any]:
     from source_scan.zip_ingest import cleanup_ingest, ingest_zip, validate_zip_bytes
+
+    if progress_job_id:
+        update_job(progress_job_id, pct=3, message="ZIP 검증·압축 해제…", step_label="준비")
 
     v = validate_zip_bytes(zip_bytes)
     if not v.get("can_run"):
@@ -525,6 +542,8 @@ def _run_java_upload(
 
     ing = ingest_zip(zip_bytes)
     try:
+        if progress_job_id:
+            update_job(progress_job_id, pct=8, message="JSP/HTML 정적 분석…", step_label="정적")
         candidates, warnings = extract_java_scenarios(ing.root, ing.java_files)
         static = scan_java_upload_sources(ing.root)
         selected_ids = parse_state_ids(state_ids)
@@ -571,6 +590,13 @@ def _run_java_upload(
                     runtime_error="선택한 화면 없음",
                 )
             else:
+                if progress_job_id:
+                    update_job(
+                        progress_job_id,
+                        pct=35,
+                        message=f"화면 진단 ({len(chosen)}개)…",
+                        step_label="Playwright",
+                    )
                 runtime = scan_java_upload_runtime(
                     base_url,
                     ui_states=[c.to_ui_state() for c in chosen],
@@ -887,6 +913,62 @@ def start_external_run_job(
                 session_job_id=session_job_id,
                 need_login=need_login,
                 progress_job_id=job_id,
+                ),
+                job_id=job_id,
+            )
+            update_job(
+                job_id,
+                status="done",
+                pct=100,
+                message="진단 완료",
+                step_label="완료",
+                result=result,
+            )
+        except ScanCancelled:
+            update_job(job_id, status="cancelled", message="취소됨", error="cancelled")
+        except Exception as e:
+            update_job(job_id, status="error", error=str(e), message=str(e))
+
+    submit_job(job_id, work)
+    job = get_job(job_id)
+    return {
+        "ok": True,
+        "async": True,
+        "job_id": job_id,
+        **(job_to_dict(job) if job else {"status": "queued", "pct": 0}),
+    }
+
+
+def start_java_upload_run_job(
+    *,
+    zip_bytes: bytes,
+    page_url: str,
+    include_runtime: bool,
+    state_ids: str | list | None,
+    login_url: str = "",
+    login_username: str = "",
+    login_password: str = "",
+    login_user_selector: str = "",
+    login_password_selector: str = "",
+    login_submit_selector: str = "",
+) -> dict[str, Any]:
+    job_id = create_job("java-upload-scan", "Java ZIP 진단 준비 중…")
+
+    def work() -> None:
+        try:
+            result = _finalize_scan_result(
+                _run_java_upload(
+                    zip_bytes,
+                    page_url=page_url,
+                    include_runtime=include_runtime,
+                    state_ids=state_ids,
+                    login_url=login_url,
+                    login_username=login_username,
+                    login_password=login_password,
+                    login_user_selector=login_user_selector,
+                    login_password_selector=login_password_selector,
+                    login_submit_selector=login_submit_selector,
+                    progress_job_id=job_id,
                 ),
                 job_id=job_id,
             )

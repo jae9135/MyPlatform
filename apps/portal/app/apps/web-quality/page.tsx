@@ -24,6 +24,7 @@ import {
   resolveFindingFix,
 } from "@/lib/webQualityFix";
 import { buildWqPrefs, loadWqPrefs, saveWqPrefs } from "@/lib/wqPrefs";
+import { openWebQualityHistoryPopout } from "@/lib/webQualityPopout";
 
 const PAGE_SIZE = 80;
 const IPMS_DEFAULT_URL = "http://14.35.194.178:12000/ipms.online/";
@@ -94,7 +95,7 @@ function isIpmsMode(mode: ScanMode): boolean {
 }
 
 function isAsyncScanMode(mode: ScanMode): boolean {
-  return isIpmsMode(mode) || mode === "external";
+  return isIpmsMode(mode) || mode === "external" || mode === "java-upload";
 }
 
 type ScenarioCandidate = {
@@ -185,23 +186,6 @@ type ScanResult = {
   rules?: { kwcag: unknown[]; egov: unknown[] };
 };
 
-type HistoryItem = {
-  job_id?: string;
-  scanned_at?: string;
-  saved_at?: string;
-  target_name?: string;
-  mode?: string;
-  page_url?: string;
-  fail?: number;
-  not_scanned?: number;
-};
-
-const MODE_LABEL: Record<string, string> = {
-  "ipms-public": "IPMS 공개",
-  "ipms-auth": "IPMS 로그인",
-  external: "외부 URL",
-  "java-upload": "Java ZIP",
-};
 
 type DesignCheck = {
   checking: boolean;
@@ -434,7 +418,6 @@ export default function WebQualityPage() {
   const [msg, setMsg] = useState("");
   const [resultsByMode, setResultsByMode] = useState<Partial<Record<ScanMode, ScanResult>>>({});
   const [jobIdsByMode, setJobIdsByMode] = useState<Partial<Record<ScanMode, string>>>({});
-  const [history, setHistory] = useState<HistoryItem[]>([]);
   const [exportBusy, setExportBusy] = useState(false);
   const [selectedIdsByMode, setSelectedIdsByMode] = useState<
     Partial<Record<ScanMode, string[]>>
@@ -463,17 +446,6 @@ export default function WebQualityPage() {
     const stored = selectedIdsByMode[next];
     if (stored?.length) setSelectedIds(stored);
   }, [selectedIdsByMode]);
-
-  const refreshHistory = useCallback(async () => {
-    try {
-      const res = await fetchScanApi("v1/web-quality/history?limit=15");
-      if (!res.ok) return;
-      const j = await readJsonResponse(res);
-      setHistory((j.history as HistoryItem[]) || []);
-    } catch {
-      /* ignore */
-    }
-  }, []);
 
   const loadWqEnvironment = useCallback(async () => {
     setEnvLoading(true);
@@ -521,8 +493,7 @@ export default function WebQualityPage() {
     setNeedLogin(prefs.needLogin);
     setSelectedIdsByMode(prefs.selectedIdsByMode || {});
     prefsHydrated.current = true;
-    void refreshHistory();
-  }, [refreshHistory]);
+  }, []);
 
   useEffect(() => {
     if (!prefsHydrated.current) return;
@@ -883,33 +854,6 @@ export default function WebQualityPage() {
     }
   }
 
-  async function loadHistoryRecord(jobId: string, recordMode?: string) {
-    setBusy(true);
-    setBusyMode(mode);
-    setMsg("");
-    try {
-      const res = await fetchScanApi(`v1/web-quality/history/${jobId}`);
-      const j = await readJsonResponse(res);
-      if (!res.ok || !j.payload) {
-        throw new Error(String(j.detail || `이력 불러오기 실패 (HTTP ${res.status})`));
-      }
-      const payload = j.payload as ScanResult;
-      const scanMode = (recordMode as ScanMode) || (payload.mode as ScanMode) || mode;
-      if (scanMode === "ipms-public" || scanMode === "ipms-auth" || scanMode === "external" || scanMode === "java-upload") {
-        setMode(scanMode);
-        setResultsByMode((prev) => ({ ...prev, [scanMode]: payload }));
-        setJobIdsByMode((prev) => ({ ...prev, [scanMode]: jobId }));
-        setTab("all");
-        setMsg(`이력 불러옴 — ${payload.findings.length}건 (${payload.scanned_at?.slice(0, 19) || ""})`);
-      }
-    } catch (e) {
-      setMsg(String((e as Error).message || e));
-    } finally {
-      setBusy(false);
-      setBusyMode(null);
-    }
-  }
-
   const appendCommonFields = useCallback(
     (fd: FormData) => {
       fd.append("mode", mode);
@@ -1083,7 +1027,7 @@ export default function WebQualityPage() {
         throw new Error("진단할 화면을 하나 이상 선택하세요.");
       }
       fd.append("format", format);
-      if (format === "json" && includeRuntime && isAsyncScanMode(mode)) {
+      if (format === "json" && isAsyncScanMode(mode)) {
         fd.append("async_progress", "true");
       }
       const res = await postScanMultipart("v1/web-quality/run", fd);
@@ -1126,7 +1070,6 @@ export default function WebQualityPage() {
       setMsg(
         `진단 완료 — ${j.findings.length}건 · 캡처 ${j.screenshots?.length ?? 0}장 · 미실행 ${j.stats?.not_scanned ?? 0}건${diffNote}${rtNote}`
       );
-      void refreshHistory();
     } catch (e) {
       setMsg(wrapScanFetchError(e).message);
     } finally {
@@ -1211,6 +1154,59 @@ export default function WebQualityPage() {
   }
 
   const canExport = Boolean((result || lastJobId) && !busy && !exportBusy);
+
+  const loadHistoryRecord = useCallback(async (jobId: string, recordMode?: string) => {
+    setBusy(true);
+    setBusyMode(mode);
+    setMsg("");
+    try {
+      const res = await fetchScanApi(`v1/web-quality/history/${jobId}`);
+      const j = await readJsonResponse(res);
+      if (!res.ok || !j.payload) {
+        throw new Error(String(j.detail || `이력 불러오기 실패 (HTTP ${res.status})`));
+      }
+      const payload = j.payload as ScanResult;
+      const scanMode = (recordMode as ScanMode) || (payload.mode as ScanMode) || mode;
+      if (
+        scanMode === "ipms-public" ||
+        scanMode === "ipms-auth" ||
+        scanMode === "external" ||
+        scanMode === "java-upload"
+      ) {
+        setMode(scanMode);
+        setResultsByMode((prev) => ({ ...prev, [scanMode]: payload }));
+        setJobIdsByMode((prev) => ({ ...prev, [scanMode]: jobId }));
+        setTab("all");
+        setMsg(`이력 불러옴 — ${payload.findings.length}건 (${payload.scanned_at?.slice(0, 19) || ""})`);
+        window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+      }
+    } catch (e) {
+      setMsg(String((e as Error).message || e));
+    } finally {
+      setBusy(false);
+      setBusyMode(null);
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as { type?: string; jobId?: string; mode?: string };
+      if (data?.type === "web-quality-load-history" && data.jobId) {
+        void loadHistoryRecord(data.jobId, data.mode);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [loadHistoryRecord]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const loadId = params.get("load");
+    if (!loadId) return;
+    void loadHistoryRecord(loadId, params.get("mode") || undefined);
+    window.history.replaceState({}, "", "/apps/web-quality");
+  }, [loadHistoryRecord]);
 
   const filteredFindings = useMemo(() => {
     if (!result) return [] as Finding[];
@@ -1799,32 +1795,42 @@ python scripts/save_ipms_session.py --url ${pageUrl.trim() || EXTERNAL_URL_PLACE
         </div>
         ) : null}
 
-        <div className="btn-row">
-          <button
-            type="button"
-            className="btn"
-            disabled={isBusyHere || (!designCheck.canRun && !designCheck.checking)}
-            onClick={() => void runScan()}
-          >
-            {mode === "ipms-public"
-              ? "공개 화면 진단"
-              : mode === "ipms-auth"
-                ? "로그인 화면 진단"
-                : mode === "java-upload"
-                  ? includeRuntime
-                    ? "정적 + 화면 진단"
-                    : "정적 진단 실행"
-                  : "화면 진단 실행"}
-          </button>
-          <button
-            type="button"
-            className="btn ghost"
-            disabled={!activeScanProgress?.job_id || exportBusy}
-            onClick={() => void cancelScan()}
-          >
-            취소
-          </button>
-          <>
+        <div className="source-scan-actions">
+          <div className="source-scan-actions-primary">
+            <button
+              type="button"
+              className="btn"
+              disabled={isBusyHere || (!designCheck.canRun && !designCheck.checking)}
+              onClick={() => void runScan()}
+            >
+              {mode === "ipms-public"
+                ? "공개 화면 진단"
+                : mode === "ipms-auth"
+                  ? "로그인 화면 진단"
+                  : mode === "java-upload"
+                    ? includeRuntime
+                      ? "정적 + 화면 진단"
+                      : "정적 진단 실행"
+                    : "화면 진단 실행"}
+            </button>
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={!activeScanProgress?.job_id || exportBusy}
+              onClick={() => void cancelScan()}
+            >
+              취소
+            </button>
+            <button type="button" className="btn ghost" onClick={() => openWebQualityHistoryPopout()}>
+              진단 이력
+            </button>
+          </div>
+          <div className="source-scan-export-block">
+            <p className="export-title">보고서 내보내기</p>
+            <p className="export-hint">
+              HTML = 새 탭 미리보기 · HTML 저장 = .html 파일 · ZIP = html+xlsx 묶음
+            </p>
+            <div className="btn-row">
               <button
                 type="button"
                 className="btn ghost"
@@ -1841,7 +1847,7 @@ python scripts/save_ipms_session.py --url ${pageUrl.trim() || EXTERNAL_URL_PLACE
                 onClick={() => void exportReport("html", "open")}
                 title={canExport ? "HTML 새 탭에서 열기" : "진단 또는 이력 불러오기 후 사용"}
               >
-                HTML
+                HTML 보기
               </button>
               <button
                 type="button"
@@ -1859,7 +1865,8 @@ python scripts/save_ipms_session.py --url ${pageUrl.trim() || EXTERNAL_URL_PLACE
               >
                 ZIP
               </button>
-            </>
+            </div>
+          </div>
         </div>
         {activeScanProgress ? (
           <div className="run-progress source-scan-progress">
@@ -1889,46 +1896,6 @@ python scripts/save_ipms_session.py --url ${pageUrl.trim() || EXTERNAL_URL_PLACE
           </p>
         ) : null}
       </section>
-
-      {history.length ? (
-        <section className="panel">
-          <h2>진단 이력</h2>
-          <p className="hint">행을 클릭하면 해당 결과를 불러옵니다. Excel/HTML/ZIP은 이력 job_id로도 내보낼 수 있습니다.</p>
-          <div className="table-wrap">
-            <table className="result-table">
-              <thead>
-                <tr>
-                  <th>일시</th>
-                  <th>대상</th>
-                  <th>모드</th>
-                  <th>미흡</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((h) => (
-                  <tr
-                    key={h.job_id}
-                    style={{ cursor: h.job_id ? "pointer" : undefined }}
-                    onClick={() => h.job_id && void loadHistoryRecord(h.job_id, h.mode)}
-                  >
-                    <td>{h.scanned_at?.slice(0, 19) || h.saved_at?.slice(0, 19) || "-"}</td>
-                    <td>
-                      {h.target_name}
-                      {h.page_url ? (
-                        <span className="hint" style={{ display: "block" }}>
-                          {h.page_url}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td>{MODE_LABEL[h.mode || ""] || h.mode}</td>
-                    <td>{h.fail ?? 0}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
 
       {result ? (
         <section className="panel">

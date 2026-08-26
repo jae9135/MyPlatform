@@ -3,6 +3,7 @@
 import { API_BASE } from "@/lib/apiBase";
 
 const FETCH_TIMEOUT_MS = 20000;
+const MULTIPART_UPLOAD_TIMEOUT_MS = 180000;
 
 export function isLocalPortalHost(): boolean {
   if (typeof window === "undefined") return false;
@@ -10,10 +11,14 @@ export function isLocalPortalHost(): boolean {
   return h === "localhost" || h === "127.0.0.1";
 }
 
-export async function fetchScanApi(apiPath: string, init?: RequestInit): Promise<Response> {
+export async function fetchScanApi(
+  apiPath: string,
+  init?: RequestInit,
+  timeoutMs = FETCH_TIMEOUT_MS
+): Promise<Response> {
   const path = apiPath.replace(/^\//, "");
   const ctrl = new AbortController();
-  const timer = window.setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     return await fetch(`${API_BASE}/${path}`, { ...init, signal: ctrl.signal });
   } finally {
@@ -22,7 +27,7 @@ export async function fetchScanApi(apiPath: string, init?: RequestInit): Promise
 }
 
 export async function postScanMultipart(apiPath: string, fd: FormData): Promise<Response> {
-  return fetchScanApi(apiPath, { method: "POST", body: fd });
+  return fetchScanApi(apiPath, { method: "POST", body: fd }, MULTIPART_UPLOAD_TIMEOUT_MS);
 }
 
 export function wrapScanFetchError(e: unknown): Error {
@@ -32,7 +37,7 @@ export function wrapScanFetchError(e: unknown): Error {
     if (isLocalPortalHost()) {
       return new Error(
         timedOut
-          ? "API 응답 없음 — scripts\\start-local-scan.bat 실행 및 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001 확인."
+          ? "API 응답 시간 초과 — ZIP 업로드·진단에 시간이 걸릴 수 있습니다. API(start-local-scan.bat) 실행 여부를 확인하고 다시 시도하세요."
           : "API 연결 실패 — start-local-scan.bat 실행 후 포털을 새로고침하세요."
       );
     }
