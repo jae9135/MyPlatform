@@ -70,6 +70,7 @@ function screenLabel(screen: ProductScreenId): string {
   const map: Partial<Record<ProductScreenId, string>> = {
     "source-scan-home": "/apps/source-scan",
     "web-quality-home": "/apps/web-quality",
+    "perf-test-home": "/apps/perf-test",
     "std-home": "/apps/chk-db-std",
     "dbmgr-home": "/apps/db-manager",
     "erd-home": "/apps/er-modeler",
@@ -165,6 +166,51 @@ function renderScreen(screen: ProductScreenId) {
               <span>로그인 · label 없음</span>
             </div>
           </div>
+        </DarkApp>
+      );
+    case "perf-test-home":
+      return (
+        <DarkApp title="성능 진단">
+          <DarkPanel title="부하 설정">
+            <DarkRow label="대상" value="MyGantt (포털)" />
+            <DarkRow label="VU" value="5" />
+            <DarkRow label="Duration" value="30초" />
+            <DarkBtn primary>성능검사 실행</DarkBtn>
+          </DarkPanel>
+          <DarkBars items={[
+            { label: "TPS", pct: 82, color: "#3ecf8e" },
+            { label: "p95 (ms)", pct: 65, color: "#f0b429" },
+            { label: "오류율", pct: 8, color: "#ff7b72" },
+          ]} />
+        </DarkApp>
+      );
+    case "perf-test-run":
+      return (
+        <DarkApp title="성능 진단">
+          <DarkPanel title="시나리오 선택">
+            <DarkCheck label="MyGantt 홈" checked />
+            <DarkCheck label="일정 편집" checked />
+            <DarkCheck label="공유 링크" checked />
+            <DarkRow label="Base URL" value="http://127.0.0.1:3000" />
+            <DarkBtn primary>시나리오 불러오기</DarkBtn>
+          </DarkPanel>
+        </DarkApp>
+      );
+    case "perf-test-results":
+      return (
+        <DarkApp title="성능 진단">
+          <DarkTable
+            cols={["엔드포인트", "요청", "avg ms", "p95"]}
+            rows={[
+              ["GET /", "420", "48", "92"],
+              ["GET /apps/my-gantt", "380", "62", "118"],
+              ["POST /api/...", "95", "210", "340"],
+            ]}
+          />
+          <DarkPanel title="요약">
+            <DarkRow label="TPS" value="28.4" />
+            <DarkRow label="오류율" value="0.2%" />
+          </DarkPanel>
         </DarkApp>
       );
     case "std-home":

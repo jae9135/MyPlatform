@@ -11,6 +11,9 @@ export type ProductScreenId =
   | "web-quality-home"
   | "web-quality-run"
   | "web-quality-capture"
+  | "perf-test-home"
+  | "perf-test-run"
+  | "perf-test-results"
   | "std-home"
   | "std-check"
   | "std-termgen"
@@ -51,6 +54,7 @@ export type MarketingTool = {
   demoType:
     | "scan-filter"
     | "wq-bars"
+    | "perf-bars"
     | "std-input"
     | "ddl-tabs"
     | "erd"
@@ -171,6 +175,46 @@ const TOOL_META: Record<
     ],
     customizeOptions: ["IPMS 프리셋", "조직 전용 URL", "규칙·보고서 양식"],
     demoType: "wq-bars",
+  },
+  "perf-test": {
+    tagline: "Locust HTTP 부하 · TPS · 응답시간 · 오류율 (웹 품질 시나리오 공유)",
+    homeScreen: "perf-test-home",
+    features: [
+      "웹 품질과 동일 시나리오·URL 후보 재사용",
+      "VU·spawn rate·duration 부하 설정",
+      "TPS · p95 · 오류율 · 엔드포인트별 요약",
+    ],
+    featureDetails: [
+      {
+        title: "시나리오 · URL 선택",
+        description:
+          "MyGantt·ER Modeler·IPMS 등 웹 품질과 같은 후보 URL을 고르거나 직접 입력해 부하 대상을 지정합니다.",
+        screen: "perf-test-run",
+      },
+      {
+        title: "부하 설정 · 실행",
+        description:
+          "가상 사용자(VU), spawn rate, duration을 설정하고 Locust로 HTTP 부하 테스트를 실행합니다.",
+        screen: "perf-test-home",
+      },
+      {
+        title: "결과 · 이력",
+        description:
+          "TPS, 평균·p95 응답시간, 오류율, 엔드포인트별 통계와 실행 이력을 확인합니다.",
+        screen: "perf-test-results",
+      },
+    ],
+    painPoints: [
+      "성능 시험 시나리오를 웹 품질과 따로 관리",
+      "부하 테스트 도구·결과 형식이 도구마다 다름",
+    ],
+    scenarios: [
+      "웹 품질 시나리오 선택 → VU·duration 설정",
+      "Locust 부하 실행 → job 진행률 확인",
+      "TPS·p95·오류율 요약 및 이력 조회",
+    ],
+    customizeOptions: ["조직 전용 URL", "VU 상한", "HAR 기록", "시나리오 프리셋"],
+    demoType: "perf-bars",
   },
   "chk-db-std": {
     tagline: "행안부 공통표준 단어·용어·도메인·코드 점검",
@@ -367,7 +411,7 @@ export function getProductBySlug(slug: string) {
 export { BRAND_NAME };
 
 export const MARKETING_STATS = [
-  { num: "07", label: "플랫폼 프로그램" },
+  { num: "08", label: "플랫폼 프로그램" },
   { num: "03", label: "분류 · 품질/DB·설계/업무" },
   { num: "100%", label: "웹 브라우저 기반" },
   { num: "BETA", label: "전체 공개 상태" },

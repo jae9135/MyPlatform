@@ -111,7 +111,7 @@ export function MarketingHome() {
               모바일 업무 도구 · {RECEIPT_STANDALONE.name}
             </h2>
             <p style={{ color: "var(--mkt-text-dim)", maxWidth: 520, fontSize: 16 }}>
-              {RECEIPT_STANDALONE.description} 플랫폼 7종과 별도로 제공하는 독립 도구입니다.
+              {RECEIPT_STANDALONE.description} 플랫폼 8종과 별도로 제공하는 독립 도구입니다.
             </p>
             <ul className="mkt-feat-list" style={{ marginTop: 14 }}>
               {RECEIPT_STANDALONE.features.map((f) => (

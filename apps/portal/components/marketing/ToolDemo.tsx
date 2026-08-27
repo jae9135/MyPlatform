@@ -112,6 +112,29 @@ export function ToolDemo({ demoType }: { demoType: MarketingTool["demoType"] }) 
     );
   }
 
+  if (demoType === "perf-bars") {
+    const bars = [
+      { label: "TPS", pct: 82, color: "var(--mkt-green)" },
+      { label: "p95 응답", pct: 65, color: "var(--mkt-amber)" },
+      { label: "안정성", pct: 92, color: "var(--mkt-green)" },
+    ];
+    return (
+      <div className="mkt-demo-box">
+        <div className="mkt-demo-label">체험 — 부하 테스트 요약</div>
+        {bars.map((b) => (
+          <div key={b.label} style={{ marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+              <span>{b.label}</span>
+            </div>
+            <div className="mkt-gantt-track">
+              <div className="mkt-gantt-bar" style={{ left: 0, width: `${b.pct}%`, background: b.color }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   if (demoType === "std-input") {
     return (
       <div className="mkt-demo-box">

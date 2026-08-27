@@ -75,7 +75,7 @@ export default async function WorkspacePage() {
       </section>
 
       <main className="beta-hub-main">
-        <p className="beta-hub-section-title">플랫폼 프로그램 · 7종</p>
+        <p className="beta-hub-section-title">플랫폼 프로그램 · 8종</p>
         <div className="beta-hub-grid">
           {PLATFORM_APPS.map((app) => (
             <article key={app.id} className="beta-hub-card">
