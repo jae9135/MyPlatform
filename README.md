@@ -1,5 +1,8 @@
 # MyPlatform
 
+> **버전:** 이 폴더는 **1.0 (배포 스냅샷)** 입니다.  
+> 신규 개발은 [`../MyPlatform-2.0`](../MyPlatform-2.0) · [`VERSION.md`](./VERSION.md) 참고.
+
 여러 로컬 도구(ChkDBStd, DBManager, DeliverableManager, ReceiptToPDF 등)를  
 **웹/모바일에서 사용**하기 위한 플랫폼 뼈대입니다.
 

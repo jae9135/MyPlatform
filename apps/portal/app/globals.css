@@ -1279,6 +1279,26 @@ input[type="text"] {
   margin-bottom: 1rem;
 }
 
+.wq-ipms-unlock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.wq-ipms-unlock-dialog {
+  width: min(420px, 100%);
+  margin: 0;
+}
+
+.wq-ipms-unlock-dialog h2 {
+  margin-top: 0;
+}
+
 .wq-step-block {
   margin-bottom: 8px;
 }
