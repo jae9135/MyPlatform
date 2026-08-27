@@ -1,5 +1,8 @@
-# Source Scan API 환경 설정 + 실행 (Windows)
+# MyPlatform 로컬 API — 전체 기능 (source-scan, web-quality, DBManager 등)
 # 사용: .\scripts\start-api-source-scan.ps1
+#
+# 환경 변수: apps/api/.env.local (DATABASE_URL 등) + apps/portal/.env.local (공유 키)
+# 포털 UI: 별도 터미널에서 npm run dev:portal (apps/portal/.env.local 필요)
 #
 # npm run dev:api (--reload) 와 동시에 쓰지 마세요. reload 자식 프로세스가 포트를 붙잡을 수 있습니다.
 
@@ -9,6 +12,147 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Test-EnvSet {
+    param([string]$Name)
+    $val = [Environment]::GetEnvironmentVariable($Name, "Process")
+    if ([string]::IsNullOrWhiteSpace($val)) { return $false }
+    if ($val -match 'YOUR_PROJECT|YOUR-PASSWORD|your_') { return $false }
+    return $true
+}
+
+function Import-DotEnvFile {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$OnlyIfUnset
+    )
+    if (-not (Test-Path $Path)) { return $false }
+
+    $loaded = 0
+    Get-Content $Path -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object {
+        $line = $_.Trim()
+        if (-not $line -or $line.StartsWith("#")) { return }
+        if ($line -match '^\s*export\s+(.+)$') { $line = $Matches[1].Trim() }
+        if ($line -notmatch '^\s*([^#=]+?)=(.*)$') { return }
+
+        $key = $Matches[1].Trim()
+        $val = $Matches[2].Trim()
+        if ($val.StartsWith('"') -and $val.EndsWith('"') -and $val.Length -ge 2) {
+            $val = $val.Substring(1, $val.Length - 2)
+        } elseif ($val.StartsWith("'") -and $val.EndsWith("'") -and $val.Length -ge 2) {
+            $val = $val.Substring(1, $val.Length - 2)
+        }
+        if ([string]::IsNullOrWhiteSpace($key)) { return }
+        if ($OnlyIfUnset -and (Test-EnvSet $key)) { return }
+
+        Set-Item -Path "Env:$key" -Value $val
+        $loaded++
+    }
+    return ($loaded -gt 0)
+}
+
+function Test-DbConfigured {
+    if (Test-EnvSet "DATABASE_URL") { return $true }
+    return (
+        (Test-EnvSet "POSTGRES_HOST") -and
+        (Test-EnvSet "POSTGRES_USER")
+    )
+}
+
+function Initialize-LocalApiEnv {
+    param([string]$RepoRoot)
+
+    $apiEnv = Join-Path $RepoRoot "apps\api\.env.local"
+    $portalEnv = Join-Path $RepoRoot "apps\portal\.env.local"
+
+    if (Import-DotEnvFile -Path $apiEnv) {
+        Write-Host "Loaded API env:" $apiEnv
+    } elseif (Test-Path (Join-Path $RepoRoot "apps\api\.env.example")) {
+        Write-Host "Tip: copy apps\api\.env.example → apps\api\.env.local (DATABASE_URL for DBManager)"
+    }
+
+    if (Import-DotEnvFile -Path $portalEnv -OnlyIfUnset) {
+        Write-Host "Loaded portal env (fill missing keys):" $portalEnv
+    }
+
+    if (-not (Test-EnvSet "SUPABASE_URL") -and (Test-EnvSet "NEXT_PUBLIC_SUPABASE_URL")) {
+        $env:SUPABASE_URL = $env:NEXT_PUBLIC_SUPABASE_URL
+    }
+    if (-not (Test-EnvSet "SUPABASE_SERVICE_ROLE_KEY") -and (Test-EnvSet "SUPABASE_SECRET_KEY")) {
+        $env:SUPABASE_SERVICE_ROLE_KEY = $env:SUPABASE_SECRET_KEY
+    }
+}
+
+function Initialize-CorsOrigins {
+    param([string]$RepoRoot)
+
+    if (Test-EnvSet "CORS_ORIGINS") {
+        Write-Host "CORS_ORIGINS:" $env:CORS_ORIGINS
+        return
+    }
+
+    $corsList = [System.Collections.Generic.List[string]]::new()
+    [void]$corsList.Add("http://127.0.0.1:3000")
+    [void]$corsList.Add("http://localhost:3000")
+
+    $portalEnv = Join-Path $RepoRoot "apps\portal\.env.local"
+    if (Test-Path $portalEnv) {
+        Get-Content $portalEnv -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_ -match '^\s*NEXT_PUBLIC_PORTAL_URL\s*=\s*(.+)\s*$') {
+                $u = $Matches[1].Trim().Trim('"').Trim("'")
+                if ($u -match '^https?://') { [void]$corsList.Add($u) }
+            }
+        }
+    }
+
+    $env:CORS_ORIGINS = ($corsList | Select-Object -Unique) -join ','
+    Write-Host "CORS_ORIGINS (auto):" $env:CORS_ORIGINS
+}
+
+function Show-FeatureReadiness {
+    param([string]$RepoRoot)
+
+    Write-Host ""
+    Write-Host "=== Local feature readiness ==="
+
+    function Write-FeatureStatus {
+        param([string]$Label, [bool]$Ok, [string]$Hint = "")
+        $mark = if ($Ok) { "[OK]" } else { "[--]" }
+        $color = if ($Ok) { "Green" } else { "Yellow" }
+        Write-Host "  $mark $Label" -ForegroundColor $color
+        if (-not $Ok -and $Hint) { Write-Host "       $Hint" -ForegroundColor DarkYellow }
+    }
+
+    $portalEnv = Join-Path $RepoRoot "apps\portal\.env.local"
+    $hasPortalEnv = Test-Path $portalEnv
+
+    Write-FeatureStatus "Source scan (PMD/SpotBugs)" `
+        ($env:PMD_HOME -and (Test-Path $env:PMD_HOME) -and $env:SPOTBUGS_HOME -and (Test-Path $env:SPOTBUGS_HOME)) `
+        "PMD_HOME / SPOTBUGS_HOME 경로 확인"
+
+    Write-FeatureStatus "Web quality (Playwright)" `
+        (Test-EnvSet "PORTAL_PASSWORD") `
+        "apps/portal/.env.local 에 PORTAL_PASSWORD (IPMS 로그인용)"
+
+    Write-FeatureStatus "DBManager (Supabase Postgres)" `
+        (Test-DbConfigured) `
+        "apps/api/.env.local 에 DATABASE_URL (Supabase Database URI)"
+
+    Write-FeatureStatus "Portal Supabase apps (DeliverableManager, MyGantt)" `
+        ($hasPortalEnv -and (Test-EnvSet "NEXT_PUBLIC_SUPABASE_URL") -and (Test-EnvSet "NEXT_PUBLIC_SUPABASE_ANON_KEY")) `
+        "apps/portal/.env.local + npm run dev:portal"
+
+    Write-FeatureStatus "ChkDBStd / ER Modeler API" $true ""
+
+    $locustOk = $false
+    try {
+        python -c "import locust" 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { $locustOk = $true }
+    } catch { }
+
+    Write-FeatureStatus "Perf test (Locust)" $locustOk "pip install locust (apps/api/requirements.txt)"
+    Write-Host ""
+}
 
 function Get-PidsOnPort {
     param([int]$ListenPort)
@@ -116,6 +260,9 @@ function Wait-PortFree {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
+Initialize-LocalApiEnv -RepoRoot $repoRoot
+Initialize-CorsOrigins -RepoRoot $repoRoot
+
 # === 경로를 환경에 맞게 수정 ===
 $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-11.0.32.9-hotspot"
 $mavenBin = "C:\Mywork\Tools\apache-maven-3.9.16\bin"
@@ -152,27 +299,22 @@ if ($plugin) {
 
 $env:PATH = "$env:JAVA_HOME\bin;$mavenBin;$env:PATH"
 
-# Vercel 포털 → 로컬 API CORS (localhost + .env.local NEXT_PUBLIC_PORTAL_URL)
-if (-not $env:CORS_ORIGINS) {
-    $corsList = [System.Collections.Generic.List[string]]::new()
-    [void]$corsList.Add("http://127.0.0.1:3000")
-    [void]$corsList.Add("http://localhost:3000")
-    $envLocal = Join-Path $repoRoot "apps\portal\.env.local"
-    if (Test-Path $envLocal) {
-        Get-Content $envLocal -ErrorAction SilentlyContinue | ForEach-Object {
-            if ($_ -match '^\s*NEXT_PUBLIC_PORTAL_URL\s*=\s*(.+)\s*$') {
-                $u = $Matches[1].Trim().Trim('"').Trim("'")
-                if ($u -match '^https?://') { [void]$corsList.Add($u) }
-            }
-        }
-    }
-    $env:CORS_ORIGINS = ($corsList | Select-Object -Unique) -join ','
-    Write-Host "CORS_ORIGINS (auto):" $env:CORS_ORIGINS
-}
-
 Write-Host "JAVA_HOME:" $env:JAVA_HOME
 Write-Host "PMD_HOME:" $env:PMD_HOME
 Write-Host "SPOTBUGS_HOME:" $env:SPOTBUGS_HOME
+if (Test-DbConfigured) {
+    Write-Host "DATABASE: configured (DBManager ready)"
+} else {
+    Write-Warning "DATABASE_URL not set — DBManager Supabase apply disabled. See apps/api/.env.example"
+}
+if (Test-EnvSet "PORTAL_PASSWORD") {
+    Write-Host "PORTAL_PASSWORD: set (web-quality IPMS)"
+}
+if (Test-EnvSet "API_ACCESS_KEY") {
+    Write-Host "API_ACCESS_KEY: set"
+}
+
+Show-FeatureReadiness -RepoRoot $repoRoot
 
 if (-not $SkipKill) {
     Stop-ListenerOnPort -ListenPort $Port
@@ -180,7 +322,8 @@ if (-not $SkipKill) {
 }
 
 Write-Host "Starting API on http://127.0.0.1:$Port ..."
-Write-Host "Health: http://127.0.0.1:$Port/v1/source-scan/environment"
-Write-Host "Tip: use this script instead of 'npm run dev:api' for source-scan (PMD/SpotBugs env included)."
+Write-Host "Health: http://127.0.0.1:$Port/health/detail"
+Write-Host "Portal: npm run dev:portal  →  http://127.0.0.1:3000"
+Write-Host "Tip: use this script instead of 'npm run dev:api' (PMD/SpotBugs + .env.local included)."
 
 python -m uvicorn main:app --app-dir apps/api --port $Port

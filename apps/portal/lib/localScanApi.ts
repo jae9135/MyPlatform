@@ -3,8 +3,20 @@
 import { API_BASE } from "@/lib/apiBase";
 
 const FETCH_TIMEOUT_MS = 20000;
+const ENV_FETCH_TIMEOUT_MS = 60000;
 const JOB_POLL_TIMEOUT_MS = 45000;
 const MULTIPART_UPLOAD_TIMEOUT_MS = 180000;
+const ENV_FETCH_RETRIES = 2;
+const ENV_FETCH_RETRY_DELAY_MS = 2500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isTimeoutError(e: unknown): boolean {
+  const msg = String((e as Error).message || e);
+  return msg.includes("aborted") || msg.includes("timeout");
+}
 
 type DirectApiConfig = { apiBase: string; apiKey: string };
 
@@ -65,6 +77,28 @@ export async function fetchScanApi(
   return fetchWithTimeout(url, resolved, timeoutMs);
 }
 
+/** Environment probe — Render cold start / busy during scan. */
+export async function fetchScanEnvApi(apiPath: string, init?: RequestInit): Promise<Response> {
+  return fetchScanApi(apiPath, init, ENV_FETCH_TIMEOUT_MS);
+}
+
+export async function fetchScanEnvWithRetry(
+  apiPath: string,
+  init?: RequestInit,
+): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= ENV_FETCH_RETRIES; attempt += 1) {
+    try {
+      return await fetchScanEnvApi(apiPath, init);
+    } catch (e) {
+      lastErr = e;
+      if (!isTimeoutError(e) || attempt >= ENV_FETCH_RETRIES) break;
+      await sleep(ENV_FETCH_RETRY_DELAY_MS * (attempt + 1));
+    }
+  }
+  throw lastErr;
+}
+
 /** Job status polling — longer timeout for Render cold start. */
 export async function fetchScanJobApi(apiPath: string, init?: RequestInit): Promise<Response> {
   return fetchScanApi(apiPath, init, JOB_POLL_TIMEOUT_MS);
@@ -74,10 +108,25 @@ export async function postScanMultipart(apiPath: string, fd: FormData): Promise<
   return fetchScanApi(apiPath, { method: "POST", body: fd }, MULTIPART_UPLOAD_TIMEOUT_MS);
 }
 
-export function wrapScanFetchError(e: unknown): Error {
+export function wrapScanFetchError(e: unknown, opts?: { scanBusy?: boolean; envProbe?: boolean }): Error {
   const msg = String((e as Error).message || e);
-  const timedOut = msg.includes("aborted") || msg.includes("timeout");
+  const timedOut = isTimeoutError(e);
   if (msg === "Failed to fetch" || msg.includes("NetworkError") || timedOut) {
+    if (opts?.envProbe && opts.scanBusy && timedOut) {
+      return new Error(
+        "환경 조회 지연 — Render가 진단 중이라 응답이 느릸습니다. 진단 진행은 계속됩니다. 완료 후 「환경 다시 확인」을 누르세요.",
+      );
+    }
+    if (opts?.envProbe && timedOut) {
+      if (isLocalPortalHost()) {
+        return new Error(
+          "환경 API 응답 지연 — API(start-local-scan.bat) 실행 여부를 확인한 뒤 「환경 다시 확인」을 누르세요.",
+        );
+      }
+      return new Error(
+        "환경 API 응답 지연 — Render cold start·부하일 수 있습니다. 「환경 다시 확인」을 누르거나 1~2분 후 새로고침하세요.",
+      );
+    }
     if (isLocalPortalHost()) {
       return new Error(
         timedOut
@@ -92,6 +141,10 @@ export function wrapScanFetchError(e: unknown): Error {
     );
   }
   return e instanceof Error ? e : new Error(msg);
+}
+
+export function isEnvProbeSoftError(message: string): boolean {
+  return message.startsWith("환경 조회 지연") || message.startsWith("환경 API 응답 지연");
 }
 
 /** @deprecated use fetchScanApi */

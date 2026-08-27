@@ -57,9 +57,35 @@ npm run dev:portal       # repo root에서
 
 ### 환경 변수
 
+스크립트가 자동으로 읽습니다:
+
+| 파일 | 용도 |
+|------|------|
+| `apps/api/.env.local` | `DATABASE_URL` (DBManager), API 전용 설정 |
+| `apps/portal/.env.local` | `PORTAL_PASSWORD`, `API_ACCESS_KEY`, Supabase 키 등 (비어 있는 API 변수만 보충) |
+
+처음 설정:
+
+```powershell
+copy apps\api\.env.example apps\api\.env.local
+# Supabase Database URI 를 DATABASE_URL 에 붙여넣기
+copy apps\portal\.env.example apps\portal\.env.local
+# NEXT_PUBLIC_SUPABASE_*, PORTAL_PASSWORD 등 설정
+```
+
+포털 UI는 별도 터미널:
+
+```powershell
+npm run dev:portal
+```
+
 | 변수 | 설명 |
 |------|------|
-| `PMD_HOME` | PMD 설치 경로 |
+| `DATABASE_URL` | DBManager — Supabase Postgres URI (`apps/api/.env.local`) |
+| `PORTAL_PASSWORD` | 웹 품질 IPMS 로그인 (`apps/portal/.env.local`) |
+| `API_ACCESS_KEY` | 포털·API 공통 (로컬은 비워도 됨) |
+| `NEXT_PUBLIC_SUPABASE_*` | DeliverableManager, MyGantt (포털) |
+| `PMD_HOME` | PMD 설치 경로 (스크립트 기본값) |
 | `PMD_RULESETS` | (선택) UI 고급 옵션으로도 지정 가능 |
 | `SPOTBUGS_HOME` | SpotBugs 설치 경로 |
 | `FINDSEC_BUGS_PLUGIN_JAR` | findsecbugs-plugin JAR |

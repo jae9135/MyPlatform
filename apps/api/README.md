@@ -9,6 +9,15 @@ FastAPI 서비스. 포털에서 파일을 받아 처리하고 **화면용 JSON**
 
 ## 로컬 실행
 
+**권장 (전체 기능 — PMD/SpotBugs + `.env.local`):**
+
+```powershell
+.\scripts\start-api-source-scan.ps1
+```
+
+`apps/api/.env.local` (`DATABASE_URL`) 과 `apps/portal/.env.local` (`PORTAL_PASSWORD` 등) 을 자동 로드합니다.  
+`apps/api/.env.example` 참고.
+
 ```powershell
 cd C:\Mywork\MyPlatform\apps\api
 pip install -r requirements.txt

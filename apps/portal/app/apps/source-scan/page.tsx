@@ -5,7 +5,9 @@ import { PortalNav } from "@/lib/PortalNav";
 import { API_BASE } from "@/lib/apiBase";
 import {
   fetchScanApi,
+  fetchScanEnvWithRetry,
   fetchScanJobApi,
+  isEnvProbeSoftError,
   isLocalPortalHost,
   postScanMultipart,
   wrapScanFetchError,
@@ -306,6 +308,8 @@ export default function SourceScanPage() {
   const forceRescanRef = useRef(false);
   const validateTimer = useRef<number | null>(null);
   const validateRef = useRef<() => Promise<void>>(async () => {});
+  const busyRef = useRef(false);
+  const wasBusyRef = useRef(false);
 
   const validateWatchKey = useMemo(
     () => [zipFile?.name ?? "", zipFile?.size ?? 0, zipFile?.lastModified ?? 0].join("|"),
@@ -394,15 +398,18 @@ export default function SourceScanPage() {
     showAdvanced,
   ]);
 
-  const loadScanEnvironment = useCallback(async () => {
-    setEnvLoading(true);
-    setEnvLoadError("");
+  const loadScanEnvironment = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) {
+      setEnvLoading(true);
+      setEnvLoadError("");
+    }
 
     try {
-      const eRes = await fetchScanApi("v1/source-scan/environment");
+      const eRes = await fetchScanEnvWithRetry("v1/source-scan/environment");
       let env: EnvStatus | null = null;
       if (eRes.ok) {
         env = (await readJsonResponse(eRes)) as EnvStatus;
+        setEnvLoadError("");
       } else {
         const detailRes = await fetch(`${API_BASE}/health/detail`);
         if (detailRes.ok) {
@@ -410,27 +417,29 @@ export default function SourceScanPage() {
           if (detail.source_scan) {
             env = { ok: true, ...detail.source_scan } as EnvStatus;
             setEnvLoadError(
-              `환경 API HTTP ${eRes.status} — health/detail fallback. API_ACCESS_KEY 확인.`
+              `환경 API HTTP ${eRes.status} — health/detail fallback. API_ACCESS_KEY 확인.`,
             );
           }
         }
       }
       if (env) {
         setEnvStatus(env);
-      } else {
+      } else if (!opts?.silent) {
         setEnvLoadError(
-          `API 연결 실패 (HTTP ${eRes.status}). NEXT_PUBLIC_API_BASE_URL·API_ACCESS_KEY 확인.`
+          `API 연결 실패 (HTTP ${eRes.status}). NEXT_PUBLIC_API_BASE_URL·API_ACCESS_KEY 확인.`,
         );
       }
     } catch (e) {
-      setEnvLoadError(wrapScanFetchError(e).message);
+      setEnvLoadError(
+        wrapScanFetchError(e, { envProbe: true, scanBusy: busyRef.current }).message,
+      );
     } finally {
-      setEnvLoading(false);
+      if (!opts?.silent) setEnvLoading(false);
     }
 
     void (async () => {
       try {
-        const gRes = await fetchScanApi("v1/source-scan/fix-guides");
+        const gRes = await fetchScanEnvWithRetry("v1/source-scan/fix-guides");
         if (gRes.ok) {
           const gj = await readJsonResponse(gRes);
           setFixGuides(normalizeFixGuides(gj));
@@ -440,6 +449,17 @@ export default function SourceScanPage() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+
+  useEffect(() => {
+    if (wasBusyRef.current && !busy) {
+      void loadScanEnvironment();
+    }
+    wasBusyRef.current = busy;
+  }, [busy, loadScanEnvironment]);
 
   useEffect(() => {
     void loadScanEnvironment();
@@ -838,10 +858,22 @@ export default function SourceScanPage() {
       <section className="panel">
         <div className="env-panel-head">
           <h2>도구·환경 상태</h2>
-          <EnvSourceBadge />
+          <div className="env-panel-head-actions">
+            <EnvSourceBadge />
+            <button
+              type="button"
+              className="btn ghost env-refresh-btn"
+              disabled={envLoading}
+              onClick={() => void loadScanEnvironment()}
+            >
+              {envLoading ? "확인 중…" : "환경 다시 확인"}
+            </button>
+          </div>
         </div>
         {envLoading ? <EnvToolsSkeleton /> : null}
-        {envLoadError ? <p className="msg err">{envLoadError}</p> : null}
+        {envLoadError ? (
+          <p className={isEnvProbeSoftError(envLoadError) ? "msg warn" : "msg err"}>{envLoadError}</p>
+        ) : null}
         {!envLoading && envStatus ? (
           <>
             {!isLocalPortalHost() && !envStatus.pmd && !envStatus.spotbugs ? (

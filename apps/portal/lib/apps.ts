@@ -36,6 +36,16 @@ export const APPS: PlatformApp[] = [
     showInMarketingCatalog: true,
   },
   {
+    id: "perf-test",
+    name: "성능 진단",
+    description: "Locust HTTP 부하 · TPS · 응답시간 · 오류율 (웹 품질 시나리오 공유)",
+    status: "beta",
+    href: "/apps/perf-test",
+    category: "quality",
+    showInPlatformHub: true,
+    showInMarketingCatalog: true,
+  },
+  {
     id: "chk-db-std",
     name: "DB 표준 점검 도구",
     description: "행안부 공통표준 단어/용어/도메인/코드 점검",

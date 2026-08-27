@@ -6,9 +6,19 @@ export const TRIAL_ONCE_FLAG = "mp_trial_once_used";
 export const TRIAL_KIND_COOKIE = "mp_trial_kind";
 export const CODE_SESSION_COOKIE = "mp_code_session";
 export const CODE_KIND_COOKIE = "mp_code_kind";
+export const IPMS_UNLOCK_COOKIE = "mp_ipms_unlock";
 
 export type TrialMode = "day" | "once";
 export type PortalAuthKind = "full" | "trial-day" | "trial-once" | "code-full" | "code-day" | "code-once" | null;
+
+/** 정식(30일) 포털 암호 또는 MP-F 전체 코드 — IPMS 등 제한 기능 */
+export function isFullPortalAuth(kind: PortalAuthKind | null | undefined): boolean {
+  return kind === "full" || kind === "code-full";
+}
+
+export function getIpmsUnlockPassword(): string {
+  return process.env.IPMS_UNLOCK_PASSWORD?.trim() ?? "";
+}
 
 const TOKEN_PREFIX = "myplatform.portal.v1:";
 const FULL_SESSION_MAX_AGE = 60 * 60 * 24 * 30;
@@ -105,6 +115,7 @@ export function clearPortalAuthCookies(res: { cookies: { set: (name: string, val
   res.cookies.set(TRIAL_KIND_COOKIE, "", { ...base, maxAge: 0 });
   res.cookies.set(CODE_SESSION_COOKIE, "", { ...base, maxAge: 0 });
   res.cookies.set(CODE_KIND_COOKIE, "", { ...base, maxAge: 0 });
+  res.cookies.set(IPMS_UNLOCK_COOKIE, "", { ...base, maxAge: 0 });
 }
 
 export function setCodeSessionCookies(

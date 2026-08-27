@@ -230,12 +230,20 @@ def health_detail() -> dict:
         ),
         "er_export": "v4-index-key-box",
         "source_scan": _source_scan_health(),
+        "perf_test": _perf_test_health(),
     }
 
 
 def _source_scan_health() -> dict:
     _ensure_api_path()
     from source_scan.service import get_environment_status  # type: ignore
+
+    return get_environment_status()
+
+
+def _perf_test_health() -> dict:
+    _ensure_api_path()
+    from perf_test.service import get_environment_status  # type: ignore
 
     return get_environment_status()
 
@@ -1988,3 +1996,125 @@ async def source_scan_export(request: Request):
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+def _load_perf_test():
+    _ensure_api_path()
+    import perf_test.service as pt  # type: ignore
+
+    return pt
+
+
+@app.get("/v1/perf-test/environment")
+def perf_test_environment() -> dict:
+    pt = _load_perf_test()
+    return {"ok": True, **pt.get_environment_status()}
+
+
+@app.get("/v1/perf-test/scenarios")
+def perf_test_scenarios(
+    target: str = Query("my-gantt"),
+    access: str = Query(""),
+    page_url: str = Query(""),
+) -> dict:
+    pt = _load_perf_test()
+    try:
+        return pt.list_scenarios(target, base_url=page_url, access=access or "public")
+    except Exception as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@app.post("/v1/perf-test/validate")
+async def perf_test_validate(
+    target: str = Form(""),
+    base_url: str = Form(""),
+    state_ids: str = Form(""),
+    users: int = Form(5),
+    spawn_rate: float = Form(1.0),
+    duration_sec: int = Form(30),
+    record_har: str = Form("false"),
+    confirm_high_load: str = Form("false"),
+    access: str = Form("public"),
+    manual_urls: str = Form(""),
+) -> dict:
+    pt = _load_perf_test()
+    from perf_test.options import PerfTestOptions  # type: ignore
+
+    opts = PerfTestOptions.from_params(
+        target=target,
+        base_url=base_url,
+        state_ids=state_ids,
+        users=users,
+        spawn_rate=spawn_rate,
+        duration_sec=duration_sec,
+        record_har=(record_har or "false").lower() in ("1", "true", "yes"),
+        confirm_high_load=(confirm_high_load or "false").lower() in ("1", "true", "yes"),
+        access=access,
+        manual_urls=manual_urls,
+    )
+    return pt.validate_run(opts)
+
+
+@app.post("/v1/perf-test/run")
+async def perf_test_run(
+    target: str = Form(""),
+    base_url: str = Form(""),
+    state_ids: str = Form(""),
+    users: int = Form(5),
+    spawn_rate: float = Form(1.0),
+    duration_sec: int = Form(30),
+    record_har: str = Form("false"),
+    confirm_high_load: str = Form("false"),
+    access: str = Form("public"),
+    manual_urls: str = Form(""),
+    async_progress: str = Form("true"),
+) -> dict:
+    pt = _load_perf_test()
+    from perf_test.options import PerfTestOptions  # type: ignore
+
+    opts = PerfTestOptions.from_params(
+        target=target,
+        base_url=base_url,
+        state_ids=state_ids,
+        users=users,
+        spawn_rate=spawn_rate,
+        duration_sec=duration_sec,
+        record_har=(record_har or "false").lower() in ("1", "true", "yes"),
+        confirm_high_load=(confirm_high_load or "false").lower() in ("1", "true", "yes"),
+        access=access,
+        manual_urls=manual_urls,
+    )
+    use_async = (async_progress or "true").lower() in ("1", "true", "yes")
+    if not use_async:
+        raise HTTPException(400, detail="async_progress=true 필요")
+    try:
+        return pt.start_run_job(opts)
+    except Exception as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@app.get("/v1/perf-test/jobs/{job_id}")
+def perf_test_job(job_id: str) -> dict:
+    pt = _load_perf_test()
+    return pt.get_perf_job(job_id)
+
+
+@app.post("/v1/perf-test/jobs/{job_id}/cancel")
+def perf_test_job_cancel(job_id: str) -> dict:
+    pt = _load_perf_test()
+    return pt.cancel_perf_job(job_id)
+
+
+@app.get("/v1/perf-test/history")
+def perf_test_history(limit: int = Query(30, ge=1, le=100)) -> dict:
+    pt = _load_perf_test()
+    return pt.get_perf_history(limit=limit)
+
+
+@app.get("/v1/perf-test/history/{job_id}")
+def perf_test_history_record(job_id: str) -> dict:
+    pt = _load_perf_test()
+    result = pt.get_perf_history_record(job_id)
+    if not result.get("ok"):
+        raise HTTPException(404, detail="not found")
+    return result

@@ -2,4 +2,5 @@
 source_scan_jobs/
 source_scan_history/
 web_quality_history/
+perf_test_history/
 ipms_sessions/

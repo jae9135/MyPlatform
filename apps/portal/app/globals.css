@@ -227,6 +227,9 @@ input[type="file"] {
 .msg.err {
   color: #ff7b72;
 }
+.msg.warn {
+  color: var(--warn);
+}
 
 footer {
   margin-top: 36px;
@@ -571,6 +574,19 @@ input[type="password"] {
 
 .env-panel-head h2 {
   margin: 0;
+}
+
+.env-panel-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.env-refresh-btn {
+  font-size: 12px;
+  padding: 6px 10px;
 }
 
 .env-source-badge {
@@ -1362,6 +1378,26 @@ input[type="text"] {
 
 .wq-mode-tabs {
   margin-bottom: 1rem;
+}
+
+.wq-ipms-unlock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.wq-ipms-unlock-dialog {
+  width: min(420px, 100%);
+  margin: 0;
+}
+
+.wq-ipms-unlock-dialog h2 {
+  margin-top: 0;
 }
 
 .wq-step-block {

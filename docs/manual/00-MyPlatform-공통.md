@@ -55,6 +55,7 @@ ER Modeler, MyGantt는 전용 상단 바를 사용합니다.
 |------|------|------|
 | 소스코드·보안 진단 | `/apps/source-scan` | 품질 |
 | 웹 품질 진단 | `/apps/web-quality` | 품질 |
+| 성능 진단 | `/apps/perf-test` | 품질 |
 | DB 표준 점검 | `/apps/chk-db-std` | DB·설계 |
 | DBManager | `/apps/db-manager` | DB·설계 |
 | ER Modeler | `/apps/er-modeler` | DB·설계 |

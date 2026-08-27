@@ -5,6 +5,7 @@ import {
   TRIAL_KIND_COOKIE,
   CODE_SESSION_COOKIE,
   CODE_KIND_COOKIE,
+  IPMS_UNLOCK_COOKIE,
   cookieBaseOptions,
 } from "@/lib/portal-auth";
 

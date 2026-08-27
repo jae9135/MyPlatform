@@ -384,7 +384,7 @@ function ResultTable({
 }
 
 export default function WebQualityPage() {
-  const [mode, setMode] = useState<ScanMode>("ipms-public");
+  const [mode, setMode] = useState<ScanMode>("external");
   const [pageUrl, setPageUrl] = useState("");
   const [needLogin, setNeedLogin] = useState(false);
   const [ipmsUrl, setIpmsUrl] = useState(IPMS_DEFAULT_URL);
@@ -425,6 +425,13 @@ export default function WebQualityPage() {
   const prefsHydrated = useRef(false);
   const prefsSaveTimer = useRef<number | null>(null);
   const [scanProgressMode, setScanProgressMode] = useState<ScanMode | null>(null);
+  const [ipmsEnabled, setIpmsEnabled] = useState<boolean | null>(null);
+  const [ipmsUnlocked, setIpmsUnlocked] = useState(false);
+  const [ipmsUnlockOpen, setIpmsUnlockOpen] = useState(false);
+  const [ipmsUnlockPending, setIpmsUnlockPending] = useState<ScanMode | null>(null);
+  const [ipmsUnlockInput, setIpmsUnlockInput] = useState("");
+  const [ipmsUnlockError, setIpmsUnlockError] = useState("");
+  const [ipmsUnlockBusy, setIpmsUnlockBusy] = useState(false);
   const [tab, setTab] = useState<TabId>("all");
   const [query, setQuery] = useState("");
   const validateTimer = useRef<number | null>(null);
@@ -446,6 +453,51 @@ export default function WebQualityPage() {
     const stored = selectedIdsByMode[next];
     if (stored?.length) setSelectedIds(stored);
   }, [selectedIdsByMode]);
+
+  const requestIpmsMode = useCallback(
+    (next: ScanMode) => {
+      if (ipmsUnlocked) {
+        switchMode(next, { includeRuntime: true });
+        return;
+      }
+      setIpmsUnlockPending(next);
+      setIpmsUnlockOpen(true);
+      setIpmsUnlockInput("");
+      setIpmsUnlockError("");
+    },
+    [ipmsUnlocked, switchMode],
+  );
+
+  const submitIpmsUnlock = useCallback(async () => {
+    setIpmsUnlockBusy(true);
+    setIpmsUnlockError("");
+    try {
+      const res = await fetch("/api/portal/ipms-unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: ipmsUnlockInput }),
+      });
+      const j = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !j.ok) {
+        setIpmsUnlockError(
+          j.error === "not_configured"
+            ? "서버에 IPMS_UNLOCK_PASSWORD 가 설정되지 않았습니다."
+            : "암호가 올바르지 않습니다.",
+        );
+        return;
+      }
+      setIpmsUnlocked(true);
+      setIpmsUnlockOpen(false);
+      if (ipmsUnlockPending) {
+        switchMode(ipmsUnlockPending, { includeRuntime: true });
+        setIpmsUnlockPending(null);
+      }
+    } catch {
+      setIpmsUnlockError("확인 요청에 실패했습니다.");
+    } finally {
+      setIpmsUnlockBusy(false);
+    }
+  }, [ipmsUnlockInput, ipmsUnlockPending, switchMode]);
 
   const loadWqEnvironment = useCallback(async () => {
     setEnvLoading(true);
@@ -481,6 +533,28 @@ export default function WebQualityPage() {
   useEffect(() => {
     void loadWqEnvironment();
   }, [loadWqEnvironment]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/portal/auth");
+        const j = (await res.json()) as { ipmsEnabled?: boolean; ipmsUnlocked?: boolean };
+        setIpmsEnabled(Boolean(j.ipmsEnabled));
+        setIpmsUnlocked(Boolean(j.ipmsUnlocked));
+      } catch {
+        setIpmsEnabled(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (ipmsEnabled === false && isIpmsMode(mode)) {
+      setMode("external");
+    }
+    if (ipmsEnabled && isIpmsMode(mode) && !ipmsUnlocked) {
+      setMode("external");
+    }
+  }, [ipmsEnabled, ipmsUnlocked, mode]);
 
   useEffect(() => {
     const prefs = loadWqPrefs();
@@ -1173,6 +1247,14 @@ export default function WebQualityPage() {
         scanMode === "external" ||
         scanMode === "java-upload"
       ) {
+        if (isIpmsMode(scanMode) && (!ipmsEnabled || !ipmsUnlocked)) {
+          setMsg(
+            ipmsEnabled
+              ? "IPMS 이력 — IPMS 탭 선택 후 2차 암호를 입력해야 열람할 수 있습니다."
+              : "IPMS 이력은 정식 암호(30일) 또는 MP-F 발급 코드 로그인 후 열람할 수 있습니다.",
+          );
+          return;
+        }
         setMode(scanMode);
         setResultsByMode((prev) => ({ ...prev, [scanMode]: payload }));
         setJobIdsByMode((prev) => ({ ...prev, [scanMode]: jobId }));
@@ -1186,7 +1268,7 @@ export default function WebQualityPage() {
       setBusy(false);
       setBusyMode(null);
     }
-  }, [mode]);
+  }, [mode, ipmsEnabled, ipmsUnlocked]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -1440,25 +1522,41 @@ export default function WebQualityPage() {
 
       <section className="panel">
         <h2>진단 설정</h2>
+        {ipmsEnabled ? (
+          <p className="hint">
+            <strong>IPMS 공개·로그인</strong> 탭을 선택하면 <strong>2차 암호</strong> 입력 창이
+            열립니다. (정식 로그인 · 발급 코드 필요)
+          </p>
+        ) : ipmsEnabled === false ? (
+          <p className="hint">
+            <strong>IPMS 공개·로그인</strong> 진단은{" "}
+            <strong>정식 암호(30일)</strong> 또는 <code>MP-F-</code> 발급 코드로 로그인한 경우에만
+            표시됩니다. Java ZIP · 외부 URL은 체험 암호에서도 이용할 수 있습니다.
+          </p>
+        ) : null}
         <div className="tabs wq-mode-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            className={`tab ${mode === "ipms-public" ? "active" : ""}`}
-            aria-selected={mode === "ipms-public"}
-            onClick={() => switchMode("ipms-public", { includeRuntime: true })}
-          >
-            IPMS 공개
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={`tab ${mode === "ipms-auth" ? "active" : ""}`}
-            aria-selected={mode === "ipms-auth"}
-            onClick={() => switchMode("ipms-auth", { includeRuntime: true })}
-          >
-            IPMS 로그인
-          </button>
+          {ipmsEnabled ? (
+            <>
+              <button
+                type="button"
+                role="tab"
+                className={`tab ${mode === "ipms-public" ? "active" : ""}`}
+                aria-selected={mode === "ipms-public"}
+                onClick={() => requestIpmsMode("ipms-public")}
+              >
+                IPMS 공개
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className={`tab ${mode === "ipms-auth" ? "active" : ""}`}
+                aria-selected={mode === "ipms-auth"}
+                onClick={() => requestIpmsMode("ipms-auth")}
+              >
+                IPMS 로그인
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
             role="tab"
@@ -1479,7 +1577,7 @@ export default function WebQualityPage() {
           </button>
         </div>
 
-        {mode === "ipms-public" ? (
+        {ipmsEnabled && ipmsUnlocked && mode === "ipms-public" ? (
           <div className="wq-step-block">
             <p className="hint">
               <strong>전기사업정보시스템 — 공개 화면</strong> · 홈, 알림마당, 이용안내, 통계분석 등
@@ -1497,7 +1595,7 @@ export default function WebQualityPage() {
               </label>
             </div>
           </div>
-        ) : mode === "ipms-auth" ? (
+        ) : ipmsEnabled && ipmsUnlocked && mode === "ipms-auth" ? (
           <div className="wq-step-block">
             <p className="hint">
               <strong>전기사업정보시스템 — 로그인 후</strong> · 공동인증서(2단계)는 세션 JSON이
@@ -2092,6 +2190,53 @@ python scripts/save_ipms_session.py --url ${pageUrl.trim() || EXTERNAL_URL_PLACE
             </>
           )}
         </section>
+      ) : null}
+
+      {ipmsUnlockOpen ? (
+        <div className="wq-ipms-unlock-overlay" role="presentation">
+          <div className="panel wq-ipms-unlock-dialog" role="dialog" aria-labelledby="wq-ipms-unlock-title">
+            <h2 id="wq-ipms-unlock-title">IPMS 진단 2차 암호</h2>
+            <p className="hint">
+              IPMS 공개·로그인 기능을 사용하려면 추가 암호를 입력하세요.
+            </p>
+            <label className="login-label">
+              암호
+              <input
+                type="password"
+                value={ipmsUnlockInput}
+                onChange={(e) => setIpmsUnlockInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void submitIpmsUnlock();
+                }}
+                autoFocus
+                disabled={ipmsUnlockBusy}
+              />
+            </label>
+            {ipmsUnlockError ? <p className="msg err">{ipmsUnlockError}</p> : null}
+            <div className="source-scan-actions-primary">
+              <button
+                type="button"
+                className="btn primary"
+                disabled={ipmsUnlockBusy || !ipmsUnlockInput.trim()}
+                onClick={() => void submitIpmsUnlock()}
+              >
+                {ipmsUnlockBusy ? "확인 중…" : "확인"}
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={ipmsUnlockBusy}
+                onClick={() => {
+                  setIpmsUnlockOpen(false);
+                  setIpmsUnlockPending(null);
+                  setIpmsUnlockError("");
+                }}
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </main>
     </>
