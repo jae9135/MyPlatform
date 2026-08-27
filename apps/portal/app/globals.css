@@ -4,7 +4,7 @@
   --text: #e8eef4;
   --muted: #8b9aab;
   --line: #2a3542;
-  --accent: #3d8bfd;
+  --accent: #4fd1e8;
   --ok: #3ecf8e;
   --warn: #f0b429;
 }
@@ -283,8 +283,81 @@ footer {
   font-weight: 600;
 }
 
+@media (max-width: 640px) {
+  .login-trial-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .login-panel {
-  max-width: 28rem;
+  max-width: 36rem;
+}
+
+.login-options {
+  margin-top: 16px;
+}
+
+.login-section-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.login-trial-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.login-trial-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.login-trial-card h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.login-trial-card p {
+  margin: 0 0 12px;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.contact-info {
+  max-width: 36rem;
+  margin: 0 auto 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.contact-info-compact {
+  margin-bottom: 12px;
+}
+
+.contact-info-notice {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.contact-info-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.contact-info-list a {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .login-form {
@@ -301,6 +374,18 @@ footer {
   font-size: 13px;
   color: var(--muted);
   width: 100%;
+}
+
+.login-kind-hint {
+  margin: 0 0 16px;
+  padding-left: 1.2rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.login-kind-hint b {
+  color: var(--text);
 }
 
 input[type="password"] {

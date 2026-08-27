@@ -1,5 +1,8 @@
 # MyPlatform
 
+> **버전:** 이 폴더는 **2.0 (로컬 개발)** 입니다.  
+> 배포 스냅샷 1.0은 [`../MyPlatform-1.0`](../MyPlatform-1.0) · [`VERSION.md`](./VERSION.md) 참고.
+
 여러 로컬 도구(ChkDBStd, DBManager, DeliverableManager, ReceiptToPDF 등)를  
 **웹/모바일에서 사용**하기 위한 플랫폼 뼈대입니다.
 
@@ -109,6 +112,8 @@ MyPlatform/
 
 기존 도구 소스(`C:\Mywork\AI\cursor\09 독자 제공용 파일\study\...`)는  
 당분간 그 자리에 두고, API에서 점진적으로 이식합니다.
+
+**사용자 매뉴얼:** [docs/manual/README.md](docs/manual/README.md) — 포털·전체 앱 화면/기능/사용법
 
 ---
 

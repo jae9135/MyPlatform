@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  PORTAL_COOKIE,
-  getPortalPassword,
-  timingSafeEqual,
-  tokenFromPassword,
-} from "@/lib/portal-auth";
+import { isPortalAuthed } from "@/lib/portal-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,11 +13,9 @@ function upstreamBase(): string {
 }
 
 async function isAuthed(req: NextRequest): Promise<boolean> {
-  const password = getPortalPassword();
+  const password = process.env.PORTAL_PASSWORD?.trim();
   if (!password) return true;
-  const cookie = req.cookies.get(PORTAL_COOKIE)?.value ?? "";
-  const expected = await tokenFromPassword(password);
-  return Boolean(cookie && timingSafeEqual(cookie, expected));
+  return isPortalAuthed((name) => req.cookies.get(name));
 }
 
 async function proxy(req: NextRequest, path: string[]): Promise<Response> {

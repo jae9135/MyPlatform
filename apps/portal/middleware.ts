@@ -1,26 +1,21 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import {
-  PORTAL_COOKIE,
-  getPortalPassword,
-  timingSafeEqual,
-  tokenFromPassword,
-} from "@/lib/portal-auth";
-
-function isPublicPath(pathname: string): boolean {
-  return pathname === "/login" || pathname === "/api/login";
-}
+import { isPortalAuthed } from "@/lib/portal-auth";
+import { isPublicPath } from "@/lib/publicPaths";
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const password = getPortalPassword();
-  const cookie = req.cookies.get(PORTAL_COOKIE)?.value ?? "";
-  const expected = password ? await tokenFromPassword(password) : "";
-  const authed = Boolean(expected && cookie && timingSafeEqual(cookie, expected));
+
+  // /admin 은 서버 컴포넌트·API에서 별도 검증 (Edge에서 env/crypto 이슈 회피)
+  if (pathname.startsWith("/admin") || pathname.startsWith("/api/admin")) {
+    return NextResponse.next();
+  }
+
+  const authed = await isPortalAuthed((name) => req.cookies.get(name));
 
   if (isPublicPath(pathname)) {
     if (authed && pathname === "/login") {
-      return NextResponse.redirect(new URL("/", req.url));
+      return NextResponse.redirect(new URL("/workspace", req.url));
     }
     return NextResponse.next();
   }

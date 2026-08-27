@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { BRAND_NAME } from "@/lib/brand";
 
 export const metadata: Metadata = {
-  title: "MyPlatform",
-  description: "로컬 도구를 웹·모바일에서 — 샘플은 서버, 입력·결과는 기기",
-  applicationName: "MyPlatform",
+  title: BRAND_NAME,
+  description: "프로젝트 자동화 Platform — 개발·품질·DB 업무 도구 데모 및 베타 프로그램",
+  applicationName: BRAND_NAME,
 };
 
 export const viewport: Viewport = {

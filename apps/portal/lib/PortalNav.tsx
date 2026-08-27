@@ -1,6 +1,15 @@
 "use client";
 
-export function PortalNav({ home = false }: { home?: boolean }) {
+import { BRAND_NAME } from "@/lib/brand";
+
+export function PortalNav({
+  home = false,
+  showLogout = true,
+}: {
+  home?: boolean;
+  /** false면 로그아웃 버튼 숨김 (로그인·공개 화면) */
+  showLogout?: boolean;
+}) {
   return (
     <nav className={`portal-nav${home ? " portal-nav-home" : ""}`} aria-label="포털">
       {home ? (
@@ -8,20 +17,22 @@ export function PortalNav({ home = false }: { home?: boolean }) {
       ) : (
         <a
           className="back"
-          href="/"
+          href="/workspace"
           onClick={(e) => {
             e.preventDefault();
-            window.location.assign("/");
+            window.location.assign("/workspace");
           }}
         >
-          ← MyPlatform으로 돌아가기
+          ← {BRAND_NAME} 허브
         </a>
       )}
-      <form action="/api/logout" method="post">
-        <button className="btn ghost" type="submit">
-          로그아웃
-        </button>
-      </form>
+      {showLogout ? (
+        <form action="/api/logout" method="post">
+          <button className="btn ghost" type="submit">
+            로그아웃
+          </button>
+        </form>
+      ) : null}
     </nav>
   );
 }

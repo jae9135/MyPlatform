@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>시안 D — 소프트 인디고 | 프로젝트 자동화 Platform</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Pretendard,sans-serif;background:#f8f9fc;color:#2d3748;line-height:1.6}
+.mock-banner{background:#e0e7ff;padding:10px;text-align:center;font-size:13px}
+.mock-banner a{color:#4338ca;font-weight:600;margin:0 8px}
+header{background:#fff;border-bottom:1px solid #e2e8f0;padding:16px 5%;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5}
+.logo{font-weight:800;color:#4338ca}
+nav a{margin-left:18px;color:#64748b;font-size:14px;text-decoration:none}
+nav a:hover{color:#4338ca}
+.btn{padding:9px 16px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;border:none}
+.btn-p{background:#4f46e5;color:#fff}
+.btn-g{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+.hero{padding:72px 5% 56px;background:linear-gradient(135deg,#eef2ff 0%,#f5f3ff 50%,#faf5ff 100%);max-width:1180px;margin:0 auto}
+.hero h1{font-size:clamp(28px,4vw,40px);color:#312e81;margin-bottom:16px;line-height:1.25}
+.hero h1 em{color:#4f46e5;font-style:normal}
+.hero p{color:#64748b;font-size:16px;max-width:520px;margin-bottom:24px}
+.stats{display:flex;gap:1px;background:#e2e8f0;border-radius:12px;overflow:hidden;margin:40px 5% 0;max-width:1180px;margin-left:auto;margin-right:auto}
+.stat{flex:1;background:#fff;padding:20px;text-align:center}
+.stat b{display:block;font-size:24px;color:#4f46e5}
+.stat span{font-size:12px;color:#64748b}
+.wrap{max-width:1180px;margin:0 auto;padding:48px 5%}
+.sec-head{margin-bottom:28px}
+.sec-head h2{font-size:24px;color:#312e81;margin-bottom:8px}
+.sec-head p{color:#64748b;font-size:14px}
+.tool{border:1px solid #e2e8f0;border-radius:12px;background:#fff;margin-bottom:10px;overflow:hidden}
+.tool-head{padding:18px 20px;cursor:pointer;display:flex;align-items:center;gap:14px;user-select:none}
+.tool-head:hover{background:#fafafa}
+.tool-num{font-family:monospace;color:#a5b4fc;font-size:13px;width:28px}
+.tool-head h3{flex:1;font-size:16px;color:#1e293b}
+.tool-head .pill{font-size:10px;padding:3px 8px;border-radius:999px;background:#eef2ff;color:#4338ca}
+.tool-body{display:none;padding:0 20px 20px;border-top:1px solid #f1f5f9}
+.tool.open .tool-body{display:block}
+.tool-body p{font-size:13px;color:#64748b;margin:12px 0}
+.demo-mini{background:#f8fafc;border-radius:8px;padding:14px;font-size:12px;color:#475569;margin-top:8px}
+.receipt{margin-top:36px;padding:28px;background:linear-gradient(90deg,#ecfdf5,#f0fdf4);border-radius:16px;border:1px solid #a7f3d0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+.receipt h3{color:#047857}
+.cta{margin-top:40px;padding:36px;background:#fff;border:2px solid #c7d2fe;border-radius:16px}
+.cta h3{color:#312e81;margin-bottom:16px}
+.steps{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.step{flex:1;min-width:100px;background:#eef2ff;padding:12px;border-radius:8px;text-align:center;font-size:12px;color:#4338ca}
+footer{text-align:center;padding:32px;color:#94a3b8;font-size:13px;border-top:1px solid #e2e8f0;margin-top:48px}
+.chev{transition:.2s;color:#94a3b8}
+.tool.open .chev{transform:rotate(180deg);color:#4f46e5}
+</style>
+</head>
+<body>
+<div class="mock-banner">시안 <b>D — 소프트 인디고</b> (현재 구조 + 밝은 톤) · <a href="01-밝은-포털형.html">A</a> <a href="02-소프트-스카이.html">B</a> <a href="03-웜-퍼블릭.html">C</a></div>
+<header>
+  <div class="logo">프로젝트 자동화 Platform</div>
+  <nav><a href="#tools">도구</a><a href="#receipt">모바일</a><a href="#cta">문의</a></nav>
+  <button class="btn btn-g">사내 포털</button>
+</header>
+<section class="hero">
+  <h1>프로젝트마다 반복되는 산출물,<br><em>일곱 가지 도구</em>로 자동화</h1>
+  <p>지금 사이트와 같은 <strong>펼침형 도구 목록</strong>을 유지하되, 배경·글자색을 밝게 바꾼 버전입니다. 데모·문의 흐름은 동일합니다.</p>
+  <button class="btn btn-p">7가지 도구 체험 ↓</button>
+  <button class="btn btn-g">맞춤 개발 문의</button>
+</section>
+<div class="stats">
+  <div class="stat"><b>7</b><span>플랫폼 프로그램</span></div>
+  <div class="stat"><b>3</b><span>업무 분류</span></div>
+  <div class="stat"><b>100%</b><span>웹 기반</span></div>
+  <div class="stat"><b>BETA</b><span>데모 공개</span></div>
+</div>
+<section class="wrap" id="tools">
+  <div class="sec-head">
+    <h2>도구 카탈로그</h2>
+    <p>항목을 클릭하면 미니 데모 설명이 펼쳐집니다.</p>
+  </div>
+  <div class="tool open" onclick="toggle(this)">
+    <div class="tool-head"><span class="tool-num">01</span><h3>소스코드·보안 진단</h3><span class="pill">품질</span><span class="chev">▼</span></div>
+    <div class="tool-body"><p>PMD · FindSecBugs · Bandit — ZIP 업로드 점검</p><div class="demo-mini">체험: 결함 심각도 탭 필터 · Excel/HTML 보고서</div></div>
+  </div>
+  <div class="tool" onclick="toggle(this)">
+    <div class="tool-head"><span class="tool-num">02</span><h3>웹 품질 진단</h3><span class="pill">품질</span><span class="chev">▼</span></div>
+    <div class="tool-body"><p>KWCAG 2.2 · Playwright · 화면 캡처</p><div class="demo-mini">체험: 웹표준/접근성 pass·fail 바</div></div>
+  </div>
+  <div class="tool" onclick="toggle(this)">
+    <div class="tool-head"><span class="tool-num">03</span><h3>DB 표준 점검</h3><span class="pill">DB</span><span class="chev">▼</span></div>
+    <div class="tool-body"><p>행안부 공통표준 단어·용어·도메인</p></div>
+  </div>
+  <div class="tool" onclick="toggle(this)">
+    <div class="tool-head"><span class="tool-num">04</span><h3>DBManager</h3><span class="pill">DB</span><span class="chev">▼</span></div>
+    <div class="tool-body"><p>설계서 → DDL · DB 동기화</p></div>
+  </div>
+  <div class="tool" onclick="toggle(this)">
+    <div class="tool-head"><span class="tool-num">05</span><h3>ER Modeler</h3><span class="pill">DB</span><span class="chev">▼</span></div>
+    <div class="tool-body"><p>Excel/SQL → ERD</p></div>
+  </div>
+  <div class="tool" onclick="toggle(this)">
+    <div class="tool-head"><span class="tool-num">06</span><h3>DeliverableManager</h3><span class="pill">업무</span><span class="chev">▼</span></div>
+    <div class="tool-body"><p>산출물 목록·양식</p></div>
+  </div>
+  <div class="tool" onclick="toggle(this)">
+    <div class="tool-head"><span class="tool-num">07</span><h3>MyGantt</h3><span class="pill">업무</span><span class="chev">▼</span></div>
+    <div class="tool-body"><p>WBS · 간트 · 공유</p></div>
+  </div>
+  <div class="receipt" id="receipt">
+    <div><span style="font-size:12px;color:#059669;font-weight:600">별도 · 모바일</span><h3>ReceiptToPDF</h3><p style="font-size:14px;color:#64748b">영수증 → PDF (플랫폼 외)</p></div>
+    <button class="btn btn-p" style="background:#059669">체험하기</button>
+  </div>
+  <div class="cta" id="cta">
+    <h3>맞춤 개발 · 운영 구축</h3>
+    <div class="steps">
+      <div class="step">01<br><b>문의</b></div>
+      <div class="step">02<br><b>요구사항</b></div>
+      <div class="step">03<br><b>데모</b></div>
+      <div class="step">04<br><b>검수</b></div>
+      <div class="step">05<br><b>납품</b></div>
+    </div>
+    <button class="btn btn-p">문의하기</button>
+  </div>
+</section>
+<footer>시안 D — 현재 다크 홈의 밝은 버전 · 구조 변경 최소</footer>
+<script>
+function toggle(el){document.querySelectorAll('.tool').forEach(t=>{if(t!==el)t.classList.remove('open')});el.classList.toggle('open')}
+</script>
+</body>
+</html>

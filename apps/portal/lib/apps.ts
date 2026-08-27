@@ -7,6 +7,10 @@ export type PlatformApp = {
   status: AppStatus;
   href: string;
   category: string;
+  /** Show on internal /workspace hub (platform tools). */
+  showInPlatformHub?: boolean;
+  /** Show on public marketing home tool catalog. */
+  showInMarketingCatalog?: boolean;
 };
 
 /** Supabase apps 테이블과 동기화되는 포털 기본 목록(오프라인 폴백). */
@@ -18,6 +22,8 @@ export const APPS: PlatformApp[] = [
     status: "beta",
     href: "/apps/source-scan",
     category: "quality",
+    showInPlatformHub: true,
+    showInMarketingCatalog: true,
   },
   {
     id: "web-quality",
@@ -26,6 +32,8 @@ export const APPS: PlatformApp[] = [
     status: "beta",
     href: "/apps/web-quality",
     category: "quality",
+    showInPlatformHub: true,
+    showInMarketingCatalog: true,
   },
   {
     id: "chk-db-std",
@@ -34,6 +42,8 @@ export const APPS: PlatformApp[] = [
     status: "beta",
     href: "/apps/chk-db-std",
     category: "db-std",
+    showInPlatformHub: true,
+    showInMarketingCatalog: true,
   },
   {
     id: "db-manager",
@@ -42,6 +52,8 @@ export const APPS: PlatformApp[] = [
     status: "beta",
     href: "/apps/db-manager",
     category: "db-std",
+    showInPlatformHub: true,
+    showInMarketingCatalog: true,
   },
   {
     id: "er-modeler",
@@ -50,6 +62,8 @@ export const APPS: PlatformApp[] = [
     status: "beta",
     href: "/apps/er-modeler",
     category: "db-std",
+    showInPlatformHub: true,
+    showInMarketingCatalog: true,
   },
   {
     id: "deliverable-manager",
@@ -58,6 +72,8 @@ export const APPS: PlatformApp[] = [
     status: "beta",
     href: "/apps/deliverable-manager",
     category: "pm",
+    showInPlatformHub: true,
+    showInMarketingCatalog: true,
   },
   {
     id: "receipt-to-pdf",
@@ -66,6 +82,8 @@ export const APPS: PlatformApp[] = [
     status: "beta",
     href: "/apps/receipt-to-pdf",
     category: "mobile",
+    showInPlatformHub: false,
+    showInMarketingCatalog: false,
   },
   {
     id: "my-gantt",
@@ -74,5 +92,15 @@ export const APPS: PlatformApp[] = [
     status: "beta",
     href: "/apps/my-gantt",
     category: "pm",
+    showInPlatformHub: true,
+    showInMarketingCatalog: true,
   },
 ];
+
+export const PLATFORM_APPS = APPS.filter((a) => a.showInPlatformHub !== false);
+
+export const STANDALONE_APPS = APPS.filter((a) => a.showInPlatformHub === false);
+
+export const MARKETING_PLATFORM_APPS = APPS.filter(
+  (a) => a.showInMarketingCatalog !== false,
+);

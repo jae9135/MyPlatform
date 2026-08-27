@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>시안 C — 웜 퍼블릭 | 프로젝트 자동화 Platform</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Pretendard,"Malgun Gothic",sans-serif;background:#f7f6f3;color:#1c1917}
+.mock-banner{background:#fef3c7;padding:10px;text-align:center;font-size:13px;border-bottom:1px solid #fcd34d}
+.mock-banner a{color:#b45309;font-weight:600;margin:0 8px}
+.top{background:#1e3a5f;color:#fff;padding:0 5%;height:64px;display:flex;align-items:center;justify-content:space-between}
+.top .logo{font-weight:700;font-size:17px}
+.top a{color:#cbd5e1;font-size:14px}
+.hero{padding:52px 5%;background:#fff;border-bottom:3px solid #059669}
+.hero-inner{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1.2fr .8fr;gap:40px;align-items:center}
+.hero h1{font-size:36px;line-height:1.3;color:#1e3a5f;margin-bottom:16px}
+.hero .lead{font-size:16px;color:#57534e;line-height:1.75;margin-bottom:24px}
+.btn{padding:11px 20px;border-radius:8px;font-weight:600;font-size:14px;border:none;cursor:pointer;display:inline-block}
+.btn-green{background:#059669;color:#fff}
+.btn-outline{background:#fff;color:#1e3a5f;border:2px solid #1e3a5f}
+.info-box{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:24px}
+.info-box li{margin:8px 0;font-size:14px;color:#44403c;list-style:none;padding-left:20px;position:relative}
+.info-box li::before{content:"✓";position:absolute;left:0;color:#059669;font-weight:bold}
+.wrap{max-width:1100px;margin:0 auto;padding:40px 5%}
+h2.sec{font-size:22px;color:#1e3a5f;border-left:4px solid #059669;padding-left:12px;margin-bottom:20px}
+.table-wrap{background:#fff;border:1px solid #e7e5e4;border-radius:12px;overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{background:#f5f5f4;text-align:left;padding:14px 16px;color:#57534e;font-weight:600}
+td{padding:14px 16px;border-top:1px solid #f5f5f4;color:#44403c}
+td a{color:#059669;font-weight:600;margin-right:8px}
+.receipt{margin-top:32px;padding:24px;background:#fffbeb;border:1px solid #fde68a;border-radius:12px}
+.receipt h3{color:#b45309;margin-bottom:8px}
+.contact{margin-top:40px;padding:32px;background:#1e3a5f;color:#fff;border-radius:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+footer{text-align:center;padding:28px;font-size:13px;color:#a8a29e}
+@media(max-width:800px){.hero-inner{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="mock-banner">시안 <b>C — 웜 퍼블릭</b> · <a href="01-밝은-포털형.html">A</a> <a href="02-소프트-스카이.html">B</a> <a href="04-소프트-인디고.html">D</a></div>
+<div class="top">
+  <div class="logo">프로젝트 자동화 Platform</div>
+  <a href="#">사내 포털 로그인 →</a>
+</div>
+<section class="hero">
+  <div class="hero-inner">
+    <div>
+      <h1>공공·SI 프로젝트를 위한<br>업무 자동화 도구 모음</h1>
+      <p class="lead">품질 점검, DB 표준, 설계·DDL, 산출물·일정까지. <strong>읽기 쉬운 화면</strong>으로 기능을 소개하고, 조직에 맞게 커스터마이징할 수 있습니다.</p>
+      <button class="btn btn-green">도구 목록 보기</button>
+      <button class="btn btn-outline">맞춤 개발 문의</button>
+    </div>
+    <div class="info-box">
+      <strong style="display:block;margin-bottom:12px;color:#166534">이런 분께 추천</strong>
+      <ul>
+        <li>웹 품질·KWCAG 감리 준비</li>
+        <li>DB 표준·설계서 점검</li>
+        <li>반복 산출물·일정 관리</li>
+        <li>도입 전 데모·견적 상담</li>
+      </ul>
+    </div>
+  </div>
+</section>
+<main class="wrap">
+  <h2 class="sec">플랫폼 프로그램 (7종)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>분류</th><th>프로그램</th><th>설명</th><th></th></tr></thead>
+      <tbody>
+        <tr><td>품질</td><td><b>소스코드·보안 진단</b></td><td>Java/Python/TS ZIP 보안·품질</td><td><a href="#">데모</a><a href="#">상세</a></td></tr>
+        <tr><td>품질</td><td><b>웹 품질 진단</b></td><td>KWCAG 2.2 · Playwright</td><td><a href="#">데모</a><a href="#">상세</a></td></tr>
+        <tr><td>DB</td><td><b>DB 표준 점검</b></td><td>공통표준 단어·용어</td><td><a href="#">데모</a><a href="#">상세</a></td></tr>
+        <tr><td>DB</td><td><b>DBManager</b></td><td>DDL · DB 동기화</td><td><a href="#">데모</a><a href="#">상세</a></td></tr>
+        <tr><td>DB</td><td><b>ER Modeler</b></td><td>ERD 편집·export</td><td><a href="#">데모</a><a href="#">상세</a></td></tr>
+        <tr><td>업무</td><td><b>DeliverableManager</b></td><td>산출물 카탈로그</td><td><a href="#">데모</a><a href="#">상세</a></td></tr>
+        <tr><td>업무</td><td><b>MyGantt</b></td><td>일정·간트</td><td><a href="#">데모</a><a href="#">상세</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="receipt">
+    <span style="font-size:12px;color:#b45309">별도 제공 · 모바일</span>
+    <h3>ReceiptToPDF</h3>
+    <p style="font-size:14px;color:#57534e">영수증 → A4 PDF (플랫폼 7종과 분리)</p>
+  </div>
+  <div class="contact">
+    <div><b style="font-size:17px">우리 기관·회사에 맞게 조정 가능합니다</b><br><small style="opacity:.85">문의 후 요구사항 · 데모 · 납품</small></div>
+    <button class="btn btn-green">문의하기</button>
+  </div>
+</main>
+<footer>시안 C — 웜 퍼블릭 · 공공·감리 친화, 표 형식으로 명확하게</footer>
+</body>
+</html>
