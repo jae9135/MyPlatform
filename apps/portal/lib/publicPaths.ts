@@ -5,7 +5,7 @@ export function isPublicPath(pathname: string): boolean {
   if (pathname === "/api/login") return true;
   if (pathname === "/robots.txt") return true;
   if (pathname === "/sitemap.xml") return true;
-  if (/^\/google[a-z0-9]+\.html$/i.test(pathname)) return true;
+  if (/^\/(google|naver)[a-z0-9]+\.html$/i.test(pathname)) return true;
   if (pathname.startsWith("/products")) return true;
   if (pathname.startsWith("/demo")) return true;
   if (pathname === "/customize") return true;
