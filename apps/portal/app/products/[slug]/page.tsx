@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ProductDetailScreens } from "@/components/marketing/AppScreenMockup";
@@ -6,6 +7,7 @@ import {
   getMarketingTool,
   getMarketingTools,
   getProductBySlug,
+  getProductSeo,
   RECEIPT_STANDALONE,
 } from "@/lib/marketingCatalog";
 import "../../marketing.css";
@@ -15,6 +17,22 @@ type Props = { params: { slug: string } };
 export function generateStaticParams() {
   const slugs = getMarketingTools().map((t) => ({ slug: t.slug }));
   return [...slugs, { slug: RECEIPT_STANDALONE.slug }];
+}
+
+export function generateMetadata({ params }: Props): Metadata {
+  const seo = getProductSeo(params.slug);
+  const product = getProductBySlug(params.slug);
+  if (!product || !seo) {
+    return { title: product?.name ?? "제품" };
+  }
+  return {
+    title: seo.seoTitle,
+    description: seo.seoDescription,
+    openGraph: {
+      title: seo.seoTitle,
+      description: seo.seoDescription,
+    },
+  };
 }
 
 export default function ProductPage({ params }: Props) {
@@ -33,9 +51,18 @@ export default function ProductPage({ params }: Props) {
       ) : null}
 
       <div className="mkt-product-hero">
-        <h1>{product.name}</h1>
-        <p className="mkt-product-tagline">{product.tagline}</p>
+        <h1>{product.tagline}</h1>
+        <p className="mkt-product-tagline">{product.name}</p>
         <p className="mkt-product-desc">{product.description}</p>
+      </div>
+
+      <div className="mkt-panel" style={{ marginBottom: 20 }}>
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>주요 기능</h2>
+        <ul className="mkt-feat-list">
+          {product.features.map((f) => (
+            <li key={f}>{f}</li>
+          ))}
+        </ul>
       </div>
 
       <ProductDetailScreens

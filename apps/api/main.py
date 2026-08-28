@@ -208,7 +208,8 @@ def _db_configured() -> bool:
 @app.get("/health")
 async def health() -> dict:
     """Lightweight liveness probe — must never block on scans or DB."""
-    return {"ok": True, "service": "myplatform-api"}
+    perf = await asyncio.to_thread(_perf_test_health)
+    return {"ok": True, "service": "myplatform-api", "perf_test": perf}
 
 
 @app.get("/health/detail")

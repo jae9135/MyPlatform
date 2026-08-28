@@ -1,6 +1,7 @@
 "use client";
 
 import type { ProductFeatureDetail, ProductScreenId } from "@/lib/marketingCatalog";
+import { ReceiptGlassMockup } from "./ReceiptGlassMockup";
 
 type Props = {
   screen: ProductScreenId;
@@ -8,6 +9,14 @@ type Props = {
 };
 
 export function AppScreenMockup({ screen, label }: Props) {
+  if (screen.startsWith("receipt-")) {
+    return (
+      <div className="mkt-screen-wrap mkt-receipt-screen-wrap">
+        {renderScreen(screen)}
+      </div>
+    );
+  }
+
   return (
     <div className="mkt-screen-wrap">
       <div className="mkt-browser">
@@ -370,33 +379,11 @@ function renderScreen(screen: ProductScreenId) {
         </DarkApp>
       );
     case "receipt-home":
-      return (
-        <MobileApp title="ReceiptToPDF">
-          <div className="mkt-mock-phone-grid">
-            <div className="shot" />
-            <div className="shot" />
-          </div>
-          <DarkBtn primary>PDF 만들기</DarkBtn>
-        </MobileApp>
-      );
+      return <ReceiptGlassMockup variant="home" interactive={false} />;
     case "receipt-capture":
-      return (
-        <MobileApp title="ReceiptToPDF">
-          <div className="mkt-mock-camera">📷 촬영 · 갤러리</div>
-          <div className="mkt-mock-phone-grid">
-            <div className="shot on" />
-            <div className="shot on" />
-            <div className="shot" />
-          </div>
-        </MobileApp>
-      );
+      return <ReceiptGlassMockup variant="capture" interactive={false} />;
     case "receipt-pdf":
-      return (
-        <MobileApp title="ReceiptToPDF">
-          <div className="mkt-mock-pdf">A4 PDF · 3페이지</div>
-          <DarkBtn primary>다운로드</DarkBtn>
-        </MobileApp>
-      );
+      return <ReceiptGlassMockup variant="pdf" interactive={false} />;
     default:
       return <DarkApp title="Program">화면 미리보기</DarkApp>;
   }

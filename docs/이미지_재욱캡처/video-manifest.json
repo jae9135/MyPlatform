@@ -1,0 +1,51 @@
+{
+  "generated_at": "2026-08-27T08:15:08.046075+00:00",
+  "source_dir": "C:\\Mywork\\MyPlatform-2.0\\docs\\이미지_재욱캡처",
+  "slides": [
+    {
+      "file": "메인.jpg",
+      "caption": "프로젝트 자동화 Platform"
+    },
+    {
+      "file": "도구모음메인.jpg",
+      "caption": "베타 프로그램 · 도구 모음"
+    },
+    {
+      "file": "소스코드보안진단.jpg",
+      "caption": "소스코드·보안 진단"
+    },
+    {
+      "file": "웹품질진단.jpg",
+      "caption": "웹 품질 진단"
+    },
+    {
+      "file": "DB표준점검도구.jpg",
+      "caption": "DB 표준 점검"
+    },
+    {
+      "file": "DB관리.jpg",
+      "caption": "DBManager"
+    },
+    {
+      "file": "ER모델러.jpg",
+      "caption": "ER Modeler"
+    },
+    {
+      "file": "산출물관리.jpg",
+      "caption": "DeliverableManager"
+    },
+    {
+      "file": "마이간트.jpg",
+      "caption": "MyGantt"
+    }
+  ],
+  "outputs": [
+    "C:\\Mywork\\MyPlatform-2.0\\docs\\marketing-assets\\videos\\04-promo-jaewook-captures.mp4",
+    "C:\\Mywork\\MyPlatform-2.0\\docs\\이미지_재욱캡처\\프로젝트자동화Platform-화면소개.mp4"
+  ],
+  "path": "C:\\Mywork\\MyPlatform-2.0\\docs\\marketing-assets\\videos\\04-promo-jaewook-captures.mp4",
+  "frames": 1080,
+  "duration_sec": 36.0,
+  "bytes": 6347416,
+  "mb": 6.05
+}

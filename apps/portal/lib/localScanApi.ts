@@ -4,6 +4,7 @@ import { API_BASE } from "@/lib/apiBase";
 
 const FETCH_TIMEOUT_MS = 20000;
 const ENV_FETCH_TIMEOUT_MS = 60000;
+const ENV_FETCH_TIMEOUT_LOCAL_MS = 12000;
 const JOB_POLL_TIMEOUT_MS = 45000;
 const MULTIPART_UPLOAD_TIMEOUT_MS = 180000;
 const ENV_FETCH_RETRIES = 2;
@@ -79,7 +80,8 @@ export async function fetchScanApi(
 
 /** Environment probe — Render cold start / busy during scan. */
 export async function fetchScanEnvApi(apiPath: string, init?: RequestInit): Promise<Response> {
-  return fetchScanApi(apiPath, init, ENV_FETCH_TIMEOUT_MS);
+  const timeoutMs = isLocalPortalHost() ? ENV_FETCH_TIMEOUT_LOCAL_MS : ENV_FETCH_TIMEOUT_MS;
+  return fetchScanApi(apiPath, init, timeoutMs);
 }
 
 export async function fetchScanEnvWithRetry(
@@ -120,7 +122,7 @@ export function wrapScanFetchError(e: unknown, opts?: { scanBusy?: boolean; envP
     if (opts?.envProbe && timedOut) {
       if (isLocalPortalHost()) {
         return new Error(
-          "환경 API 응답 지연 — API(start-local-scan.bat) 실행 여부를 확인한 뒤 「환경 다시 확인」을 누르세요.",
+          "환경 API 응답 지연 — .\\scripts\\start-api-source-scan.ps1 실행 여부를 확인한 뒤 「환경 다시 확인」을 누르세요.",
         );
       }
       return new Error(

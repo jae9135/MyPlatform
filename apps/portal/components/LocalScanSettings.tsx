@@ -1,9 +1,19 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { isLocalPortalHost } from "@/lib/localScanApi";
 
 export function EnvSourceBadge() {
-  const isLocal = isLocalPortalHost();
+  const [isLocal, setIsLocal] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    setIsLocal(isLocalPortalHost());
+  }, []);
+
+  if (isLocal === null) {
+    return <span className="env-source-badge">API 연결 확인 중…</span>;
+  }
+
   return (
     <span className={`env-source-badge ${isLocal ? "local" : "cloud"}`}>
       {isLocal ? "로컬 API (프록시)" : "Render · Vercel 프록시"}
@@ -23,7 +33,14 @@ export function EnvToolsSkeleton() {
 
 /** Shown on deployed portal when ZIP upload is available — local dev uses proxy to PC API. */
 export function CloudLargeZipHint() {
-  if (isLocalPortalHost()) return null;
+  const [isLocal, setIsLocal] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    setIsLocal(isLocalPortalHost());
+  }, []);
+
+  if (isLocal === null || isLocal) return null;
+
   return (
     <p className="hint cloud-zip-hint">
       <strong>대용량 ZIP(약 4MB 초과)</strong>은 Render 업로드·메모리 한계로 실패할 수 있습니다. PC에서{" "}

@@ -1,0 +1,179 @@
+/* 가격/라이선스 섹션 스타일 */
+
+.mkt-pricing-section {
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+  border-top: 1px solid var(--mkt-line);
+}
+
+.mkt-pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  margin-bottom: 40px;
+}
+
+.mkt-pricing-card {
+  position: relative;
+  background: #fff;
+  border: 2px solid var(--mkt-line);
+  border-radius: 16px;
+  padding: 32px 28px;
+  transition: all 0.3s ease;
+}
+
+.mkt-pricing-card:hover {
+  box-shadow: 0 12px 32px rgba(37, 99, 235, 0.12);
+  transform: translateY(-4px);
+}
+
+.mkt-pricing-card.highlight {
+  border-color: var(--mkt-accent);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.15);
+}
+
+.mkt-pricing-card.highlight::before {
+  content: "";
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  height: 6px;
+  background: linear-gradient(90deg, #2563eb, #1d4ed8);
+  border-radius: 16px 16px 0 0;
+}
+
+.mkt-pricing-card.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.mkt-pricing-badge {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mkt-pricing-card.disabled .mkt-pricing-badge {
+  background: #94a3b8;
+}
+
+.mkt-pricing-header {
+  margin-bottom: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--mkt-line);
+}
+
+.mkt-pricing-name {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--mkt-text);
+  margin: 0 0 12px;
+}
+
+.mkt-pricing-price {
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--mkt-accent);
+  margin-bottom: 8px;
+  line-height: 1.2;
+}
+
+.mkt-pricing-period {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--mkt-text-dim);
+}
+
+.mkt-pricing-desc {
+  margin: 0;
+  font-size: 14px;
+  color: var(--mkt-text-dim);
+  line-height: 1.6;
+}
+
+.mkt-pricing-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mkt-pricing-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 15px;
+  color: var(--mkt-text-dim);
+  line-height: 1.5;
+}
+
+.mkt-pricing-check {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #dbeafe;
+  color: var(--mkt-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mkt-btn-block {
+  width: 100%;
+  text-align: center;
+}
+
+.mkt-btn-disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.mkt-pricing-note {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px;
+  background: #f8fafc;
+  border: 1px solid var(--mkt-line);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.mkt-pricing-note p {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--mkt-text-dim);
+  line-height: 1.6;
+}
+
+.mkt-pricing-note p:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 768px) {
+  .mkt-pricing-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mkt-pricing-card {
+    padding: 24px 20px;
+  }
+
+  .mkt-pricing-price {
+    font-size: 30px;
+  }
+}

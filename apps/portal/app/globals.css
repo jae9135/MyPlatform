@@ -1471,3 +1471,298 @@ input[type="text"] {
   overflow-x: auto;
   white-space: pre;
 }
+
+/* --- Performance test page --- */
+.perf-page .hero {
+  margin-bottom: 1.25rem;
+}
+
+.perf-page .hero h1 {
+  margin-bottom: 0.35rem;
+}
+
+.perf-page .hero-lead {
+  margin: 0;
+  color: var(--muted);
+  max-width: 52rem;
+  line-height: 1.55;
+}
+
+.perf-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.perf-badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(79, 209, 232, 0.08);
+  color: var(--accent);
+}
+
+.perf-env-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.perf-env-head h2 {
+  margin: 0;
+}
+
+.perf-env-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.perf-env-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.perf-env-card.ok {
+  border-color: rgba(62, 207, 142, 0.4);
+  background: rgba(62, 207, 142, 0.06);
+}
+
+.perf-env-card.warn {
+  border-color: rgba(240, 180, 41, 0.4);
+  background: rgba(240, 180, 41, 0.06);
+}
+
+.perf-env-card-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.perf-env-card-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.perf-setup-guide {
+  margin-top: 4px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(240, 180, 41, 0.35);
+  background: rgba(240, 180, 41, 0.06);
+}
+
+.perf-setup-guide.ready {
+  border-color: rgba(62, 207, 142, 0.35);
+  background: rgba(62, 207, 142, 0.06);
+}
+
+.perf-setup-guide h3 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+}
+
+.perf-setup-steps {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.perf-setup-steps li {
+  margin-bottom: 8px;
+}
+
+.perf-setup-steps li:last-child {
+  margin-bottom: 0;
+}
+
+.perf-setup-steps code {
+  font-size: 0.82rem;
+}
+
+.perf-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+@media (max-width: 720px) {
+  .perf-settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.perf-settings-grid .source-scan-field-full {
+  grid-column: 1 / -1;
+}
+
+.perf-section-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 16px 0;
+  opacity: 0.7;
+}
+
+.perf-scenario-panel {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.perf-scenario-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.perf-scenario-panel-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.perf-options-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin-top: 12px;
+}
+
+.perf-options-row .check-row {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.perf-option-help {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.perf-option-help p {
+  margin: 0 0 8px;
+}
+
+.perf-option-help p:last-child {
+  margin-bottom: 0;
+}
+
+.perf-result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 4px;
+}
+
+.perf-result-head h2 {
+  margin: 0;
+}
+
+.perf-export-row {
+  flex-wrap: wrap;
+}
+
+.perf-result-meta {
+  margin: 0 0 14px;
+}
+
+.perf-run-block {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+
+.perf-run-block .btn.primary {
+  min-width: 10rem;
+}
+
+.perf-run-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.perf-live-stats {
+  margin: 10px 0 0;
+  font-size: 0.88rem;
+  color: var(--accent);
+  font-family: ui-monospace, monospace;
+}
+
+.perf-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.perf-metric {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.perf-metric-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.perf-metric-value {
+  margin-top: 4px;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.perf-metric-value.good {
+  color: var(--ok);
+}
+
+.perf-metric-value.warn {
+  color: var(--warn);
+}
+
+.perf-history-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.perf-env-loading {
+  margin: 10px 0 0;
+  line-height: 1.5;
+}
+
+.perf-env-loading code {
+  font-size: 0.82rem;
+}

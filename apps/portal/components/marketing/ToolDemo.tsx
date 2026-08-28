@@ -305,26 +305,8 @@ function runStd(text: string) {
     });
 }
 
+import { ReceiptGlassMockup } from "./ReceiptGlassMockup";
+
 export function ReceiptPhoneDemo() {
-  const [show, setShow] = useState(false);
-  return (
-    <div className="mkt-phone">
-      <div className="mkt-phone-shots">
-        <div />
-        <div />
-        <div />
-      </div>
-      <button
-        type="button"
-        className="mkt-phone-btn"
-        onClick={() => {
-          setShow(true);
-          setTimeout(() => setShow(false), 2200);
-        }}
-      >
-        PDF 만들기
-      </button>
-      <div className={`mkt-toast${show ? " show" : ""}`}>✓ 3페이지 PDF 생성 완료</div>
-    </div>
-  );
+  return <ReceiptGlassMockup variant="home" interactive showSuccess />;
 }

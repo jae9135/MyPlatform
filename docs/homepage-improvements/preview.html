@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>홈페이지 개선안 미리보기</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --mkt-accent: #2563eb;
+      --mkt-text: #0f172a;
+      --mkt-text-dim: #475569;
+      --mkt-line: #e2e8f0;
+      --mkt-line-strong: #cbd5e1;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: var(--mkt-text);
+      line-height: 1.6;
+      background: #fff;
+    }
+
+    .preview-header {
+      background: linear-gradient(135deg, #1e40af, #2563eb);
+      color: white;
+      padding: 40px 24px;
+      text-align: center;
+    }
+
+    .preview-header h1 {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    .preview-header p {
+      opacity: 0.9;
+      font-size: 16px;
+    }
+
+    .preview-nav {
+      position: sticky;
+      top: 0;
+      background: white;
+      border-bottom: 2px solid var(--mkt-line);
+      padding: 16px 24px;
+      display: flex;
+      gap: 24px;
+      justify-content: center;
+      flex-wrap: wrap;
+      z-index: 100;
+    }
+
+    .preview-nav a {
+      color: var(--mkt-text-dim);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 14px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      transition: all 0.2s;
+    }
+
+    .preview-nav a:hover {
+      color: var(--mkt-accent);
+      background: #eff6ff;
+    }
+
+    .preview-section {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 60px 24px;
+      border-bottom: 1px solid var(--mkt-line);
+    }
+
+    .preview-section h2 {
+      font-size: 28px;
+      margin-bottom: 12px;
+      color: var(--mkt-accent);
+    }
+
+    .preview-section .subtitle {
+      font-size: 16px;
+      color: var(--mkt-text-dim);
+      margin-bottom: 32px;
+    }
+
+    .variant-grid {
+      display: grid;
+      gap: 32px;
+    }
+
+    .variant-card {
+      border: 2px solid var(--mkt-line);
+      border-radius: 12px;
+      padding: 24px;
+      background: #fafbfc;
+    }
+
+    .variant-card h3 {
+      font-size: 20px;
+      margin-bottom: 8px;
+    }
+
+    .variant-card .desc {
+      color: var(--mkt-text-dim);
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+
+    .demo-box {
+      background: white;
+      border: 1px solid var(--mkt-line);
+      border-radius: 8px;
+      padding: 24px;
+      margin-top: 16px;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 12px 24px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      transition: all 0.3s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: white;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+      margin-top: 24px;
+    }
+
+    .feature-item {
+      background: white;
+      border: 1px solid var(--mkt-line);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .feature-item h4 {
+      font-size: 16px;
+      margin-bottom: 8px;
+    }
+
+    .feature-item p {
+      font-size: 14px;
+      color: var(--mkt-text-dim);
+    }
+
+    .code-preview {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 16px;
+      border-radius: 8px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      overflow-x: auto;
+      margin-top: 16px;
+    }
+
+    .footer-note {
+      text-align: center;
+      padding: 40px 24px;
+      background: #f8fafc;
+      color: var(--mkt-text-dim);
+      font-size: 14px;
+    }
+
+    @media (max-width: 768px) {
+      .preview-nav {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .feature-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-header">
+    <h1>🎨 홈페이지 개선안 미리보기</h1>
+    <p>현재 홈페이지는 수정하지 않고, 개선 제안만 별도로 작성했습니다</p>
+  </div>
+
+  <nav class="preview-nav">
+    <a href="#cta">CTA 개선</a>
+    <a href="#faq">FAQ 섹션</a>
+    <a href="#testimonial">고객 후기</a>
+    <a href="#pricing">가격 안내</a>
+  </nav>
+
+  <!-- CTA 개선안 -->
+  <section id="cta" class="preview-section">
+    <h2>1. CTA 개선안 (히어로 섹션)</h2>
+    <p class="subtitle">현재 3개 버튼 → 주요 액션 1개 강조</p>
+
+    <div class="variant-grid">
+      <div class="variant-card">
+        <h3>✨ Variant 1: 메인 CTA 강조</h3>
+        <p class="desc">큰 버튼 1개 + 작은 텍스트 링크 2개</p>
+        <div class="demo-box">
+          <a href="#" class="btn btn-primary" style="font-size: 18px; padding: 16px 32px;">
+            8가지 도구 무료 체험 →
+          </a>
+          <div style="margin-top: 16px; font-size: 15px; color: var(--mkt-text-dim);">
+            <a href="#" style="color: inherit; text-decoration: none;">맞춤 개발 알아보기</a>
+            <span style="margin: 0 12px;">·</span>
+            <a href="#" style="color: inherit; text-decoration: none;">베타 프로그램</a>
+          </div>
+        </div>
+        <div class="code-preview">
+&lt;a class="mkt-btn-primary-large" href="#tools"&gt;
+  8가지 도구 무료 체험 →
+&lt;/a&gt;</div>
+      </div>
+
+      <div class="variant-card">
+        <h3>✨ Variant 2: 2단 구조</h3>
+        <p class="desc">주요 버튼(2줄 텍스트) + 보조 버튼 2개</p>
+        <div class="demo-box">
+          <a href="#" class="btn btn-primary" style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+            <span style="font-size: 18px;">8가지 도구 체험하기</span>
+            <span style="font-size: 13px; opacity: 0.9;">무료 · 회원가입 불필요</span>
+          </a>
+          <div style="margin-top: 16px; display: flex; gap: 10px;">
+            <a href="#" class="btn" style="border: 2px solid var(--mkt-accent); color: var(--mkt-accent); background: white;">맞춤 상담 신청</a>
+            <a href="#" class="btn" style="background: #f1f5f9; color: var(--mkt-text-dim);">베타 로그인</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="variant-card">
+        <h3>✨ Variant 3: 카드형</h3>
+        <p class="desc">아이콘 + 텍스트 카드 3개 (첫 번째 강조)</p>
+        <div class="demo-box">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 14px; background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 2px solid var(--mkt-accent); border-radius: 12px;">
+              <span style="font-size: 28px;">🚀</span>
+              <div>
+                <div style="font-weight: 700; font-size: 15px;">무료 체험 시작</div>
+                <div style="font-size: 12px; color: var(--mkt-text-dim);">8가지 도구 바로 사용</div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; padding: 14px; background: white; border: 2px solid var(--mkt-line); border-radius: 12px;">
+              <span style="font-size: 28px;">💬</span>
+              <div>
+                <div style="font-weight: 700; font-size: 15px;">맞춤 상담</div>
+                <div style="font-size: 12px; color: var(--mkt-text-dim);">프로젝트에 맞게 조정</div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; padding: 14px; background: white; border: 2px solid var(--mkt-line); border-radius: 12px;">
+              <span style="font-size: 28px;">🔐</span>
+              <div>
+                <div style="font-weight: 700; font-size: 15px;">베타 프로그램</div>
+                <div style="font-size: 12px; color: var(--mkt-text-dim);">로그인 후 전체 이용</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ 섹션 -->
+  <section id="faq" class="preview-section" style="background: linear-gradient(180deg, #f8fafc, #fff);">
+    <h2>2. FAQ 섹션</h2>
+    <p class="subtitle">아코디언 UI로 자주 묻는 질문 6개</p>
+
+    <div class="feature-grid">
+      <div class="feature-item">
+        <h4>✅ 특징</h4>
+        <p>• Q/A 배지 아이콘<br>• 클릭 시 확장/축소<br>• 슬라이드 애니메이션<br>• 문의하기 링크</p>
+      </div>
+      <div class="feature-item">
+        <h4>📍 추천 위치</h4>
+        <p>#workflow와 #customize 사이</p>
+      </div>
+      <div class="feature-item">
+        <h4>💬 질문 예시</h4>
+        <p>• 베타 프로그램 무료?<br>• 기술 스택<br>• 온프레미스 설치<br>• 지원 언어</p>
+      </div>
+    </div>
+
+    <div class="demo-box" style="max-width: 800px; margin: 24px auto 0;">
+      <div style="border: 1px solid var(--mkt-line); border-radius: 12px; overflow: hidden; background: white;">
+        <button style="width: 100%; display: flex; align-items: center; gap: 12px; padding: 18px; background: none; border: none; cursor: pointer; text-align: left;">
+          <span style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; font-weight: 700; font-size: 13px;">Q</span>
+          <span style="flex: 1; font-weight: 600;">베타 프로그램은 무료인가요?</span>
+          <span style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: #f1f5f9; font-size: 20px;">+</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="code-preview" style="max-width: 800px; margin: 16px auto 0;">
+파일: docs/homepage-improvements/faq-section.tsx
+위치: MarketingHome.tsx의 #workflow 다음</div>
+  </section>
+
+  <!-- 고객 후기 -->
+  <section id="testimonial" class="preview-section">
+    <h2>3. 고객 후기 / 사례</h2>
+    <p class="subtitle">3개 카드 (금융, 공공, 제조) + 태그</p>
+
+    <div class="feature-grid">
+      <div class="feature-item">
+        <h4>A 금융계열사</h4>
+        <p style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--mkt-line);">
+          "소스코드 진단 도구로 레거시 Java 프로젝트의 보안 취약점 300여 건을 발견했습니다."
+        </p>
+        <div style="margin-top: 12px; display: flex; gap: 8px;">
+          <span style="padding: 4px 10px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; font-size: 11px; font-weight: 600; color: var(--mkt-accent);">소스코드 진단</span>
+          <span style="padding: 4px 10px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; font-size: 11px; font-weight: 600; color: var(--mkt-accent);">보안</span>
+        </div>
+      </div>
+
+      <div class="feature-item">
+        <h4>B 공공기관</h4>
+        <p style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--mkt-line);">
+          "Excel 하나로 DB 표준 검증, ERD, Supabase 반영까지 자동화. 3일 → 1시간 단축."
+        </p>
+        <div style="margin-top: 12px; display: flex; gap: 8px;">
+          <span style="padding: 4px 10px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; font-size: 11px; font-weight: 600; color: var(--mkt-accent);">DB 워크플로</span>
+        </div>
+      </div>
+
+      <div class="feature-item">
+        <h4>C 제조사</h4>
+        <p style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--mkt-line);">
+          "웹 품질 진단으로 사내 포털 개선. Lighthouse 점수 평균 30점 상승."
+        </p>
+        <div style="margin-top: 12px; display: flex; gap: 8px;">
+          <span style="padding: 4px 10px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; font-size: 11px; font-weight: 600; color: var(--mkt-accent);">웹 품질</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="code-preview">
+파일: docs/homepage-improvements/testimonial-section.tsx
+위치: #tools 섹션 다음 (신뢰도 강화 목적)</div>
+  </section>
+
+  <!-- 가격 안내 -->
+  <section id="pricing" class="preview-section" style="background: linear-gradient(180deg, #fff, #f8fafc);">
+    <h2>4. 가격 & 라이선스 안내</h2>
+    <p class="subtitle">3개 플랜 (베타 체험, 기업 라이선스, SaaS 구독)</p>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; margin-top: 24px;">
+      <div style="background: white; border: 2px solid var(--mkt-line); border-radius: 16px; padding: 28px;">
+        <div style="position: relative; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--mkt-line);">
+          <div style="position: absolute; top: 0; right: 0; padding: 4px 10px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; font-size: 11px; font-weight: 700; border-radius: 6px;">무료</div>
+          <h3 style="font-size: 20px; margin-bottom: 8px;">베타 체험</h3>
+          <div style="font-size: 32px; font-weight: 800; color: var(--mkt-accent); margin-bottom: 8px;">₩0</div>
+          <p style="font-size: 13px; color: var(--mkt-text-dim);">8가지 도구를 무료로 체험</p>
+        </div>
+        <a href="#" class="btn" style="width: 100%; text-align: center; background: #f1f5f9; color: var(--mkt-text-dim);">무료 체험</a>
+      </div>
+
+      <div style="background: white; border: 2px solid var(--mkt-accent); border-radius: 16px; padding: 28px; position: relative; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.15);">
+        <div style="position: absolute; top: -2px; left: -2px; right: -2px; height: 6px; background: linear-gradient(90deg, #2563eb, #1d4ed8); border-radius: 16px 16px 0 0;"></div>
+        <div style="position: relative; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--mkt-line);">
+          <div style="position: absolute; top: 0; right: 0; padding: 4px 10px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; font-size: 11px; font-weight: 700; border-radius: 6px;">추천</div>
+          <h3 style="font-size: 20px; margin-bottom: 8px;">기업 라이선스</h3>
+          <div style="font-size: 32px; font-weight: 800; color: var(--mkt-accent); margin-bottom: 8px;">견적 문의</div>
+          <p style="font-size: 13px; color: var(--mkt-text-dim);">맞춤 개발 + 라이선스</p>
+        </div>
+        <a href="#" class="btn btn-primary" style="width: 100%; text-align: center;">상담 신청</a>
+      </div>
+
+      <div style="background: white; border: 2px solid var(--mkt-line); border-radius: 16px; padding: 28px; opacity: 0.6;">
+        <div style="position: relative; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--mkt-line);">
+          <div style="position: absolute; top: 0; right: 0; padding: 4px 10px; background: #94a3b8; color: white; font-size: 11px; font-weight: 700; border-radius: 6px;">준비중</div>
+          <h3 style="font-size: 20px; margin-bottom: 8px;">SaaS 구독</h3>
+          <div style="font-size: 32px; font-weight: 800; color: var(--mkt-accent); margin-bottom: 8px;">미정</div>
+          <p style="font-size: 13px; color: var(--mkt-text-dim);">2026년 하반기 출시 예정</p>
+        </div>
+        <a href="#" class="btn" style="width: 100%; text-align: center; background: #e2e8f0; color: #94a3b8; cursor: not-allowed;">출시 알림 받기</a>
+      </div>
+    </div>
+
+    <div class="code-preview">
+파일: docs/homepage-improvements/pricing-section.tsx
+위치: #customize 다음 또는 별도 /pricing 페이지</div>
+  </section>
+
+  <div class="footer-note">
+    <p><strong>📁 위치:</strong> <code>docs/homepage-improvements/</code></p>
+    <p style="margin-top: 8px;">각 파일(*.tsx, *.css)을 검토 후 <code>apps/portal/components/marketing/</code>로 이동하여 적용</p>
+    <p style="margin-top: 16px; color: var(--mkt-accent); font-weight: 600;">
+      현재 홈페이지는 수정되지 않았습니다 ✅
+    </p>
+  </div>
+</body>
+</html>

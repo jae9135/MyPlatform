@@ -2,6 +2,8 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AccessCodeAdmin } from "@/components/admin/AccessCodeAdmin";
+import { ContactInquiriesAdmin } from "@/components/admin/ContactInquiriesAdmin";
+import { VisitStatsAdmin } from "@/components/admin/VisitStatsAdmin";
 import { isAdminAuthed, isAdminConfigured } from "@/lib/admin-auth";
 import { isSupabaseAdminConfigured } from "@/lib/supabaseAdmin";
 import "./admin.css";
@@ -19,8 +21,8 @@ export default async function AdminPage() {
     <main className="admin-main">
       <header className="admin-header">
         <div>
-          <h1>액세스 코드 관리</h1>
-          <p className="admin-hint">30일 · 1일 · 1회 로그인 코드를 발급·폐기합니다.</p>
+          <h1>포털 관리</h1>
+          <p className="admin-hint">액세스 코드 · 문의 · 홈 방문 통계</p>
         </div>
         <form action="/api/admin/logout" method="post">
           <button className="btn ghost" type="submit">
@@ -37,12 +39,18 @@ export default async function AdminPage() {
 
       {!supabaseOk ? (
         <p className="msg err">
-          Supabase service role가 필요합니다. <code>SUPABASE_SERVICE_ROLE_KEY</code>와 마이그레이션{" "}
-          <code>20260826100000_portal_access_codes.sql</code>을 적용하세요.
+          Supabase service role가 필요합니다. <code>SUPABASE_SERVICE_ROLE_KEY</code>와 마이그레이션(
+          <code>contact_inquiries</code>, <code>portal_visit_daily</code>)을 적용하세요.
         </p>
       ) : null}
 
-      {adminOk && supabaseOk ? <AccessCodeAdmin /> : null}
+      {adminOk && supabaseOk ? (
+        <>
+          <VisitStatsAdmin />
+          <ContactInquiriesAdmin />
+          <AccessCodeAdmin />
+        </>
+      ) : null}
 
       <p style={{ marginTop: 24 }}>
         <Link href="/">← 공개 홈</Link>

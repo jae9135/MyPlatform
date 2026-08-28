@@ -7,6 +7,8 @@ export function isPublicPath(pathname: string): boolean {
   if (pathname.startsWith("/demo")) return true;
   if (pathname === "/customize") return true;
   if (pathname === "/contact") return true;
+  if (pathname === "/api/contact") return true;
+  if (pathname === "/api/visit") return true;
   if (pathname.startsWith("/receipt-to-pdf")) return true;
   return false;
 }

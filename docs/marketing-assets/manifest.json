@@ -1,0 +1,168 @@
+{
+  "generated_at": "2026-08-27T07:49:17.630453+00:00",
+  "brand": "프로젝트 자동화 Platform",
+  "deterministic": true,
+  "note": "동일 스크립트·설정으로 재실행하면 같은 결과입니다. hero-ai-base.png 또는 TOOLS/BRAND 상수를 바꾸면 달라집니다.",
+  "images": [
+    {
+      "path": "docs\\marketing-assets\\images\\01-hero-main.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 165000
+    },
+    {
+      "path": "docs\\marketing-assets\\images\\02-hero-medium.jpg",
+      "width": 1200,
+      "height": 675,
+      "bytes": 98352
+    },
+    {
+      "path": "docs\\marketing-assets\\images\\03-hero-minimum.jpg",
+      "width": 652,
+      "height": 366,
+      "bytes": 50405
+    },
+    {
+      "path": "docs\\marketing-assets\\images\\04-tools-overview.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 39012
+    },
+    {
+      "path": "docs\\marketing-assets\\images\\05-workflow.jpg",
+      "width": 1600,
+      "height": 900,
+      "bytes": 69804
+    },
+    {
+      "path": "docs\\marketing-assets\\images\\06-quality-category.jpg",
+      "width": 1920,
+      "height": 900,
+      "bytes": 69824
+    },
+    {
+      "path": "docs\\marketing-assets\\images\\07-db-pm-category.jpg",
+      "width": 1920,
+      "height": 900,
+      "bytes": 87016
+    },
+    {
+      "path": "docs\\marketing-assets\\images\\08-cta-contact.jpg",
+      "width": 1200,
+      "height": 630,
+      "bytes": 38969
+    },
+    {
+      "path": "docs\\marketing-assets\\images\\09-platform-badge.png",
+      "width": 800,
+      "height": 800,
+      "bytes": 14026
+    },
+    {
+      "path": "docs\\marketing-assets\\images\\10-tools-grid-wide.jpg",
+      "width": 2000,
+      "height": 1125,
+      "bytes": 85299
+    },
+    {
+      "path": "docs\\marketing-assets\\images\\11-animated-banner.gif",
+      "width": 652,
+      "height": 366,
+      "bytes": 144656
+    }
+  ],
+  "app_home_images": [
+    {
+      "app_id": "source-scan",
+      "title": "소스코드·보안 진단",
+      "path": "docs\\marketing-assets\\images\\apps\\app-01-source-scan-home.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 56955
+    },
+    {
+      "app_id": "web-quality",
+      "title": "웹 품질 진단",
+      "path": "docs\\marketing-assets\\images\\apps\\app-02-web-quality-home.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 56619
+    },
+    {
+      "app_id": "perf-test",
+      "title": "성능 진단",
+      "path": "docs\\marketing-assets\\images\\apps\\app-03-perf-test-home.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 59134
+    },
+    {
+      "app_id": "chk-db-std",
+      "title": "DB 표준 점검",
+      "path": "docs\\marketing-assets\\images\\apps\\app-04-chk-db-std-home.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 51692
+    },
+    {
+      "app_id": "db-manager",
+      "title": "DBManager",
+      "path": "docs\\marketing-assets\\images\\apps\\app-05-db-manager-home.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 48930
+    },
+    {
+      "app_id": "er-modeler",
+      "title": "ER Modeler",
+      "path": "docs\\marketing-assets\\images\\apps\\app-06-er-modeler-home.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 51129
+    },
+    {
+      "app_id": "deliverable-manager",
+      "title": "DeliverableManager",
+      "path": "docs\\marketing-assets\\images\\apps\\app-07-deliverable-manager-home.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 45700
+    },
+    {
+      "app_id": "my-gantt",
+      "title": "MyGantt",
+      "path": "docs\\marketing-assets\\images\\apps\\app-08-my-gantt-home.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 48509
+    }
+  ],
+  "videos": [
+    {
+      "path": "docs\\marketing-assets\\videos\\01-promo-overview.mp4",
+      "width": 1920,
+      "height": 1088,
+      "frames": 1560,
+      "duration_sec": 52.0,
+      "bytes": 5503777
+    },
+    {
+      "path": "docs\\marketing-assets\\videos\\02-promo-tools.mp4",
+      "width": 1920,
+      "height": 1088,
+      "frames": 1050,
+      "duration_sec": 35.0,
+      "bytes": 1485466
+    },
+    {
+      "path": "docs\\marketing-assets\\videos\\03-promo-app-screens.mp4",
+      "width": 1920,
+      "height": 1088,
+      "frames": 945,
+      "duration_sec": 31.5,
+      "bytes": 1209242
+    }
+  ],
+  "total_video_bytes": 8198485,
+  "total_video_mb": 7.82
+}

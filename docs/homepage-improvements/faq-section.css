@@ -1,0 +1,159 @@
+/* FAQ 섹션 스타일 */
+
+.mkt-faq-section {
+  background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
+  border-top: 1px solid var(--mkt-line);
+}
+
+.mkt-faq-list {
+  max-width: 840px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mkt-faq-item {
+  background: #fff;
+  border: 1px solid var(--mkt-line);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: box-shadow 0.2s ease;
+}
+
+.mkt-faq-item:hover {
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.08);
+}
+
+.mkt-faq-q {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 20px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.mkt-faq-q:hover {
+  background: #f8fafc;
+}
+
+.mkt-faq-q.open {
+  border-bottom: 1px solid var(--mkt-line);
+}
+
+.mkt-faq-icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.mkt-faq-icon-a {
+  background: linear-gradient(135deg, #10b981, #059669);
+}
+
+.mkt-faq-question {
+  flex: 1;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--mkt-text);
+  line-height: 1.5;
+}
+
+.mkt-faq-toggle {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #f1f5f9;
+  color: var(--mkt-text-dim);
+  font-size: 20px;
+  font-weight: 300;
+  transition: all 0.2s ease;
+}
+
+.mkt-faq-q:hover .mkt-faq-toggle {
+  background: #e2e8f0;
+  transform: scale(1.1);
+}
+
+.mkt-faq-a {
+  display: flex;
+  gap: 12px;
+  padding: 18px 20px;
+  background: #f8fafc;
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mkt-faq-a p {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  color: var(--mkt-text-dim);
+  line-height: 1.65;
+}
+
+.mkt-faq-more {
+  text-align: center;
+  margin-top: 32px;
+  font-size: 15px;
+  color: var(--mkt-text-dim);
+}
+
+.mkt-link-primary {
+  color: var(--mkt-accent);
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.mkt-link-primary:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .mkt-faq-q {
+    padding: 14px 16px;
+  }
+
+  .mkt-faq-a {
+    padding: 14px 16px;
+  }
+
+  .mkt-faq-question {
+    font-size: 15px;
+  }
+
+  .mkt-faq-icon {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+  }
+}

@@ -1,0 +1,123 @@
+/* 고객 후기/사례 섹션 스타일 */
+
+.mkt-testimonial-section {
+  background: #fff;
+  border-block: 1px solid var(--mkt-line);
+}
+
+.mkt-testimonial-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.mkt-testimonial-card {
+  background: linear-gradient(135deg, #f8fafc 0%, #fff 100%);
+  border: 1px solid var(--mkt-line);
+  border-radius: 16px;
+  padding: 24px;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.mkt-testimonial-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: linear-gradient(180deg, #2563eb, #1d4ed8);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.mkt-testimonial-card:hover {
+  box-shadow: 0 12px 32px rgba(37, 99, 235, 0.12);
+  transform: translateY(-4px);
+  border-color: #2563eb;
+}
+
+.mkt-testimonial-card:hover::before {
+  opacity: 1;
+}
+
+.mkt-testimonial-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.mkt-testimonial-company {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--mkt-text);
+  margin-bottom: 4px;
+}
+
+.mkt-testimonial-meta {
+  font-size: 13px;
+  color: var(--mkt-text-dim);
+}
+
+.mkt-testimonial-quote-icon {
+  font-size: 48px;
+  line-height: 1;
+  color: #dbeafe;
+  font-family: Georgia, serif;
+  font-weight: 700;
+}
+
+.mkt-testimonial-quote {
+  margin: 0 0 16px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--mkt-text-dim);
+  font-style: normal;
+}
+
+.mkt-testimonial-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mkt-testimonial-tag {
+  display: inline-block;
+  padding: 4px 12px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2563eb;
+}
+
+.mkt-testimonial-cta {
+  text-align: center;
+  font-size: 16px;
+  color: var(--mkt-text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .mkt-testimonial-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mkt-testimonial-card {
+    padding: 20px;
+  }
+
+  .mkt-testimonial-cta {
+    flex-direction: column;
+    gap: 16px;
+  }
+}

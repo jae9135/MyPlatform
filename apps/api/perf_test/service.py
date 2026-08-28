@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 from datetime import datetime, timezone
 from typing import Any
@@ -19,6 +20,7 @@ from perf_test.job_progress import (
 )
 from perf_test.options import DEFAULT_MAX_USERS, PerfTestOptions
 from perf_test.runner import record_har_requests, run_locust_load_test
+from perf_test.subprocess_runner import run_locust_isolated
 from perf_test.scenario_urls import (
     build_requests_from_scenarios,
     fetch_scenarios,
@@ -33,12 +35,7 @@ def is_load_allowed() -> bool:
 
 
 def locust_installed() -> bool:
-    try:
-        import locust  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec("locust") is not None
 
 
 def get_environment_status() -> dict[str, Any]:
@@ -171,9 +168,9 @@ def _run_job_body(job_id: str, opts: PerfTestOptions) -> None:
 
     requests, meta = _resolve_requests(opts)
     check_cancelled(job_id)
-    update_job(job_id, pct=10, message=f"Locust 부하 시작 · {len(requests)} 요청", step_label="locust")
+    update_job(job_id, pct=10, message=f"Locust 부하 시작 · {len(requests)} URL", step_label="locust")
 
-    result = run_locust_load_test(
+    result = run_locust_isolated(
         meta["base_url"],
         requests,
         users=opts.users,
