@@ -1473,6 +1473,10 @@ input[type="text"] {
 }
 
 /* --- Performance test page --- */
+main.perf-page {
+  width: min(1280px, calc(100% - 32px));
+}
+
 .perf-page .hero {
   margin-bottom: 1.25rem;
 }
@@ -1787,4 +1791,111 @@ input[type="text"] {
 
 .perf-env-loading code {
   font-size: 0.82rem;
+}
+
+.perf-panel-compact {
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+.perf-env-actions {
+  margin-top: 8px;
+}
+
+.perf-option-oneline {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+}
+
+.perf-result-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.perf-bottom-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+  margin-top: 18px;
+  align-items: start;
+}
+
+.perf-bottom-grid > .panel {
+  margin-top: 0;
+}
+
+.perf-history-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.perf-history-panel h2 {
+  margin: 0 0 12px;
+}
+
+.perf-full-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.perf-full-table th,
+.perf-full-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perf-full-table td:nth-child(2) {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.perf-fail-hint {
+  margin: 0 0 14px;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+@media (min-width: 960px) {
+  .perf-bottom-grid {
+    grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  }
+}
+
+.perf-result-detail {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.perf-result-detail h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.perf-table-wrap {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.perf-endpoints-table .perf-endpoint-name {
+  max-width: 280px;
+  word-break: break-word;
+}
+
+.perf-metric-value-sm {
+  font-size: 1.1rem !important;
+}
+
+@media (min-width: 900px) {
+  .perf-result-head {
+    align-items: flex-start;
+  }
+
+  .perf-metrics {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
 }

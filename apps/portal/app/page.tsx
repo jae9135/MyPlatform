@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   description: HOME_SEO.description,
   openGraph: {
     title: HOME_SEO.title,
-    description: HOME_SEO.description,
+    description: HOME_SEO.ogDescription,
     images: [
       {
         url: "/marketing/og-image.jpg",
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: HOME_SEO.title,
-    description: HOME_SEO.description,
+    description: HOME_SEO.ogDescription,
     images: ["/marketing/og-image.jpg"],
   },
 };

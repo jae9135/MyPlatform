@@ -77,6 +77,35 @@ def urls_to_requests(urls: list[str], base_url: str) -> list[dict[str, Any]]:
     return requests
 
 
+def normalize_locust_requests(
+    base_url: str,
+    requests: list[dict[str, Any]],
+) -> tuple[str, list[dict[str, Any]]]:
+    """Locust host에 base path가 포함된 경우 요청 path를 상대 경로로 맞춘다."""
+    raw = (base_url or "").strip()
+    parsed = urlparse(raw if "://" in raw else f"http://{raw}")
+    base_path = (parsed.path or "").rstrip("/")
+    if base_path:
+        locust_host = f"{parsed.scheme}://{parsed.netloc}{base_path}"
+    else:
+        locust_host = f"{parsed.scheme}://{parsed.netloc}"
+
+    out: list[dict[str, Any]] = []
+    for req in requests:
+        path = str(req.get("path") or "/")
+        if base_path:
+            if path == base_path or path == f"{base_path}/":
+                path = "/"
+            elif path.startswith(base_path + "/"):
+                path = path[len(base_path) :] or "/"
+            elif path.startswith(base_path) and len(path) > len(base_path):
+                path = path[len(base_path) :] or "/"
+        if not path.startswith("/"):
+            path = f"/{path}"
+        out.append({**req, "path": path})
+    return locust_host, out
+
+
 def fetch_scenarios(
     target: str,
     *,
@@ -120,15 +149,77 @@ def select_candidates(
     return selected
 
 
+def _base_path_from_url(base_url: str) -> str:
+    host = (base_url or "").strip()
+    parsed = urlparse(host if "://" in host else f"http://{host}")
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    return path
+
+
+def _manifest_path_for_target(target: str) -> str | None:
+    if not target or target == "ipms-online":
+        return None
+    from web_quality.manifest import get_target  # type: ignore
+
+    cfg = get_target(target)
+    if not cfg:
+        return None
+    p = (cfg.get("path") or "").strip()
+    return p if p else None
+
+
+def candidate_to_request_entries(
+    candidate: dict[str, Any],
+    base_url: str,
+    fallback_path: str | None = None,
+) -> list[dict[str, Any]]:
+    urls = urls_from_candidate(candidate, base_url)
+    if urls:
+        return urls_to_requests(urls, base_url)
+    path = fallback_path or _base_path_from_url(base_url)
+    label = str(candidate.get("label") or candidate.get("state_id") or path)
+    sid = str(candidate.get("state_id") or "")
+    name = label if not sid else f"{label} [{sid}]"
+    return [{"method": "GET", "path": path, "name": name[:120]}]
+
+
+def _dedupe_requests(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for req in requests:
+        method = str(req.get("method") or "GET").upper()
+        path = str(req.get("path") or "/")
+        name = str(req.get("name") or path)[:120]
+        key = f"{method}:{path}:{name}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"method": method, "path": path, "name": name})
+    return out
+
+
 def build_requests_from_scenarios(
     scenario_payload: dict[str, Any],
     state_ids: list[str],
     base_url: str,
     manual_urls: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    urls: list[str] = list(manual_urls or [])
+    manifest_path = _manifest_path_for_target(str(scenario_payload.get("target") or ""))
+    requests: list[dict[str, Any]] = []
+
+    if manual_urls:
+        requests.extend(urls_to_requests(manual_urls, base_url))
+
     for candidate in select_candidates(scenario_payload, state_ids):
-        urls.extend(urls_from_candidate(candidate, base_url))
-    if not urls and base_url:
-        urls.append(base_url)
-    return urls_to_requests(urls, base_url), urls
+        requests.extend(
+            candidate_to_request_entries(candidate, base_url, manifest_path or _base_path_from_url(base_url))
+        )
+
+    requests = _dedupe_requests(requests)
+    if not requests and base_url:
+        requests = urls_to_requests([base_url], base_url)
+
+    url_labels = [str(r.get("name") or r.get("path") or "") for r in requests]
+    return requests, url_labels

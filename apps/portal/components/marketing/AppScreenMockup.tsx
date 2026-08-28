@@ -181,7 +181,7 @@ function renderScreen(screen: ProductScreenId) {
       return (
         <DarkApp title="성능 진단">
           <DarkPanel title="부하 설정">
-            <DarkRow label="대상" value="MyGantt (포털)" />
+            <DarkRow label="대상" value="MyGantt" />
             <DarkRow label="VU" value="5" />
             <DarkRow label="Duration" value="30초" />
             <DarkBtn primary>성능검사 실행</DarkBtn>

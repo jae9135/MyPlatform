@@ -1,11 +1,21 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { BRAND_NAME } from "@/lib/brand";
+import { HOME_SEO } from "@/lib/marketingCatalog";
 
 export const metadata: Metadata = {
-  title: BRAND_NAME,
-  description: "프로젝트 자동화 Platform — 개발·품질·DB 업무 도구 데모 및 베타 프로그램",
+  title: {
+    default: HOME_SEO.title,
+    template: `%s | ${BRAND_NAME}`,
+  },
+  description: HOME_SEO.description,
   applicationName: BRAND_NAME,
+  openGraph: {
+    title: HOME_SEO.title,
+    description: HOME_SEO.ogDescription,
+    type: "website",
+    locale: "ko_KR",
+  },
 };
 
 export const viewport: Viewport = {

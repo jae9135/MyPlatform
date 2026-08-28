@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
 
+from perf_test.scenario_urls import normalize_locust_requests
+
 
 def har_entries_to_requests(har_path: Path, base_url: str) -> list[dict[str, Any]]:
     data = json.loads(har_path.read_text(encoding="utf-8"))
@@ -103,7 +105,7 @@ def run_locust_load_test(
     if not host.startswith("http"):
         host = f"http://{host}"
 
-    req_list = list(requests)
+    host, req_list = normalize_locust_requests(host, list(requests))
 
     class PerfHttpUser(HttpUser):
         wait_time = constant(0.05)

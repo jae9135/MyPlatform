@@ -376,7 +376,7 @@ def _draw_app_body(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, app_id: st
     elif app_id == "perf-test":
         draw.text((x + 12, y), "성능 진단", fill=hex_rgb(DARK["muted"]), font=font(11))
         py = _mock_panel(draw, x + 12, y + 24, w - 24, 130, "부하 설정")
-        py = _mock_row(draw, x + 24, py, w - 48, "대상", "MyGantt (포털)")
+        py = _mock_row(draw, x + 24, py, w - 48, "대상", "MyGantt")
         py = _mock_row(draw, x + 24, py, w - 48, "VU", "5")
         py = _mock_row(draw, x + 24, py, w - 48, "Duration", "30초")
         _mock_btn(draw, x + 24, py + 4, "성능검사 실행", primary=True)

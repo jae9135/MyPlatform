@@ -27,7 +27,7 @@ const IPMS_DEFAULT_URL = "http://14.35.194.178:12000/ipms.online/";
 
 const TARGET_OPTIONS = [
   { id: "manual", label: "URL 직접 입력" },
-  { id: "my-gantt", label: "MyGantt (포털)" },
+  { id: "my-gantt", label: "MyGantt" },
   { id: "er-modeler", label: "ER Modeler" },
   { id: "db-manager", label: "DBManager" },
   { id: "chk-db-std", label: "DB 표준 점검" },
@@ -63,6 +63,7 @@ type PerfEndpoint = {
   num_failures?: number;
   avg_ms: number;
   p95_ms: number;
+  pending?: boolean;
 };
 
 type RequestPreview = {
@@ -434,6 +435,22 @@ export default function PerfTestPage() {
     return src || "—";
   }, [result?.request_source]);
 
+  const endpointRows = useMemo(() => {
+    if (result?.endpoints?.length) return result.endpoints;
+    if (result?.requests_preview?.length) {
+      return result.requests_preview.map((r) => ({
+        name: r.name || r.path || "—",
+        method: r.method || "GET",
+        num_requests: 0,
+        num_failures: 0,
+        avg_ms: 0,
+        p95_ms: 0,
+        pending: true,
+      }));
+    }
+    return [];
+  }, [result?.endpoints, result?.requests_preview]);
+
   function buildReportData(): PerfReportData | null {
     if (!result?.summary) return null;
     return {
@@ -468,7 +485,7 @@ export default function PerfTestPage() {
           </div>
         </header>
 
-        <section className="panel">
+        <section className="panel perf-panel-compact">
           <div className="perf-env-head">
             <h2>도구 · 환경</h2>
             <EnvSourceBadge />
@@ -479,9 +496,7 @@ export default function PerfTestPage() {
             <>
               <EnvToolsSkeleton />
               <p className="hint perf-env-loading">
-                환경 조회 중… API가 꺼져 있으면 최대 약 12초 후 오류가 표시됩니다.{" "}
-                <code>.\scripts\start-api-source-scan.ps1</code> 실행 후 「환경 다시 확인」을
-                누르세요.
+                환경 조회 중… <code>.\scripts\start-api-source-scan.ps1</code> 실행 후 「환경 다시 확인」
               </p>
             </>
           ) : null}
@@ -491,83 +506,42 @@ export default function PerfTestPage() {
               <div className="perf-env-cards">
                 <div className={`perf-env-card ${loadAllowed ? "ok" : "warn"}`}>
                   <div className="perf-env-card-label">부하 실행</div>
-                  <div className="perf-env-card-value">
-                    {loadAllowed ? "허용 (로컬)" : "차단 (클라우드)"}
-                  </div>
+                  <div className="perf-env-card-value">{loadAllowed ? "허용 (로컬)" : "차단 (클라우드)"}</div>
                 </div>
                 <div className={`perf-env-card ${locustInstalled ? "ok" : "warn"}`}>
                   <div className="perf-env-card-label">Locust</div>
-                  <div className="perf-env-card-value">
-                    {locustInstalled ? "설치됨" : "미설치"}
-                  </div>
+                  <div className="perf-env-card-value">{locustInstalled ? "설치됨" : "미설치"}</div>
                 </div>
-                <div className="perf-env-card ok">
-                  <div className="perf-env-card-label">VU 상한</div>
-                  <div className="perf-env-card-value">{String(env.max_users ?? "100")}</div>
+                <div className={`perf-env-card ${envReady ? "ok" : "warn"}`}>
+                  <div className="perf-env-card-label">상태</div>
+                  <div className="perf-env-card-value">{envReady ? "실행 가능" : "설정 필요"}</div>
                 </div>
               </div>
 
-              <div className={`perf-setup-guide ${envReady ? "ready" : ""}`}>
-                <h3>{envReady ? "실행 준비 완료" : "설치 · 실행 가이드"}</h3>
-                {envReady ? (
-                  <ol className="perf-setup-steps">
-                    <li>
-                      <strong>Base URL</strong>을 부하 대상(보통 포털 <code>http://127.0.0.1:3000</code>
-                      )으로 맞춥니다.
-                    </li>
-                    <li>
-                      <strong>부하 대상 URL</strong>에서 검사할 페이지를 체크하거나, 대상 앱을 고른 뒤{" "}
-                      <strong>시나리오 불러오기</strong>를 누릅니다.
-                    </li>
-                    <li>
-                      VU·지속 시간을 설정하고 <strong>성능검사 실행</strong>을 클릭합니다. (처음엔 VU 5 ·
-                      30초 권장)
-                    </li>
-                  </ol>
-                ) : (
+              {!envReady ? (
+                <div className="perf-setup-guide">
+                  <h3>설치 · 실행 가이드</h3>
                   <ol className="perf-setup-steps">
                     {!loadAllowed ? (
                       <li>
-                        <strong>로컬 API</strong>가 필요합니다. Render(클라우드)에서는 부하 실행이
-                        차단됩니다. 포털 <code>.env.local</code>의{" "}
-                        <code>NEXT_PUBLIC_API_BASE_URL</code>을 <code>http://127.0.0.1:8001</code>로
-                        설정하세요.
+                        포털 <code>.env.local</code> — <code>NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001</code>
                       </li>
                     ) : null}
                     {!locustInstalled ? (
                       <li>
-                        API 터미널에서 Locust를 설치합니다.
-                        <pre className="wq-code-block">{`cd C:\\Mywork\\MyPlatform-2.0\\apps\\api
-pip install -r requirements.txt`}</pre>
-                        또는 프로젝트 루트에서{" "}
-                        <code>.\scripts\start-api-source-scan.ps1</code> (의존성 포함 기동)
+                        API: <code>pip install -r requirements.txt</code> 또는{" "}
+                        <code>.\scripts\start-api-source-scan.ps1</code>
                       </li>
                     ) : null}
-                    <li>
-                      <strong>터미널 1</strong> — API:{" "}
-                      <code>.\scripts\start-api-source-scan.ps1</code>
-                    </li>
-                    <li>
-                      <strong>터미널 2</strong> — 포털:{" "}
-                      <code>cd apps\\portal</code> → <code>npm run dev</code>
-                    </li>
-                    <li>
-                      설치·재시작 후 아래 <strong>환경 다시 확인</strong> → Locust·로컬 API가 모두
-                      초록이면 실행 가능합니다.
-                    </li>
+                    <li>터미널 1 — API · 터미널 2 — <code>npm run dev:portal</code></li>
                   </ol>
-                )}
-              </div>
+                </div>
+              ) : null}
             </>
           ) : null}
 
-          <div className="source-scan-actions" style={{ marginTop: 12 }}>
-            <button
-              type="button"
-              className="btn secondary"
-              disabled={envLoading}
-              onClick={() => void loadEnv()}
-            >
+          <div className="source-scan-actions perf-env-actions">
+            <button type="button" className="btn secondary" disabled={envLoading} onClick={() => void loadEnv()}>
               {envLoading ? "조회 중…" : "환경 다시 확인"}
             </button>
           </div>
@@ -759,22 +733,12 @@ pip install -r requirements.txt`}</pre>
                 checked={confirmHighLoad}
                 onChange={(e) => setConfirmHighLoad(e.target.checked)}
               />
-              고부하 확인 (VU &gt; 20 또는 외부 URL)
+              고부하 확인 (VU &gt; 20)
             </label>
           </div>
-          <div className="perf-option-help">
-            <p>
-              <strong>Playwright HAR 녹화</strong> — 대상 앱을 선택했을 때, Playwright가 페이지를 한 번 열고
-              네트워크 트래픽(HAR)을 기록합니다. 기록된 HTTP 요청이 Locust 부하 대상이 됩니다. 시나리오 URL
-              목록 대신 실제 브라우저가 호출한 API·리소스를 검사할 때 사용합니다. (API 서버에 Playwright
-              설치 필요 · URL 직접 입력 모드에서는 사용 불가)
-            </p>
-            <p>
-              <strong>고부하 확인</strong> — 안전 확인용 체크입니다. VU 20명 초과 시 반드시 체크해야 실행됩니다.
-              localhost가 아닌 외부 URL에 VU 10명 초과로 테스트할 때도 체크를 권장합니다. 운영·공용 서버에
-              의도치 않은 고부하를 방지합니다.
-            </p>
-          </div>
+          <p className="hint perf-option-oneline">
+            HAR — 실제 브라우저 요청 기록 · 로그인 필요 URL은 리다이렉트만 측정될 수 있습니다.
+          </p>
 
           <div className="perf-run-block">
             <button
@@ -816,47 +780,30 @@ pip install -r requirements.txt`}</pre>
         </section>
 
         {summary ? (
-          <section className="panel">
+          <div className="perf-bottom-grid">
+            <section className="panel perf-result-panel">
             <div className="perf-result-head">
-              <h2>결과 요약</h2>
+              <div>
+                <h2>결과 요약</h2>
+                <p className="hint perf-result-meta">
+                  {result?.target_name || result?.target || "manual"} · {result?.base_url ?? baseUrl} ·{" "}
+                  {requestSourceLabel}
+                  {result?.ran_at ? ` · ${result.ran_at.slice(0, 19).replace("T", " ")}` : ""}
+                </p>
+              </div>
               <div className="btn-row perf-export-row">
-                <button
-                  type="button"
-                  className="btn ghost"
-                  onClick={() => {
-                    const data = buildReportData();
-                    if (data) exportPerfReportHtml(data);
-                  }}
-                >
-                  HTML 보고서
+                <button type="button" className="btn ghost" onClick={() => { const d = buildReportData(); if (d) exportPerfReportHtml(d); }}>
+                  HTML
                 </button>
-                <button
-                  type="button"
-                  className="btn ghost"
-                  onClick={() => {
-                    const data = buildReportData();
-                    if (data) exportPerfReportExcel(data);
-                  }}
-                >
+                <button type="button" className="btn ghost" onClick={() => { const d = buildReportData(); if (d) exportPerfReportExcel(d); }}>
                   Excel
                 </button>
-                <button
-                  type="button"
-                  className="btn ghost"
-                  onClick={() => {
-                    const data = buildReportData();
-                    if (data) exportPerfReportJson(data);
-                  }}
-                >
+                <button type="button" className="btn ghost" onClick={() => { const d = buildReportData(); if (d) exportPerfReportJson(d); }}>
                   JSON
                 </button>
               </div>
             </div>
-            <p className="hint perf-result-meta">
-              {result?.target_name || result?.target || "manual"} · {result?.base_url ?? baseUrl} · 검사 출처:{" "}
-              {requestSourceLabel}
-              {result?.ran_at ? ` · ${result.ran_at.slice(0, 19).replace("T", " ")}` : ""}
-            </p>
+
             <div className="perf-metrics">
               <div className="perf-metric">
                 <div className="perf-metric-label">TPS (rps)</div>
@@ -884,103 +831,124 @@ pip install -r requirements.txt`}</pre>
               </div>
               <div className="perf-metric">
                 <div className="perf-metric-label">VU · 시간</div>
-                <div className="perf-metric-value" style={{ fontSize: "1.1rem" }}>
+                <div className="perf-metric-value perf-metric-value-sm">
                   {summary.users ?? "—"} · {summary.duration_sec ?? "—"}s
                 </div>
               </div>
             </div>
 
-            {result?.requests_preview?.length ? (
-              <>
-                <h3>검사 URL 목록</h3>
-                <p className="hint">Locust가 부하를 건 HTTP 경로입니다.</p>
-                <table className="data-table compact">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>메서드</th>
-                      <th>경로</th>
-                      <th>이름</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.requests_preview.map((r, i) => (
-                      <tr key={`${r.path ?? r.name ?? i}-${i}`}>
-                        <td>{i + 1}</td>
-                        <td>{r.method ?? "GET"}</td>
-                        <td>
-                          <code>{r.path ?? r.name ?? "—"}</code>
-                        </td>
-                        <td>{r.name && r.name !== r.path ? r.name : "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
+            {summary.fail_ratio != null && summary.fail_ratio > 0.05 ? (
+              <p className="msg warn perf-fail-hint">
+                오류율이 높습니다. Locust 호스트에 이미 <code>/ipms.online</code> 같은 경로가 포함된데 요청
+                path에도 같은 접두가 붙으면 <code>…/ipms.online/ipms.online/</code>처럼 잘못 호출되어 404로
+                집계됩니다. API 재시작 후 다시 검사하면 경로가 자동 보정됩니다.
+              </p>
             ) : null}
 
-            {result?.endpoints?.length ? (
-              <>
-                <h3>항목별 성능</h3>
-                <p className="hint">Locust 실행 중 경로별 집계 (요청 수 내림차순)</p>
-                <table className="data-table compact">
+            <div className="perf-result-detail">
+              <h3>항목별 성능</h3>
+              <p className="hint">
+                Locust 경로·시나리오별 집계 ({endpointRows.length}개 항목)
+                {endpointRows.length === 1 ? " — 시나리오 여러 개 선택 시 항목별로 나뉩니다." : ""}
+              </p>
+              {endpointRows.length > 0 ? (
+                <div className="perf-table-wrap">
+                  <table className="data-table compact perf-endpoints-table">
+                    <thead>
+                      <tr>
+                        <th>항목 / 경로</th>
+                        <th>메서드</th>
+                        <th>요청</th>
+                        <th>실패</th>
+                        <th>avg ms</th>
+                        <th>p95 ms</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {endpointRows.map((ep, i) => (
+                        <tr key={`${ep.method ?? "GET"}-${ep.name}-${i}`}>
+                          <td className="perf-endpoint-name">{ep.name}</td>
+                          <td>{ep.method ?? "GET"}</td>
+                          <td>{ep.pending ? "—" : ep.num_requests}</td>
+                          <td>{ep.pending ? "—" : ep.num_failures ?? 0}</td>
+                          <td>{ep.pending ? "—" : ep.avg_ms}</td>
+                          <td>{ep.pending ? "—" : ep.p95_ms}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="hint perf-history-empty">집계된 항목이 없습니다.</p>
+              )}
+            </div>
+            </section>
+
+            <section className="panel perf-history-panel">
+              <h2>검사 이력</h2>
+              {history.length > 0 ? (
+                <div className="perf-table-wrap">
+                  <table className="data-table compact perf-full-table">
+                    <thead>
+                      <tr>
+                        <th>일시</th>
+                        <th>대상</th>
+                        <th>VU</th>
+                        <th>rps</th>
+                        <th>오류율</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.map((h) => (
+                        <tr key={h.job_id}>
+                          <td>{h.saved_at?.slice(0, 19) ?? h.job_id.slice(0, 8)}</td>
+                          <td>{h.target_name || h.target || h.base_url}</td>
+                          <td>{h.users ?? "—"}</td>
+                          <td>{h.rps ?? "—"}</td>
+                          <td>{fmtPct(h.fail_ratio)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="perf-history-empty">아직 저장된 이력이 없습니다.</p>
+              )}
+            </section>
+          </div>
+        ) : (
+          <section className="panel perf-panel-compact">
+            <h2>검사 이력</h2>
+            {history.length > 0 ? (
+              <div className="perf-table-wrap">
+                <table className="data-table compact perf-full-table">
                   <thead>
                     <tr>
-                      <th>경로</th>
-                      <th>메서드</th>
-                      <th>요청</th>
-                      <th>실패</th>
-                      <th>avg ms</th>
-                      <th>p95 ms</th>
+                      <th>일시</th>
+                      <th>대상</th>
+                      <th>VU</th>
+                      <th>rps</th>
+                      <th>오류율</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {result.endpoints.map((ep) => (
-                      <tr key={`${ep.method ?? "GET"}-${ep.name}`}>
-                        <td>{ep.name}</td>
-                        <td>{ep.method ?? "GET"}</td>
-                        <td>{ep.num_requests}</td>
-                        <td>{ep.num_failures ?? 0}</td>
-                        <td>{ep.avg_ms}</td>
-                        <td>{ep.p95_ms}</td>
+                    {history.map((h) => (
+                      <tr key={h.job_id}>
+                        <td>{h.saved_at?.slice(0, 19) ?? h.job_id.slice(0, 8)}</td>
+                        <td>{h.target_name || h.target || h.base_url}</td>
+                        <td>{h.users ?? "—"}</td>
+                        <td>{h.rps ?? "—"}</td>
+                        <td>{fmtPct(h.fail_ratio)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              </>
-            ) : null}
+              </div>
+            ) : (
+              <p className="perf-history-empty">아직 저장된 이력이 없습니다. 첫 검사를 실행해 보세요.</p>
+            )}
           </section>
-        ) : null}
-
-        <section className="panel">
-          <h2>검사 이력</h2>
-          {history.length > 0 ? (
-            <table className="data-table compact">
-              <thead>
-                <tr>
-                  <th>일시</th>
-                  <th>대상</th>
-                  <th>VU</th>
-                  <th>rps</th>
-                  <th>오류율</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((h) => (
-                  <tr key={h.job_id}>
-                    <td>{h.saved_at?.slice(0, 19) ?? h.job_id.slice(0, 8)}</td>
-                    <td>{h.target_name || h.target || h.base_url}</td>
-                    <td>{h.users ?? "—"}</td>
-                    <td>{h.rps ?? "—"}</td>
-                    <td>{fmtPct(h.fail_ratio)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <p className="perf-history-empty">아직 저장된 이력이 없습니다. 첫 검사를 실행해 보세요.</p>
-          )}
-        </section>
+        )}
       </main>
     </>
   );
