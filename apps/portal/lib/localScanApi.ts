@@ -75,7 +75,7 @@ export async function fetchScanApi(
   timeoutMs = FETCH_TIMEOUT_MS
 ): Promise<Response> {
   const { url, init: resolved } = await resolveScanApiUrl(apiPath, init);
-  return fetchWithTimeout(url, resolved, timeoutMs);
+  return fetchWithTimeout(url, { ...resolved, credentials: "include" }, timeoutMs);
 }
 
 /** Environment probe — Render cold start / busy during scan. */

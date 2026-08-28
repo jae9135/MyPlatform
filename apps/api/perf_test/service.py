@@ -21,6 +21,7 @@ from perf_test.job_progress import (
 from perf_test.options import DEFAULT_MAX_USERS, PerfTestOptions
 from perf_test.runner import record_har_requests, run_locust_load_test
 from perf_test.subprocess_runner import run_locust_isolated
+from perf_test.portal_urls import list_portal_urls
 from perf_test.scenario_urls import (
     build_requests_from_scenarios,
     fetch_scenarios,
@@ -57,6 +58,10 @@ def list_scenarios(
     payload = fetch_scenarios(target, base_url=base_url, access=access)
     payload["ok"] = True
     return payload
+
+
+def get_portal_urls() -> dict[str, Any]:
+    return list_portal_urls()
 
 
 def _is_localhost_url(url: str) -> bool:

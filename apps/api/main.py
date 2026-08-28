@@ -2025,6 +2025,12 @@ def perf_test_scenarios(
         raise HTTPException(400, detail=str(e)) from e
 
 
+@app.get("/v1/perf-test/portal-urls")
+def perf_test_portal_urls() -> dict:
+    pt = _load_perf_test()
+    return pt.get_portal_urls()
+
+
 @app.post("/v1/perf-test/validate")
 async def perf_test_validate(
     target: str = Form(""),

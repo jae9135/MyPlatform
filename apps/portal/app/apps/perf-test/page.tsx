@@ -17,6 +17,11 @@ import {
   exportPerfReportJson,
   type PerfReportData,
 } from "@/lib/perfTestReport";
+import {
+  getDefaultPerfPortalPaths,
+  PERF_TEST_PORTAL_URLS,
+  type PerfPortalUrlItem,
+} from "@/lib/perfTestPortalUrls";
 
 const IPMS_DEFAULT_URL = "http://14.35.194.178:12000/ipms.online/";
 
@@ -37,6 +42,8 @@ type ScenarioCandidate = {
   recommended?: boolean;
   selectable?: boolean;
 };
+
+type PortalUrlItem = PerfPortalUrlItem;
 
 type PerfSummary = {
   total_requests?: number;
@@ -97,6 +104,31 @@ function fmtPct(ratio?: number) {
   return `${(ratio * 100).toFixed(2)}%`;
 }
 
+function formatApiErrorDetail(status: number, body: Record<string, unknown>): string {
+  const detail = String(body.detail || body.error || "").trim();
+  if (status === 401) {
+    if (detail.toLowerCase() === "unauthorized") {
+      return "API 인증 실패 — apps/portal/.env.local 과 apps/api/.env.local 의 API_ACCESS_KEY 를 동일하게 설정하거나, 포털에 다시 로그인하세요.";
+    }
+    return detail || "인증 실패 (401)";
+  }
+  return detail || `API 오류 (HTTP ${status})`;
+}
+
+function applyPortalUrlPayload(
+  j: Record<string, unknown>,
+  setPortalUrlItems: (items: PortalUrlItem[]) => void,
+  setSelectedPaths: (paths: string[]) => void,
+): number {
+  const list = Array.isArray(j.items) ? (j.items as PortalUrlItem[]) : [];
+  if (list.length) setPortalUrlItems(list);
+  const defaults = Array.isArray(j.defaults_selected)
+    ? (j.defaults_selected as string[])
+    : list.filter((x) => x.recommended !== false).map((x) => x.path);
+  if (defaults.length) setSelectedPaths(defaults);
+  return list.length;
+}
+
 export default function PerfTestPage() {
   const [env, setEnv] = useState<Record<string, unknown> | null>(null);
   const [envLoading, setEnvLoading] = useState(true);
@@ -109,7 +141,13 @@ export default function PerfTestPage() {
   const [durationSec, setDurationSec] = useState(30);
   const [recordHar, setRecordHar] = useState(false);
   const [confirmHighLoad, setConfirmHighLoad] = useState(false);
-  const [manualUrls, setManualUrls] = useState("/apps/my-gantt");
+  const [portalUrlItems, setPortalUrlItems] = useState<PortalUrlItem[]>(PERF_TEST_PORTAL_URLS);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>(getDefaultPerfPortalPaths());
+  const [customUrls, setCustomUrls] = useState("");
+  const [urlListMsg, setUrlListMsg] = useState(
+    `${PERF_TEST_PORTAL_URLS.length}개 페이지 (기본 목록)`,
+  );
+  const [urlListLoading, setUrlListLoading] = useState(false);
   const [candidates, setCandidates] = useState<ScenarioCandidate[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [scenarioMsg, setScenarioMsg] = useState("");
@@ -124,12 +162,29 @@ export default function PerfTestPage() {
     setEnvLoading(true);
     setEnvErr("");
     try {
+      const portalEnvRes = await fetch("/api/portal/perf-env", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (portalEnvRes.ok) {
+        const j = await readJsonResponse(portalEnvRes);
+        setEnv(j as Record<string, unknown>);
+        return;
+      }
+      if (portalEnvRes.status === 401) {
+        const j = await readJsonResponse(portalEnvRes).catch(() => ({}));
+        throw new Error(formatApiErrorDetail(401, j));
+      }
+
       const healthRes = await fetchScanApi("health", undefined, 8000);
       if (healthRes.ok) {
         const health = await readJsonResponse(healthRes);
         const perf = health.perf_test as Record<string, unknown> | undefined;
         if (perf && typeof perf === "object") {
           setEnv({ ok: true, ...perf });
+          if (!portalEnvRes.ok) {
+            setEnvErr("포털 환경 API 대신 /health 로 조회했습니다.");
+          }
           return;
         }
       }
@@ -157,9 +212,16 @@ export default function PerfTestPage() {
       let detailMsg = `API 연결 실패 (HTTP ${eRes.status})`;
       try {
         const errBody = await readJsonResponse(eRes);
-        if (errBody.detail) detailMsg = String(errBody.detail);
+        detailMsg = formatApiErrorDetail(eRes.status, errBody);
       } catch {
-        /* ignore */
+        if (!portalEnvRes.ok) {
+          try {
+            const pe = await readJsonResponse(portalEnvRes);
+            detailMsg = formatApiErrorDetail(portalEnvRes.status, pe);
+          } catch {
+            /* ignore */
+          }
+        }
       }
       throw new Error(detailMsg);
     } catch (e) {
@@ -180,10 +242,48 @@ export default function PerfTestPage() {
     }
   }, []);
 
+  const loadPortalUrls = useCallback(async () => {
+    setUrlListLoading(true);
+    setUrlListMsg("URL 목록 불러오는 중…");
+    try {
+      const portalRes = await fetch("/api/portal/perf-portal-urls", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (portalRes.ok) {
+        const j = await readJsonResponse(portalRes);
+        const count = applyPortalUrlPayload(j, setPortalUrlItems, setSelectedPaths);
+        setUrlListMsg(`${count}개 페이지 · API 목록 반영`);
+        return;
+      }
+
+      const res = await fetchScanApi("v1/perf-test/portal-urls");
+      if (res.ok) {
+        const j = await readJsonResponse(res);
+        const count = applyPortalUrlPayload(j, setPortalUrlItems, setSelectedPaths);
+        setUrlListMsg(`${count}개 페이지 · API 목록 반영`);
+        return;
+      }
+
+      const errBody = await readJsonResponse(res).catch(() => ({}));
+      const count = PERF_TEST_PORTAL_URLS.length;
+      setUrlListMsg(
+        `${count}개 페이지 (기본 목록) · API 갱신 실패: ${formatApiErrorDetail(res.status, errBody)}`,
+      );
+    } catch (e) {
+      setUrlListMsg(
+        `${PERF_TEST_PORTAL_URLS.length}개 페이지 (기본 목록) · ${wrapScanFetchError(e).message}`,
+      );
+    } finally {
+      setUrlListLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadEnv();
     void loadHistory();
-  }, [loadEnv, loadHistory]);
+    void loadPortalUrls();
+  }, [loadEnv, loadHistory, loadPortalUrls]);
 
   useEffect(() => {
     if (target === "ipms-online" && !baseUrl.includes("ipms")) {
@@ -220,6 +320,29 @@ export default function PerfTestPage() {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
+  function togglePath(path: string) {
+    setSelectedPaths((prev) => (prev.includes(path) ? prev.filter((x) => x !== path) : [...prev, path]));
+  }
+
+  function selectAllPaths() {
+    setSelectedPaths(portalUrlItems.map((x) => x.path));
+  }
+
+  function selectRecommendedPaths() {
+    const rec = portalUrlItems.filter((x) => x.recommended !== false).map((x) => x.path);
+    setSelectedPaths(rec.length ? rec : portalUrlItems.map((x) => x.path));
+  }
+
+  function resolvedManualUrls(): string {
+    const fromList = selectedPaths.filter(Boolean);
+    const extra = customUrls
+      .split(/[\n,]/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const merged = [...fromList, ...extra];
+    return merged.join("\n");
+  }
+
   function buildForm(): FormData {
     const fd = new FormData();
     fd.set("target", target === "manual" ? "" : target);
@@ -231,7 +354,7 @@ export default function PerfTestPage() {
     fd.set("record_har", recordHar ? "true" : "false");
     fd.set("confirm_high_load", confirmHighLoad ? "true" : "false");
     fd.set("access", access);
-    fd.set("manual_urls", manualUrls);
+    fd.set("manual_urls", resolvedManualUrls());
     fd.set("async_progress", "true");
     return fd;
   }
@@ -257,6 +380,10 @@ export default function PerfTestPage() {
   async function runTest() {
     setError("");
     setResult(null);
+    if (target !== "ipms-online" && !resolvedManualUrls().trim()) {
+      setError("부하 대상 URL을 1개 이상 선택하세요.");
+      return;
+    }
     setBusy(true);
     setProgress({ pct: 0, message: "검증 중…" });
     try {
@@ -303,7 +430,7 @@ export default function PerfTestPage() {
     const src = result?.request_source;
     if (src === "har") return "Playwright HAR 녹화";
     if (src === "scenario") return "웹 품질 시나리오";
-    if (src === "manual") return "URL 직접 입력";
+    if (src === "manual") return "URL 체크 목록";
     return src || "—";
   }, [result?.request_source]);
 
@@ -389,7 +516,7 @@ export default function PerfTestPage() {
                       )으로 맞춥니다.
                     </li>
                     <li>
-                      <strong>추가 URL</strong>에 경로를 입력하거나, 대상 앱을 고른 뒤{" "}
+                      <strong>부하 대상 URL</strong>에서 검사할 페이지를 체크하거나, 대상 앱을 고른 뒤{" "}
                       <strong>시나리오 불러오기</strong>를 누릅니다.
                     </li>
                     <li>
@@ -507,16 +634,78 @@ pip install -r requirements.txt`}</pre>
                 onChange={(e) => setDurationSec(Number(e.target.value))}
               />
             </div>
-            <div className="source-scan-field source-scan-field-full">
-              <label>추가 URL (쉼표 · 줄바꿈)</label>
-              <textarea
-                rows={2}
-                value={manualUrls}
-                onChange={(e) => setManualUrls(e.target.value)}
-                placeholder="/apps/my-gantt"
-              />
-            </div>
           </div>
+
+          {target !== "ipms-online" ? (
+            <div className="perf-scenario-panel">
+              <div className="perf-scenario-panel-head">
+                <h3>부하 대상 URL</h3>
+                <div className="btn-row">
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={urlListLoading}
+                    onClick={() => void loadPortalUrls()}
+                  >
+                    {urlListLoading ? "불러오는 중…" : "URL 목록 새로고침"}
+                  </button>
+                  <button type="button" className="btn ghost" onClick={selectRecommendedPaths}>
+                    권장만
+                  </button>
+                  <button type="button" className="btn ghost" onClick={selectAllPaths}>
+                    전체 선택
+                  </button>
+                </div>
+              </div>
+              <p className="hint">
+                {urlListMsg || "포털 페이지 경로를 선택합니다. Base URL에 붙여 Locust가 GET 요청합니다."}
+              </p>
+              {selectedPaths.length === 0 && !customUrls.trim() ? (
+                <p className="msg warn">선택된 URL이 없습니다. 최소 1개 이상 체크하세요.</p>
+              ) : (
+                <p className="hint">
+                  선택 {selectedPaths.length}개
+                  {customUrls.trim() ? " + 직접 입력" : ""} ·{" "}
+                  <code>{resolvedManualUrls().split("\n").filter(Boolean).join(", ")}</code>
+                </p>
+              )}
+              {portalUrlItems.length > 0 ? (
+                <ul className="source-scan-option-list">
+                  {portalUrlItems.map((item) => (
+                    <li key={item.id}>
+                      <label className="check-row">
+                        <input
+                          type="checkbox"
+                          checked={selectedPaths.includes(item.path)}
+                          onChange={() => togglePath(item.path)}
+                        />
+                        <span>
+                          <strong>{item.name}</strong> <code>{item.path}</code>
+                          {item.requires_auth ? (
+                            <span className="perf-url-badge auth">로그인 필요</span>
+                          ) : (
+                            <span className="perf-url-badge public">공개</span>
+                          )}
+                        </span>
+                      </label>
+                      {item.description ? (
+                        <p className="source-scan-option-desc">{item.description}</p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              <div className="source-scan-field source-scan-field-full" style={{ marginTop: 12 }}>
+                <label>추가 경로 (직접 입력 · 쉼표 · 줄바꿈)</label>
+                <textarea
+                  rows={2}
+                  value={customUrls}
+                  onChange={(e) => setCustomUrls(e.target.value)}
+                  placeholder="/apps/custom-page"
+                />
+              </div>
+            </div>
+          ) : null}
 
           {target !== "manual" ? (
             <div className="perf-scenario-panel">

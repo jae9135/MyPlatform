@@ -1,5 +1,8 @@
 import { CONTACT_EMAIL } from "@/lib/marketingCatalog";
+import { BRAND_NAME } from "@/lib/brand";
 import { getSupabaseAdmin, isSupabaseAdminConfigured } from "@/lib/supabaseAdmin";
+
+export const CONTACT_INQUIRY_SUBJECT = `${BRAND_NAME} 문의`;
 
 export type ContactPayload = {
   company: string;
@@ -43,8 +46,9 @@ function formatRequestType(value: string): string {
 }
 
 export function buildContactEmailText(payload: ContactPayload): { subject: string; text: string; html: string } {
-  const subject = `[${formatRequestType(payload.request_type)}] ${payload.company}`;
+  const subject = `[${CONTACT_INQUIRY_SUBJECT}] [${formatRequestType(payload.request_type)}] ${payload.company}`;
   const text = [
+    `${CONTACT_INQUIRY_SUBJECT}`,
     `회사/이름: ${payload.company}`,
     `연락처: ${payload.phone}`,
     `관심 프로그램: ${formatToolLabel(payload.tool)}`,
@@ -53,7 +57,7 @@ export function buildContactEmailText(payload: ContactPayload): { subject: strin
     payload.message,
   ].join("\n");
   const html = `
-    <h2>MyPlatform 문의</h2>
+    <h2>${escapeHtml(CONTACT_INQUIRY_SUBJECT)}</h2>
     <p><b>회사/이름:</b> ${escapeHtml(payload.company)}</p>
     <p><b>연락처:</b> ${escapeHtml(payload.phone)}</p>
     <p><b>관심 프로그램:</b> ${escapeHtml(formatToolLabel(payload.tool))}</p>
@@ -126,7 +130,7 @@ export async function sendContactEmail(payload: ContactPayload): Promise<boolean
   const from =
     process.env.RESEND_FROM_EMAIL?.trim() ||
     process.env.CONTACT_FROM_EMAIL?.trim() ||
-    "MyPlatform <onboarding@resend.dev>";
+    `${BRAND_NAME} <onboarding@resend.dev>`;
   const to = inboundEmail();
   const { subject, text, html } = buildContactEmailText(payload);
 
