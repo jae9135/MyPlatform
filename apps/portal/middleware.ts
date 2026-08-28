@@ -33,6 +33,10 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|marketing/).*)",
+    /*
+     * Skip static assets, marketing images, and crawler/verification files.
+     * Without this, robots.txt and Google Search Console HTML get 307 → /login.
+     */
+    "/((?!_next/static|_next/image|favicon.ico|marketing/|robots\\.txt|sitemap\\.xml|google[a-z0-9]+\\.html).*)",
   ],
 };
