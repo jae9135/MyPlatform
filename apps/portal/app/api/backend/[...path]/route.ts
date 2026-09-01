@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isPortalAuthed } from "@/lib/portal-auth";
+import { checkUpstreamConfig, upstreamBase, upstreamHeaders } from "@/lib/upstreamApi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function upstreamBase(): string {
-  const fromEnv =
-    process.env.API_UPSTREAM_URL?.trim() ||
-    process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-  if (fromEnv) return fromEnv.replace(/\/$/, "");
-  return "http://127.0.0.1:8001";
-}
 
 async function isAuthed(req: NextRequest): Promise<boolean> {
   const password = process.env.PORTAL_PASSWORD?.trim();
@@ -21,6 +14,14 @@ async function isAuthed(req: NextRequest): Promise<boolean> {
 async function proxy(req: NextRequest, path: string[]): Promise<Response> {
   if (!(await isAuthed(req))) {
     return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+  }
+
+  const configErr = checkUpstreamConfig();
+  if (configErr) {
+    return NextResponse.json(
+      { detail: configErr.detail, missing: configErr.missing },
+      { status: configErr.status },
+    );
   }
 
   const target = `${upstreamBase()}/${path.join("/")}${req.nextUrl.search}`;
@@ -34,8 +35,9 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
     const v = req.headers.get(name);
     if (v) headers.set(name, v);
   }
-  const apiKey = process.env.API_ACCESS_KEY?.trim();
-  if (apiKey) headers.set("x-api-key", apiKey);
+  for (const [k, v] of Object.entries(upstreamHeaders())) {
+    if (typeof v === "string") headers.set(k, v);
+  }
 
   const init: RequestInit = {
     method: req.method,

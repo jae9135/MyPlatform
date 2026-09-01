@@ -173,21 +173,35 @@ def build_ipms_candidates() -> list[ScenarioCandidate]:
 def extract_ipms_scenarios(
     *,
     base_url: str = "",
-    access: str = "public",
+    access: str = "public,auth",
 ) -> dict[str, Any]:
     url = (base_url or IPMS_DEFAULT_BASE).strip()
     if not url.endswith("/"):
         url += "/"
-    tier = (access or "public").strip().lower()
-    if tier not in ("public", "auth"):
-        tier = "public"
+
+    def _parse_tiers(raw: str) -> set[str]:
+        text = (raw or "public,auth").strip().lower()
+        if text in ("both", "all"):
+            return {"public", "auth"}
+        tiers = {
+            p.strip()
+            for p in text.replace(";", ",").split(",")
+            if p.strip() in ("public", "auth")
+        }
+        return tiers or {"public"}
+
+    tiers = _parse_tiers(access)
 
     all_c = build_ipms_candidates()
-    candidates = [c for c in all_c if getattr(c, "access", "public") == tier]
+    candidates = [c for c in all_c if getattr(c, "access", "public") in tiers]
     defaults = [c.state_id for c in candidates if c.recommended and c.selectable]
 
     warnings: list[str] = []
-    if tier == "public":
+    if "public" in tiers and "auth" in tiers:
+        warnings.append(
+            "공개 메뉴(알림마당·이용안내·통계)와 로그인 메뉴(민원·내정보) 시나리오를 함께 불러왔습니다."
+        )
+    elif tiers == {"public"}:
         warnings.append(
             "비로그인 공개 메뉴(알림마당·이용안내·통계분석)와 홈·로그인 화면을 진단합니다."
         )
@@ -202,7 +216,7 @@ def extract_ipms_scenarios(
         "target": "ipms-online",
         "target_name": "전기사업정보시스템",
         "extractable": True,
-        "access": tier,
+        "access": ",".join(sorted(tiers)),
         "base_url": url,
         "candidates": [c.to_dict() for c in candidates],
         "defaults_selected": defaults,

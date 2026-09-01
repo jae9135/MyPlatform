@@ -94,7 +94,7 @@ export const PERF_TEST_PORTAL_URLS: PerfPortalUrlItem[] = [
 ];
 
 export function getDefaultPerfPortalPaths(): string[] {
-  const rec = PERF_TEST_PORTAL_URLS.filter((x) => x.recommended !== false).map((x) => x.path);
+  const rec = PERF_TEST_PORTAL_URLS.filter((x) => x.recommended === true).map((x) => x.path);
   return rec.length ? rec : ["/"];
 }
 

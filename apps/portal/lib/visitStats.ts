@@ -4,6 +4,13 @@ export type VisitDailyRow = {
   path: string;
   visit_date: string;
   views: number;
+  last_viewed_at: string | null;
+};
+
+export type VisitLogRow = {
+  id: number;
+  path: string;
+  visited_at: string;
 };
 
 export type VisitSummary = {
@@ -12,6 +19,7 @@ export type VisitSummary = {
   home_today: number;
   home_7d: number;
   daily: VisitDailyRow[];
+  recent: VisitLogRow[];
 };
 
 const HOME_PATH = "/";
@@ -36,6 +44,7 @@ export async function recordPageView(path: string): Promise<void> {
   if (!isSupabaseAdminConfigured()) return;
   const normalized = normalizeVisitPath(path);
   const visitDate = todayKst();
+  const now = new Date().toISOString();
   const sb = getSupabaseAdmin();
 
   const { data: existing, error: selErr } = await sb
@@ -50,24 +59,37 @@ export async function recordPageView(path: string): Promise<void> {
   if (existing) {
     const { error } = await sb
       .from("portal_visit_daily")
-      .update({ views: Number(existing.views) + 1 })
+      .update({ views: Number(existing.views) + 1, last_viewed_at: now })
       .eq("path", normalized)
       .eq("visit_date", visitDate);
     if (error) throw new Error(error.message);
-    return;
+  } else {
+    const { error } = await sb.from("portal_visit_daily").insert({
+      path: normalized,
+      visit_date: visitDate,
+      views: 1,
+      last_viewed_at: now,
+    });
+    if (error) throw new Error(error.message);
   }
 
-  const { error } = await sb.from("portal_visit_daily").insert({
+  const { error: logErr } = await sb.from("portal_visit_log").insert({
     path: normalized,
-    visit_date: visitDate,
-    views: 1,
+    visited_at: now,
   });
-  if (error) throw new Error(error.message);
+  if (logErr) throw new Error(logErr.message);
 }
 
 export async function getVisitSummary(path = HOME_PATH): Promise<VisitSummary> {
   const normalized = normalizeVisitPath(path);
-  const empty: VisitSummary = { home_all: 0, home_total: 0, home_today: 0, home_7d: 0, daily: [] };
+  const empty: VisitSummary = {
+    home_all: 0,
+    home_total: 0,
+    home_today: 0,
+    home_7d: 0,
+    daily: [],
+    recent: [],
+  };
   if (!isSupabaseAdminConfigured()) return empty;
 
   const sb = getSupabaseAdmin();
@@ -86,14 +108,24 @@ export async function getVisitSummary(path = HOME_PATH): Promise<VisitSummary> {
   const since = daysAgoKst(30);
   const { data, error } = await sb
     .from("portal_visit_daily")
-    .select("path, visit_date, views")
+    .select("path, visit_date, views, last_viewed_at")
     .eq("path", normalized)
     .gte("visit_date", since)
     .order("visit_date", { ascending: false });
 
   if (error) throw new Error(error.message);
 
+  const { data: recentRows, error: recentErr } = await sb
+    .from("portal_visit_log")
+    .select("id, path, visited_at")
+    .eq("path", normalized)
+    .order("visited_at", { ascending: false })
+    .limit(30);
+
+  if (recentErr) throw new Error(recentErr.message);
+
   const daily = (data ?? []) as VisitDailyRow[];
+  const recent = (recentRows ?? []) as VisitLogRow[];
   const today = todayKst();
   const weekStart = daysAgoKst(6);
 
@@ -108,5 +140,5 @@ export async function getVisitSummary(path = HOME_PATH): Promise<VisitSummary> {
     if (row.visit_date >= weekStart) home_7d += v;
   }
 
-  return { home_all, home_total, home_today, home_7d, daily };
+  return { home_all, home_total, home_today, home_7d, daily, recent };
 }

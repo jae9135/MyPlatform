@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchScanApi } from "@/lib/localScanApi";
 import { readJsonResponse } from "@/lib/formUpload";
 import { notifyMainWebQualityHistory } from "@/lib/webQualityPopout";
+import { formatUtcIsoToKst } from "@/lib/formatDateTime";
 
 type HistoryItem = {
   job_id?: string;
@@ -67,7 +68,7 @@ export default function WebQualityHistoryPage() {
             <table className="result-table">
               <thead>
                 <tr>
-                  <th>일시</th>
+                  <th>일시 (KST)</th>
                   <th>대상</th>
                   <th>모드</th>
                   <th>미흡</th>
@@ -81,7 +82,7 @@ export default function WebQualityHistoryPage() {
                     className="source-scan-history-row"
                     onClick={() => h.job_id && notifyMainWebQualityHistory(h.job_id, h.mode)}
                   >
-                    <td>{h.scanned_at?.slice(0, 19).replace("T", " ") || h.saved_at?.slice(0, 19).replace("T", " ") || "-"}</td>
+                    <td>{formatUtcIsoToKst(h.scanned_at || h.saved_at, "-")}</td>
                     <td>
                       {h.target_name || "-"}
                       {h.page_url ? (

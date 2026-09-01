@@ -7,7 +7,15 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse, urlunparse
 
-from web_quality.job_progress import create_job, get_job, submit_job, update_job
+from web_quality.job_progress import (
+    ScanCancelled,
+    check_cancelled,
+    create_job,
+    get_job,
+    is_cancelled,
+    submit_job,
+    update_job,
+)
 from web_quality.presets.ipms_online import IPMS_DEFAULT_BASE
 
 SessionDetect = Literal["ipms", "generic"]
@@ -35,20 +43,42 @@ def _has_visible_password(page) -> bool:
         return False
 
 
+def _has_portal_session_cookie(context) -> bool:
+    try:
+        for c in context.cookies():
+            if c.get("name") == "mp_portal" and c.get("value"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _generic_login_complete(page, target_url: str, initial_cookie_count: int) -> bool:
+    if _has_visible_password(page):
+        return False
+
+    path = urlparse(page.url).path or ""
+    if "/login" in path:
+        return False
+
+    target = urlparse(target_url)
+    host = (target.hostname or "").lower()
+    if host in ("localhost", "127.0.0.1", "::1"):
+        return _has_portal_session_cookie(page.context)
+
     current = page.url
-    if _normalize_url(current) == _normalize_url(target_url) and not _has_visible_password(page):
+    if _normalize_url(current) == _normalize_url(target_url):
         return True
     try:
         cookies = page.context.cookies()
     except Exception:
         cookies = []
-    if len(cookies) > initial_cookie_count and not _has_visible_password(page):
-        target = urlparse(target_url)
-        current_p = urlparse(current)
-        if current_p.netloc == target.netloc:
-            return True
-    return False
+    if len(cookies) <= initial_cookie_count:
+        return False
+    current_p = urlparse(current)
+    if current_p.netloc != target.netloc:
+        return False
+    return True
 
 
 def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms") -> None:
@@ -68,7 +98,8 @@ def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms
 
     out = _session_path(job_id)
     wait_message = (
-        "브라우저에서 로그인을 완료한 뒤, 진단 URL 화면으로 이동하세요."
+        "Chromium 창에서 http://…/login 으로 이동해 포털 암호 로그인을 완료하세요. "
+        "mp_portal 쿠키가 생기면 자동 저장됩니다."
         if detect == "generic"
         else "브라우저에서 IPMS 로그인 + 공동인증서(2단계)를 완료하세요."
     )
@@ -103,22 +134,49 @@ def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms
             )
 
             deadline = time.time() + SESSION_TIMEOUT_SEC
+            login_ready = False
             while time.time() < deadline:
+                if is_cancelled(job_id):
+                    browser.close()
+                    raise ScanCancelled("cancelled")
                 if detect == "ipms":
                     if page.locator("#logout, .btn-logout, #login-user").count():
+                        login_ready = True
                         break
                 elif _generic_login_complete(page, raw, initial_cookies):
+                    login_ready = True
                     break
-                elapsed = SESSION_TIMEOUT_SEC - (deadline - time.time())
-                pct = min(85, 10 + int(elapsed / SESSION_TIMEOUT_SEC * 75))
-                update_job(job_id, pct=pct)
+                elapsed_sec = int(time.time() - (deadline - SESSION_TIMEOUT_SEC))
+                update_job(
+                    job_id,
+                    pct=15,
+                    message=f"{wait_message} ({elapsed_sec}초 경과 · 최대 {SESSION_TIMEOUT_SEC // 60}분)",
+                )
                 time.sleep(POLL_INTERVAL_SEC)
             else:
+                browser.close()
                 raise RuntimeError(
                     f"로그인 대기 시간 초과({SESSION_TIMEOUT_SEC // 60}분). "
                     "브라우저에서 로그인을 완료한 뒤 다시 시도하세요."
                 )
 
+            if login_ready and detect == "generic" and _normalize_url(page.url) != _normalize_url(raw):
+                try:
+                    page.goto(raw, wait_until="domcontentloaded", timeout=60000)
+                    page.wait_for_timeout(400)
+                except Exception:
+                    pass
+
+            if detect == "generic":
+                host = (urlparse(raw).hostname or "").lower()
+                if host in ("localhost", "127.0.0.1", "::1") and not _has_portal_session_cookie(context):
+                    browser.close()
+                    raise RuntimeError(
+                        "포털 로그인(mp_portal)이 확인되지 않았습니다. "
+                        "Chromium 창에서 /login 으로 이동해 포털 암호 로그인을 완료한 뒤 다시 시도하세요."
+                    )
+
+            check_cancelled(job_id)
             context.storage_state(path=str(out))
             browser.close()
 

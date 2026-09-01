@@ -24,6 +24,7 @@ def main() -> int:
             spawn_rate=float(payload["spawn_rate"]),
             duration_sec=int(payload["duration_sec"]),
             on_progress=on_progress,
+            storage_state=payload.get("storage_state"),
         )
         emit("done", result=result)
         return 0

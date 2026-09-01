@@ -55,33 +55,40 @@ async function fetchWithTimeout(url: string, init: RequestInit | undefined, time
   }
 }
 
-async function resolveScanApiUrl(apiPath: string, init?: RequestInit): Promise<{ url: string; init: RequestInit }> {
+async function resolveScanApiUrl(
+  apiPath: string,
+  init?: RequestInit,
+  opts?: { forceProxy?: boolean },
+): Promise<{ url: string; init: RequestInit }> {
   const path = apiPath.replace(/^\//, "");
-  const direct = await getDirectScanApiConfig();
-  if (direct) {
-    const headers = new Headers(init?.headers);
-    headers.set("X-Api-Key", direct.apiKey);
-    return {
-      url: `${direct.apiBase}/${path}`,
-      init: { ...init, headers, mode: "cors" },
-    };
+  if (!opts?.forceProxy) {
+    const direct = await getDirectScanApiConfig();
+    if (direct) {
+      const headers = new Headers(init?.headers);
+      headers.set("X-Api-Key", direct.apiKey);
+      return {
+        url: `${direct.apiBase}/${path}`,
+        init: { ...init, headers, mode: "cors" },
+      };
+    }
   }
-  return { url: `${API_BASE}/${path}`, init: init ?? {} };
+  return { url: `${API_BASE}/${path}`, init: { ...(init ?? {}), credentials: "include" } };
 }
 
 export async function fetchScanApi(
   apiPath: string,
   init?: RequestInit,
-  timeoutMs = FETCH_TIMEOUT_MS
+  timeoutMs = FETCH_TIMEOUT_MS,
+  opts?: { forceProxy?: boolean },
 ): Promise<Response> {
-  const { url, init: resolved } = await resolveScanApiUrl(apiPath, init);
-  return fetchWithTimeout(url, { ...resolved, credentials: "include" }, timeoutMs);
+  const { url, init: resolved } = await resolveScanApiUrl(apiPath, init, opts);
+  return fetchWithTimeout(url, resolved, timeoutMs);
 }
 
-/** Environment probe — Render cold start / busy during scan. */
+/** Environment probe — always Vercel 프록시 (/api/backend) 사용 (CORS·설정 오류 방지). */
 export async function fetchScanEnvApi(apiPath: string, init?: RequestInit): Promise<Response> {
   const timeoutMs = isLocalPortalHost() ? ENV_FETCH_TIMEOUT_LOCAL_MS : ENV_FETCH_TIMEOUT_MS;
-  return fetchScanApi(apiPath, init, timeoutMs);
+  return fetchScanApi(apiPath, init, timeoutMs, { forceProxy: true });
 }
 
 export async function fetchScanEnvWithRetry(

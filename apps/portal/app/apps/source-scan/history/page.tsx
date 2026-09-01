@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchScanApi } from "@/lib/localScanApi";
 import { readJsonResponse } from "@/lib/formUpload";
 import { notifyMainSourceScanHistory } from "@/lib/sourceScanPopout";
+import { formatUtcIsoToKst } from "@/lib/formatDateTime";
 
 type HistoryItem = {
   job_id?: string;
@@ -58,7 +59,7 @@ export default function SourceScanHistoryPage() {
             <table className="result-table">
               <thead>
                 <tr>
-                  <th>일시</th>
+                  <th>일시 (KST)</th>
                   <th>대상</th>
                   <th>결함</th>
                   <th>분석 불가</th>
@@ -71,7 +72,7 @@ export default function SourceScanHistoryPage() {
                     className="source-scan-history-row"
                     onClick={() => h.job_id && notifyMainSourceScanHistory(h.job_id)}
                   >
-                    <td>{h.scanned_at?.slice(0, 19).replace("T", " ") || "-"}</td>
+                    <td>{formatUtcIsoToKst(h.scanned_at, "-")}</td>
                     <td>{h.target_name || "-"}</td>
                     <td>{h.fail ?? 0}</td>
                     <td>{h.not_scanned ?? 0}</td>

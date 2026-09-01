@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from web_quality.manifest import (
@@ -95,8 +95,14 @@ def extract_scenarios(target_id: str) -> dict[str, Any]:
     if target_id == "my-gantt":
         candidates, warnings = _extract_my_gantt()
         extractable = True
+        warnings.append(
+            "포털 MyGantt(/apps/*) 시나리오는 로그인·세션 필요(access=auth)로 분류됩니다."
+        )
     else:
         candidates, warnings = _from_manifest(target_id), []
+        warnings.append(
+            "포털 앱(/apps/*) 시나리오는 로그인·세션 필요(access=auth)로 분류됩니다."
+        )
         extractable = False
 
     defaults = [c.state_id for c in candidates if c.recommended and c.selectable]
@@ -199,13 +205,14 @@ def _from_manifest(target_id: str) -> list[ScenarioCandidate]:
             ScenarioCandidate(
                 state_id=sid,
                 label=state.get("label", sid),
-                description=state.get("description", ""),
+                description=(state.get("description") or "") or "로그인·세션 필요",
                 kind="page",
                 recommended=bool(state.get("required", True)),
                 selectable=True,
                 confidence="high",
                 ready_selector=ready,
                 steps=[{"action": "wait", "selector": ready}],
+                access="auth",
             )
         )
     return out
@@ -285,6 +292,13 @@ def _extract_my_gantt() -> tuple[list[ScenarioCandidate], list[str]]:
     candidates: list[ScenarioCandidate] = []
 
     def add(c: ScenarioCandidate) -> None:
+        if c.selectable and not c.access:
+            desc = c.description or ""
+            if desc and "로그인" not in desc:
+                desc = f"{desc} (로그인·세션 필요)"
+            elif not desc:
+                desc = "로그인·세션 필요"
+            c = replace(c, access="auth", description=desc)
         candidates.append(c)
 
     if _has_any(all_text, ['className={`app', 'className="app"', "h1.brand", 'className="brand"']):

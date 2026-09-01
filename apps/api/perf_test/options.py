@@ -20,8 +20,10 @@ class PerfTestOptions:
     duration_sec: int = DEFAULT_DURATION_SEC
     record_har: bool = False
     confirm_high_load: bool = False
-    access: str = "public"
+    access: str = "public,auth"
     manual_urls: list[str] = field(default_factory=list)
+    session_job_id: str = ""
+    session_storage: dict[str, Any] | None = field(default=None, repr=False)
 
     @classmethod
     def from_params(
@@ -35,8 +37,9 @@ class PerfTestOptions:
         duration_sec: int = DEFAULT_DURATION_SEC,
         record_har: bool = False,
         confirm_high_load: bool = False,
-        access: str = "public",
+        access: str = "public,auth",
         manual_urls: str = "",
+        session_job_id: str = "",
     ) -> PerfTestOptions:
         ids: list[str] = []
         if isinstance(state_ids, list):
@@ -57,7 +60,10 @@ class PerfTestOptions:
 
         urls: list[str] = []
         if manual_urls:
-            urls = [u.strip() for u in manual_urls.replace("\n", ",").split(",") if u.strip()]
+            from perf_test.scenario_urls import dedupe_manual_urls
+
+            raw_urls = [u.strip() for u in manual_urls.replace("\n", ",").split(",") if u.strip()]
+            urls = dedupe_manual_urls(raw_urls)
 
         return cls(
             target=(target or "").strip(),
@@ -68,8 +74,9 @@ class PerfTestOptions:
             duration_sec=max(5, min(3600, int(duration_sec or DEFAULT_DURATION_SEC))),
             record_har=bool(record_har),
             confirm_high_load=bool(confirm_high_load),
-            access=(access or "public").strip().lower() or "public",
+            access=(access or "public,auth").strip() or "public,auth",
             manual_urls=urls,
+            session_job_id=(session_job_id or "").strip(),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -83,4 +90,6 @@ class PerfTestOptions:
             "record_har": self.record_har,
             "access": self.access,
             "manual_urls": self.manual_urls,
+            "session_job_id": self.session_job_id,
+            "has_session_storage": bool(self.session_storage),
         }

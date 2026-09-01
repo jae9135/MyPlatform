@@ -30,8 +30,10 @@ def urls_from_candidate(candidate: dict[str, Any], base_url: str) -> list[str]:
         if not isinstance(step, dict):
             continue
         action = str(step.get("action") or "").lower()
-        if action == "goto" and step.get("url"):
-            out.append(str(step["url"]).strip())
+        if action == "goto":
+            path = step.get("path") or step.get("url")
+            if path:
+                out.append(str(path).strip())
     if not out and candidate.get("page_url"):
         out.append(str(candidate["page_url"]).strip())
     normalized: list[str] = []
@@ -106,6 +108,54 @@ def normalize_locust_requests(
     return locust_host, out
 
 
+def parse_access_tiers(access: str) -> set[str]:
+    """public / auth / public,auth / both → 접근 tier 집합."""
+    raw = (access or "public,auth").strip().lower()
+    if raw in ("both", "all"):
+        return {"public", "auth"}
+    tiers = {
+        p.strip()
+        for p in raw.replace(";", ",").split(",")
+        if p.strip() in ("public", "auth")
+    }
+    return tiers or {"public"}
+
+
+def candidate_access_tier(candidate: dict[str, Any]) -> str:
+    """포털 /apps/* 시나리오는 access 미지정 시 auth."""
+    tier = str(candidate.get("access") or "auth").strip().lower()
+    return tier if tier in ("public", "auth") else "auth"
+
+
+def candidate_requires_session(candidate: dict[str, Any]) -> bool:
+    return candidate_access_tier(candidate) == "auth"
+
+
+def split_candidates_by_session(
+    candidates: list[dict[str, Any]],
+    *,
+    has_session: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    runnable: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for c in candidates:
+        if not isinstance(c, dict):
+            continue
+        tier = candidate_access_tier(c)
+        if tier == "auth" and not has_session:
+            skipped.append(
+                {
+                    "state_id": str(c.get("state_id") or ""),
+                    "label": candidate_display_name(c),
+                    "access": tier,
+                    "reason": "로그인 세션 없음 — 측정에서 제외",
+                }
+            )
+        else:
+            runnable.append(c)
+    return runnable, skipped
+
+
 def fetch_scenarios(
     target: str,
     *,
@@ -116,8 +166,7 @@ def fetch_scenarios(
     if cfg_target == "ipms-online":
         from web_quality.presets.ipms_online import extract_ipms_scenarios  # type: ignore
 
-        tier = (access or "public").strip().lower() or "public"
-        return extract_ipms_scenarios(base_url=base_url, access=tier)
+        return extract_ipms_scenarios(base_url=base_url, access=access or "public,auth")
 
     from web_quality.manifest import PORTAL_TARGET_IDS  # type: ignore
     from web_quality.scenario_extract import extract_scenarios  # type: ignore
@@ -158,6 +207,57 @@ def _base_path_from_url(base_url: str) -> str:
     return path
 
 
+def dedupe_manual_urls(urls: list[str]) -> list[str]:
+    """체크리스트·직접 입력 등에서 중복 경로 제거."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in urls:
+        u = (raw or "").strip()
+        if not u:
+            continue
+        if u.startswith("http://") or u.startswith("https://"):
+            key = u.lower()
+            norm = u
+        else:
+            norm = u if u.startswith("/") else f"/{u.lstrip('/')}"
+            key = norm.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(norm)
+    return out
+
+
+def resolve_manual_goto_url(path_or_url: str, base_url: str) -> str:
+    """직접 입력 경로 → Playwright goto URL."""
+    raw = (path_or_url or "").strip()
+    if not raw:
+        return base_url.rstrip("/") + "/"
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+    base = base_url.rstrip("/")
+    path = raw if raw.startswith("/") else f"/{raw}"
+    return urljoin(base + "/", path.lstrip("/"))
+
+
+def resolve_har_start_url(
+    candidate: dict[str, Any] | None,
+    base_url: str,
+    *,
+    manifest_path: str | None = None,
+) -> str:
+    """HAR 녹화 전 첫 navigation URL (goto 없는 시나리오는 manifest path 사용)."""
+    base = base_url.rstrip("/")
+    if candidate:
+        urls = urls_from_candidate(candidate, base_url)
+        if urls:
+            return urls[0]
+    if manifest_path:
+        path = manifest_path if manifest_path.startswith("/") else f"/{manifest_path}"
+        return urljoin(base + "/", path.lstrip("/"))
+    return f"{base}/"
+
+
 def _manifest_path_for_target(target: str) -> str | None:
     if not target or target == "ipms-online":
         return None
@@ -170,19 +270,45 @@ def _manifest_path_for_target(target: str) -> str | None:
     return p if p else None
 
 
+def candidate_display_name(candidate: dict[str, Any]) -> str:
+    label = str(candidate.get("label") or candidate.get("state_id") or "").strip()
+    sid = str(candidate.get("state_id") or "").strip()
+    if label and sid and label != sid:
+        return f"{label} [{sid}]"
+    return label or sid or "scenario"
+
+
+LABEL_PATH_SEP = " · "
+
+
+def format_labeled_request_name(label: str, path: str) -> str:
+    path = (path or "/").strip()
+    text = f"{label}{LABEL_PATH_SEP}{path}"
+    return text[:120]
+
+
 def candidate_to_request_entries(
     candidate: dict[str, Any],
     base_url: str,
     fallback_path: str | None = None,
 ) -> list[dict[str, Any]]:
+    tag = candidate_display_name(candidate)
+    sid = str(candidate.get("state_id") or "")
     urls = urls_from_candidate(candidate, base_url)
     if urls:
-        return urls_to_requests(urls, base_url)
+        entries = urls_to_requests(urls, base_url)
+        for entry in entries:
+            path = str(entry.get("path") or "/")
+            entry["name"] = format_labeled_request_name(tag, path)
+            if sid:
+                entry["scenario_id"] = sid
+        return entries
     path = fallback_path or _base_path_from_url(base_url)
-    label = str(candidate.get("label") or candidate.get("state_id") or path)
-    sid = str(candidate.get("state_id") or "")
-    name = label if not sid else f"{label} [{sid}]"
-    return [{"method": "GET", "path": path, "name": name[:120]}]
+    name = format_labeled_request_name(tag, path)
+    out: dict[str, Any] = {"method": "GET", "path": path, "name": name}
+    if sid:
+        out["scenario_id"] = sid
+    return [out]
 
 
 def _dedupe_requests(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:

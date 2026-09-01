@@ -21,6 +21,7 @@ def run_locust_isolated(
     duration_sec: int,
     on_progress: Callable[[int, str, dict[str, Any] | None], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    storage_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "host": host,
@@ -28,6 +29,7 @@ def run_locust_isolated(
         "users": users,
         "spawn_rate": spawn_rate,
         "duration_sec": duration_sec,
+        "storage_state": storage_state,
     }
     proc = subprocess.Popen(
         [sys.executable, "-m", "perf_test.cli_run"],

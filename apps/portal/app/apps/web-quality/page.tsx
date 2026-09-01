@@ -23,6 +23,7 @@ import {
   type FixGuideEntry,
   resolveFindingFix,
 } from "@/lib/webQualityFix";
+import { formatUtcIsoToKst } from "@/lib/formatDateTime";
 import { buildWqPrefs, loadWqPrefs, saveWqPrefs } from "@/lib/wqPrefs";
 import { openWebQualityHistoryPopout } from "@/lib/webQualityPopout";
 
@@ -122,6 +123,45 @@ type ScenarioPayload = Record<string, unknown> & {
 
 function candidatesFromPayload(j: Record<string, unknown>): ScenarioCandidate[] {
   return Array.isArray(j.candidates) ? (j.candidates as ScenarioCandidate[]) : [];
+}
+
+function exportScenarioPreset(opts: {
+  mode: ScanMode;
+  pageUrl: string;
+  ipmsUrl: string;
+  payload: ScenarioPayload;
+  selectedIds: string[];
+}): void {
+  const { mode, pageUrl, ipmsUrl, payload, selectedIds } = opts;
+  const baseUrl =
+    mode === "ipms-public" || mode === "ipms-auth"
+      ? ipmsUrl.trim()
+      : pageUrl.trim();
+  const frozen = {
+    preset_version: "1.0",
+    exported_at: new Date().toISOString(),
+    tool: "web-quality",
+    mode,
+    target: typeof payload.target === "string" ? payload.target : "",
+    target_name: typeof payload.target_name === "string" ? payload.target_name : "",
+    page_url: baseUrl,
+    access: typeof payload.access === "string" ? payload.access : "",
+    defaults_selected: selectedIds,
+    candidates: Array.isArray(payload.candidates) ? payload.candidates : [],
+    warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
+  };
+  const blob = new Blob([JSON.stringify(frozen, null, 2)], {
+    type: "application/json",
+  });
+  const slug =
+    (typeof payload.target === "string" && payload.target) ||
+    mode.replace(/[^a-z0-9]+/gi, "-") ||
+    "scenario";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `wq-preset-${slug}-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -404,6 +444,9 @@ export default function WebQualityPage() {
   const [scenarios, setScenarios] = useState<ScenarioCandidate[]>([]);
   const [extractable, setExtractable] = useState(false);
   const [scenarioLoaded, setScenarioLoaded] = useState(false);
+  const [lastScenarioPayload, setLastScenarioPayload] = useState<ScenarioPayload | null>(
+    null,
+  );
   const [scenarioBusy, setScenarioBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [scenarioWarnings, setScenarioWarnings] = useState<string[]>([]);
@@ -620,6 +663,7 @@ export default function WebQualityPage() {
 
   const applyScenarioPayload = useCallback((j: Record<string, unknown>) => {
     const list = candidatesFromPayload(j);
+    setLastScenarioPayload(j as ScenarioPayload);
     setExtractable(Boolean(j.extractable));
     setScenarios(list);
     setScenarioLoaded(true);
@@ -787,6 +831,7 @@ export default function WebQualityPage() {
       setScenarios([]);
       setSelectedIds([]);
       setScenarioLoaded(false);
+      setLastScenarioPayload(null);
       setMsg("");
       setSessionJobId("");
       setSessionPageUrl("");
@@ -796,6 +841,7 @@ export default function WebQualityPage() {
     }
     if (mode === "java-upload") {
       setScenarioLoaded(false);
+      setLastScenarioPayload(null);
       setScenarios([]);
       setSelectedIds([]);
       setMsg("");
@@ -1259,7 +1305,7 @@ export default function WebQualityPage() {
         setResultsByMode((prev) => ({ ...prev, [scanMode]: payload }));
         setJobIdsByMode((prev) => ({ ...prev, [scanMode]: jobId }));
         setTab("all");
-        setMsg(`이력 불러옴 — ${payload.findings.length}건 (${payload.scanned_at?.slice(0, 19) || ""})`);
+        setMsg(`이력 불러옴 — ${payload.findings.length}건 (${formatUtcIsoToKst(payload.scanned_at, "")})`);
         window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
       }
     } catch (e) {
@@ -1374,7 +1420,24 @@ export default function WebQualityPage() {
       <div className="wq-scenario-block">
         <div className="wq-scenario-head">
           <h3>화면 시나리오</h3>
-          <div className="btn-row">
+            <div className="btn-row">
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={scenarioBusy || !lastScenarioPayload}
+                onClick={() => {
+                  if (!lastScenarioPayload) return;
+                  exportScenarioPreset({
+                    mode,
+                    pageUrl,
+                    ipmsUrl,
+                    payload: lastScenarioPayload,
+                    selectedIds,
+                  });
+                }}
+              >
+                프리셋 JSON 저장
+              </button>
             {mode === "external" ? (
               <button
                 type="button"
@@ -1445,6 +1508,19 @@ export default function WebQualityPage() {
                 ? "JSP/HTML 정적 진단은 URL 없이. 화면 캡처는 배포 URL + 「화면 진단 포함」."
                 : "실시간 탐색. 2단계 인증 등 접근 불가 화면은 제외됩니다."}
         </p>
+        {mode === "external" ? (
+          <p className="hint warn">
+            <strong>납품·감사용:</strong> 탐색 결과는 환경마다 달라질 수 있습니다. 검수 범위를
+            고정하려면 「프리셋 JSON 저장」 후 Git(<code>presets/clients/</code>)에 보관하세요.
+            성능 진단은 동일 <code>state_ids</code>를 perf-test에서 선택합니다.
+          </p>
+        ) : null}
+        {mode === "java-upload" && scenarioLoaded ? (
+          <p className="hint warn">
+            Java ZIP 추출 시나리오도 납품 전 「프리셋 JSON 저장」으로 범위를 고정하는 것을
+            권장합니다.
+          </p>
+        ) : null}
         {scenarioWarnings.length ? (
           <ul className="hint">
             {scenarioWarnings.map((w) => (
@@ -1838,6 +1914,13 @@ python scripts/save_ipms_session.py --url ${pageUrl.trim() || EXTERNAL_URL_PLACE
                 </label>
               </div>
             ) : null}
+            <div className="wq-alert" style={{ marginBottom: "0.75rem" }}>
+              <p>
+                <strong>조사용 탐색</strong> — 링크·<code>data-wq-target</code>을 Playwright로
+                자동 수집합니다. 공공 납품·재현 검수에는 탐색 후 「프리셋 JSON 저장」으로 범위를
+                고정하세요.
+              </p>
+            </div>
             <div className="btn-row">
               <button
                 type="button"
@@ -2013,7 +2096,7 @@ python scripts/save_ipms_session.py --url ${pageUrl.trim() || EXTERNAL_URL_PLACE
                       : result.mode === "external"
                         ? ` · ${result.page_url || result.base_url}`
                         : ` · ${result.base_url}`}{" "}
-            · {result.scanned_at}
+            · {formatUtcIsoToKst(result.scanned_at)}
           </p>
           {!result.runtime_available && result.runtime_error ? (
             <div className="wq-alert warn">

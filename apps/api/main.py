@@ -2006,6 +2006,38 @@ def _load_perf_test():
     return pt
 
 
+@app.get("/v1/diagnostics/targets")
+def diagnostics_targets() -> dict:
+    """Cross-tool target registry (shared manifest)."""
+    _ensure_api_path()
+    from shared.targets import (  # type: ignore
+        CANONICAL_TARGETS,
+        LEGACY_SCENARIO_PRESETS,
+        build_source_scan_targets,
+        build_web_quality_targets,
+        portal_ids_for_tool,
+        validate_target_alignment,
+    )
+
+    return {
+        "ok": True,
+        "alignment_errors": validate_target_alignment(),
+        "canonical": [
+            {
+                "id": t["id"],
+                "name": t.get("name"),
+                "tools": t.get("tools") or [],
+                "path": t.get("path"),
+            }
+            for t in CANONICAL_TARGETS
+        ],
+        "legacy_presets": LEGACY_SCENARIO_PRESETS,
+        "web_quality_count": len(build_web_quality_targets()),
+        "source_scan_count": len(build_source_scan_targets()),
+        "perf_test_portal_ids": sorted(portal_ids_for_tool("perf_test")),
+    }
+
+
 @app.get("/v1/perf-test/environment")
 def perf_test_environment() -> dict:
     pt = _load_perf_test()
@@ -2043,9 +2075,17 @@ async def perf_test_validate(
     confirm_high_load: str = Form("false"),
     access: str = Form("public"),
     manual_urls: str = Form(""),
+    session_job_id: str = Form(""),
+    session_storage: UploadFile | None = File(None),
 ) -> dict:
     pt = _load_perf_test()
     from perf_test.options import PerfTestOptions  # type: ignore
+
+    session_bytes: bytes | None = None
+    if session_storage is not None:
+        session_bytes = await session_storage.read()
+        if not session_bytes:
+            session_bytes = None
 
     opts = PerfTestOptions.from_params(
         target=target,
@@ -2058,8 +2098,74 @@ async def perf_test_validate(
         confirm_high_load=(confirm_high_load or "false").lower() in ("1", "true", "yes"),
         access=access,
         manual_urls=manual_urls,
+        session_job_id=session_job_id,
     )
-    return pt.validate_run(opts)
+    return pt.validate_run(opts, session_storage_bytes=session_bytes)
+
+
+@app.get("/v1/perf-test/session/validate")
+async def perf_test_session_validate(
+    job_id: str = Query(""),
+    base_url: str = Query(""),
+) -> dict:
+    pt = _load_perf_test()
+    return pt.validate_perf_session(session_job_id=job_id, base_url=base_url)
+
+
+@app.post("/v1/perf-test/session/validate")
+async def perf_test_session_validate_upload(
+    base_url: str = Form(""),
+    session_job_id: str = Form(""),
+    session_storage: UploadFile | None = File(None),
+) -> dict:
+    pt = _load_perf_test()
+    session_bytes: bytes | None = None
+    if session_storage is not None:
+        session_bytes = await session_storage.read()
+        if not session_bytes:
+            session_bytes = None
+    return pt.validate_perf_session(
+        session_job_id=session_job_id,
+        base_url=base_url,
+        session_storage_bytes=session_bytes,
+    )
+
+
+@app.post("/v1/perf-test/scenarios/preview")
+async def perf_test_scenarios_preview(
+    target: str = Form(""),
+    base_url: str = Form(""),
+    state_ids: str = Form(""),
+    access: str = Form("public"),
+    session_job_id: str = Form(""),
+    session_storage: UploadFile | None = File(None),
+) -> dict:
+    pt = _load_perf_test()
+    from perf_test.options import PerfTestOptions  # type: ignore
+
+    session_bytes: bytes | None = None
+    if session_storage is not None:
+        session_bytes = await session_storage.read()
+        if not session_bytes:
+            session_bytes = None
+
+    opts = PerfTestOptions.from_params(
+        target=target,
+        base_url=base_url,
+        state_ids=state_ids,
+        access=access,
+        session_job_id=session_job_id,
+    )
+    try:
+        import asyncio
+
+        return await asyncio.to_thread(
+            pt.preview_run_scenarios,
+            opts,
+            session_storage_bytes=session_bytes,
+        )
+    except Exception as e:
+        raise HTTPException(400, detail=str(e)) from e
 
 
 @app.post("/v1/perf-test/run")
@@ -2074,10 +2180,18 @@ async def perf_test_run(
     confirm_high_load: str = Form("false"),
     access: str = Form("public"),
     manual_urls: str = Form(""),
+    session_job_id: str = Form(""),
     async_progress: str = Form("true"),
+    session_storage: UploadFile | None = File(None),
 ) -> dict:
     pt = _load_perf_test()
     from perf_test.options import PerfTestOptions  # type: ignore
+
+    session_bytes: bytes | None = None
+    if session_storage is not None:
+        session_bytes = await session_storage.read()
+        if not session_bytes:
+            session_bytes = None
 
     opts = PerfTestOptions.from_params(
         target=target,
@@ -2090,12 +2204,13 @@ async def perf_test_run(
         confirm_high_load=(confirm_high_load or "false").lower() in ("1", "true", "yes"),
         access=access,
         manual_urls=manual_urls,
+        session_job_id=session_job_id,
     )
     use_async = (async_progress or "true").lower() in ("1", "true", "yes")
     if not use_async:
         raise HTTPException(400, detail="async_progress=true 필요")
     try:
-        return pt.start_run_job(opts)
+        return pt.start_run_job(opts, session_storage_bytes=session_bytes)
     except Exception as e:
         raise HTTPException(400, detail=str(e)) from e
 

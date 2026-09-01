@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isPortalAuthed } from "@/lib/portal-auth";
+import { checkUpstreamConfig, upstreamBase, upstreamHeaders } from "@/lib/upstreamApi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function upstreamBase(): string {
-  const fromEnv =
-    process.env.API_UPSTREAM_URL?.trim() ||
-    process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-  if (fromEnv) return fromEnv.replace(/\/$/, "");
-  return "http://127.0.0.1:8001";
-}
 
 async function portalAuthed(req: NextRequest): Promise<boolean> {
   const password = process.env.PORTAL_PASSWORD?.trim();
@@ -18,19 +11,20 @@ async function portalAuthed(req: NextRequest): Promise<boolean> {
   return isPortalAuthed((name) => req.cookies.get(name));
 }
 
-function upstreamHeaders(): HeadersInit {
-  const headers: Record<string, string> = { accept: "application/json" };
-  const apiKey = process.env.API_ACCESS_KEY?.trim();
-  if (apiKey) headers["x-api-key"] = apiKey;
-  return headers;
-}
-
-/** 브라우저 → 포털 서버 → 로컬 API /health (API_ACCESS_KEY·프록시 이슈 우회) */
+/** 브라우저 → 포털 서버 → Render /health (Vercel 프록시, CORS 불필요) */
 export async function GET(req: NextRequest) {
   if (!(await portalAuthed(req))) {
     return NextResponse.json(
       { detail: "포털 로그인이 필요합니다. /login 에서 다시 로그인하세요." },
       { status: 401 },
+    );
+  }
+
+  const configErr = checkUpstreamConfig();
+  if (configErr) {
+    return NextResponse.json(
+      { detail: configErr.detail, missing: configErr.missing },
+      { status: configErr.status },
     );
   }
 
@@ -54,7 +48,7 @@ export async function GET(req: NextRequest) {
         {
           detail:
             detail ||
-            `API health HTTP ${res.status} — ${base} 실행 및 API_ACCESS_KEY(포털·API 동일) 확인`,
+            `API health HTTP ${res.status} — ${base} · API_ACCESS_KEY(포털·Render 동일) 확인`,
         },
         { status: 502 },
       );
@@ -68,7 +62,7 @@ export async function GET(req: NextRequest) {
   } catch {
     return NextResponse.json(
       {
-        detail: `API 서버에 연결할 수 없습니다 (${base}). .\\scripts\\start-api-source-scan.ps1 실행 후 「환경 다시 확인」.`,
+        detail: `Render API에 연결할 수 없습니다 (${base}). Render 서비스 실행·URL·API_ACCESS_KEY를 확인하세요.`,
       },
       { status: 503 },
     );

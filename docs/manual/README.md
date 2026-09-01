@@ -90,3 +90,4 @@ API 서버(`apps/api`) 추가 변수: `DATABASE_URL`, `PMD_HOME`, `SPOTBUGS_HOME
 - [아키텍처](../architecture.md)
 - [배포 가이드](../DEPLOY.md)
 - [소스스캔 환경 설정](../source-scan-setup.md)
+- [진단 시나리오 통합 로드맵](../diagnostics-scenario-roadmap.md) — 소스·웹품질·성능 진단 시나리오 Phase 0~3

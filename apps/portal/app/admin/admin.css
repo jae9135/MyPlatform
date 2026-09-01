@@ -120,6 +120,12 @@
   margin: 0;
 }
 
+.admin-subheading {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
 .admin-stat-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

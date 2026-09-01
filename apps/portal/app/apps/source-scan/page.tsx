@@ -23,6 +23,7 @@ import {
   type FixGuidesCatalog,
 } from "@/lib/sourceScanFix";
 import { loadSourceScanPrefs, saveSourceScanPrefs } from "@/lib/sourceScanPrefs";
+import { formatUtcIsoToKst } from "@/lib/formatDateTime";
 import {
   clientSideZipValidate,
   readJsonResponse,
@@ -655,7 +656,7 @@ export default function SourceScanPage() {
       });
       setTab("all");
       setMsg(
-        `이력 불러옴 — ${payload.findings?.length ?? 0}건 (${payload.scanned_at?.slice(0, 19) || ""})`
+        `이력 불러옴 — ${payload.findings?.length ?? 0}건 (${formatUtcIsoToKst(payload.scanned_at, "")})`
       );
       window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
     } catch (e) {
@@ -1105,7 +1106,7 @@ export default function SourceScanPage() {
         <section className="panel">
           <h2>진단 결과</h2>
           <p className="hint">
-            {result.target_name} · {result.scanned_at}
+            {result.target_name} · {formatUtcIsoToKst(result.scanned_at)}
             {result.languages?.length ? ` · 언어: ${result.languages.join(", ")}` : ""}
           </p>
           {result.jdk_hint ? <p className="hint">{result.jdk_hint}</p> : null}

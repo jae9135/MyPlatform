@@ -40,7 +40,7 @@ export default async function AdminPage() {
       {!supabaseOk ? (
         <p className="msg err">
           Supabase service role가 필요합니다. <code>SUPABASE_SERVICE_ROLE_KEY</code>와 마이그레이션(
-          <code>contact_inquiries</code>, <code>portal_visit_daily</code>)을 적용하세요.
+          <code>contact_inquiries</code>, <code>portal_visit_daily</code>, <code>portal_visit_log</code>)을 적용하세요.
         </p>
       ) : null}
 

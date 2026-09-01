@@ -2,7 +2,7 @@
 
 파일럿: **MyGantt**. LLM 없음. 휴리스틱 추출 + 사용자 선택 + 기존 Playwright/axe.
 
-관련: [my-gantt-scenario-guide.md](./my-gantt-scenario-guide.md)
+관련: [my-gantt-scenario-guide.md](./my-gantt-scenario-guide.md) · [진단 시나리오 통합 로드맵](../../../../docs/diagnostics-scenario-roadmap.md)
 
 ---
 
