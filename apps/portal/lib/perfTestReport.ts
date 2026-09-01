@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import type { PerfEndpointRow } from "@/lib/perfTestInsights";
 
 export type PerfReportData = {
   job_id?: string;
@@ -20,14 +21,7 @@ export type PerfReportData = {
     duration_sec?: number;
     users?: number;
   };
-  endpoints?: {
-    name: string;
-    method?: string;
-    num_requests: number;
-    num_failures?: number;
-    avg_ms: number;
-    p95_ms: number;
-  }[];
+  endpoints?: PerfEndpointRow[];
   requests_preview?: { method?: string; path?: string; name?: string }[];
 };
 

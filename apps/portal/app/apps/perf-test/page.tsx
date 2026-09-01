@@ -29,6 +29,7 @@ import {
   buildPerfInsights,
   endpointRowClass,
   parseEndpointName,
+  type PerfEndpointRow,
 } from "@/lib/perfTestInsights";
 
 const IPMS_DEFAULT_URL = "http://14.35.194.178:12000/ipms.online/";
@@ -271,16 +272,6 @@ type PerfSummary = {
   users?: number;
 };
 
-type PerfEndpoint = {
-  name: string;
-  method?: string;
-  num_requests: number;
-  num_failures?: number;
-  avg_ms: number;
-  p95_ms: number;
-  pending?: boolean;
-};
-
 type RequestPreview = {
   method?: string;
   path?: string;
@@ -305,7 +296,7 @@ type PerfResult = {
   spawn_rate?: number;
   summary?: PerfSummary;
   time_series?: { elapsed_sec: number; rps: number; avg_ms: number; p95_ms: number; users: number }[];
-  endpoints?: PerfEndpoint[];
+  endpoints?: PerfEndpointRow[];
   requests_preview?: RequestPreview[];
 };
 
@@ -393,7 +384,7 @@ function EndpointPerfTable({
   rows,
   emptyHint,
 }: {
-  rows: PerfEndpoint[];
+  rows: PerfEndpointRow[];
   emptyHint?: string;
 }) {
   if (!rows.length) {
@@ -430,7 +421,7 @@ function EndpointPerfTable({
                 <EndpointNameCell name={ep.name} />
               </td>
               <td>{ep.method ?? "GET"}</td>
-              <td>{ep.pending ? "—" : ep.num_requests}</td>
+              <td>{ep.pending ? "—" : (ep.num_requests ?? 0)}</td>
               <td>{ep.pending ? "—" : ep.num_failures ?? 0}</td>
               <td>{ep.pending ? "—" : ep.avg_ms}</td>
               <td>{ep.pending ? "—" : ep.p95_ms}</td>
