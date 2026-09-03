@@ -1562,7 +1562,7 @@ export default function PerfTestPage() {
       const ok = j.summary?.ok ?? 0;
       const fail = j.summary?.fail ?? 0;
       const loginFailed = (j.items || []).some(
-        (item) => !item.ok && isLoginPreviewError(String(item.error || "")),
+        (item) => !item.open_ok && isLoginPreviewError(String(item.open_error || "")),
       );
       if (loginFailed) {
         setNeedLogin(true);
