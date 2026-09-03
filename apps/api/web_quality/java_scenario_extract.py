@@ -50,6 +50,23 @@ FILE_INPUT_RE = re.compile(r'<input[^>]+type\s*=\s*["\']file["\']', re.IGNORECAS
 CONFIRM_RE = re.compile(r"\bconfirm\s*\(", re.IGNORECASE)
 
 
+def _infer_ready_selector(content: str) -> str:
+    """JSP/HTML에서 앱 본문 마커를 찾아 body 대신 구체 셀렉터를 사용."""
+    if re.search(r"\bsection-wrap\b", content, re.I):
+        return ".section-wrap"
+    if re.search(r'id\s*=\s*["\']container["\']', content, re.I):
+        return "#container"
+    if re.search(r'id\s*=\s*["\']contents["\']', content, re.I):
+        return "#contents"
+    if re.search(r"<main\b", content, re.I):
+        return "main"
+    if re.search(r'role\s*=\s*["\']main["\']', content, re.I):
+        return '[role="main"]'
+    if re.search(r'class\s*=\s*["\'][^"\']*\bwrap\b', content, re.I):
+        return ".wrap"
+    return "body"
+
+
 @dataclass
 class SpringMapping:
     url_path: str
@@ -195,6 +212,43 @@ def parse_spring_mappings(java_files: list[Path], root: Path) -> list[SpringMapp
     return mappings
 
 
+def _infer_fallback_paths(url_path: str, view_name: str) -> list[str]:
+    """@GetMapping과 viewName/확장자(.do) 불일치 시 미리보기 대체 URL."""
+    primary = (url_path or "").split("?")[0].rstrip("/") or "/"
+    seen: set[str] = {primary}
+
+    def norm(raw: str) -> str:
+        p = (raw or "").split("?")[0]
+        if not p.startswith("/"):
+            p = f"/{p}"
+        return p.rstrip("/") or "/"
+
+    raw_candidates: list[str] = []
+    vn = view_name.replace("\\", "/").strip("/")
+    if vn:
+        for suffix in ("", ".do", ".html"):
+            raw_candidates.append(f"/{vn}{suffix}")
+        tail = vn.split("/")[-1]
+        if tail:
+            for suffix in ("", ".do"):
+                raw_candidates.append(f"/{tail}{suffix}")
+    if primary.endswith(".do"):
+        raw_candidates.append(primary[:-3])
+    elif primary.endswith(".html"):
+        pass
+    elif any(part.endswith(".do") for part in (url_path, vn) if part):
+        raw_candidates.append(f"{primary}.do")
+
+    out: list[str] = []
+    for raw in raw_candidates:
+        key = norm(raw)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(raw if raw.startswith("/") else f"/{raw}")
+    return out
+
+
 def _page_label(path: Path, content: str) -> str:
     for pat in (TITLE_RE, H1_RE):
         m = pat.search(content)
@@ -231,7 +285,11 @@ def _extract_modals_from_view(
                 kind="dialog",
                 recommended=False,
                 selectable=bool(parent_url),
-                skip_reason="" if parent_url else "부모 URL 미확인 — 수동 확인",
+                skip_reason=(
+                    "JSP 모달 — 열기 동작 없음. 부모 화면에서 수동 확인 (자동 미리보기·화면 진단 제외)"
+                    if parent_url
+                    else "부모 URL 미확인 — 수동 확인"
+                ),
                 confidence="low",
                 source_files=[rel],
                 evidence=f"id=\"{mid}\"",
@@ -240,6 +298,26 @@ def _extract_modals_from_view(
             )
         )
     return out
+
+
+def is_jsp_auto_modal(candidate: ScenarioCandidate | dict[str, Any]) -> bool:
+    """JSP id-only modal extract — no click/open step, not safe for auto preview/runtime."""
+    if isinstance(candidate, ScenarioCandidate):
+        kind = candidate.kind
+        confidence = candidate.confidence
+        recommended = candidate.recommended
+        steps = candidate.steps
+    else:
+        kind = str(candidate.get("kind") or "")
+        confidence = str(candidate.get("confidence") or "")
+        recommended = candidate.get("recommended")
+        steps = candidate.get("steps") or []
+    if kind != "dialog" or confidence != "low" or recommended is not False:
+        return False
+    has_click = any(
+        isinstance(s, dict) and s.get("action") == "click" for s in steps
+    )
+    return not has_click
 
 
 def extract_java_scenarios(root: Path, java_files: list[Path]) -> tuple[list[ScenarioCandidate], list[str]]:
@@ -273,9 +351,11 @@ def extract_java_scenarios(root: Path, java_files: list[Path]) -> tuple[list[Sce
             risk.append("file_input")
         if vcontent and CONFIRM_RE.search(vcontent):
             risk.append("confirm")
+        ready_sel = _infer_ready_selector(vcontent) if vcontent else "body"
+        fallback_paths = _infer_fallback_paths(mp.url_path, mp.view_name)
         steps = [
             {"action": "goto", "path": mp.url_path},
-            {"action": "wait", "selector": "body"},
+            {"action": "wait", "selector": ready_sel},
         ]
         candidates.append(
             ScenarioCandidate(
@@ -290,8 +370,9 @@ def extract_java_scenarios(root: Path, java_files: list[Path]) -> tuple[list[Sce
                 confidence="high" if vfile else "medium",
                 source_files=[vrel, mp.java_file],
                 evidence=f"@GetMapping {mp.url_path}",
-                ready_selector="body",
+                ready_selector=ready_sel,
                 steps=steps,
+                fallback_paths=fallback_paths,
             )
         )
         if vfile and vcontent:
@@ -338,10 +419,25 @@ def extract_java_scenarios(root: Path, java_files: list[Path]) -> tuple[list[Sce
             f"@RequestMapping URL 매핑 없음 — JSP/HTML {static_view_count}개는 정적 진단만 가능합니다."
             + " 화면 캡처는 Controller 매핑이 있거나 배포 URL을 알 때 가능합니다."
         )
+    elif any(c.kind == "page" for c in candidates):
+        warnings.append(
+            "Spring @GetMapping URL은 서버 매핑입니다. IPMS·SPA 배포에서는 주소창 직접 접근이 "
+            "「비정상적인 접근」으로 차단될 수 있습니다 — 정적 진단 또는 IPMS 온라인 탭을 이용하세요."
+        )
 
     # dedupe state_id
     seen: set[str] = set()
     unique: list[ScenarioCandidate] = []
+    modal_count = sum(
+        1
+        for c in candidates
+        if c.kind == "dialog" and c.confidence == "low" and not c.recommended
+    )
+    if modal_count:
+        warnings.append(
+            f"JSP에서 추출한 모달 {modal_count}건은 열기 동작 없이 id만 확인되어 "
+            "기본 미리보기·화면 진단에서 제외됩니다."
+        )
     for c in candidates:
         if c.state_id in seen:
             continue

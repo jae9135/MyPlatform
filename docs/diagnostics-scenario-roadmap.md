@@ -157,6 +157,33 @@
 
 ---
 
+### Phase 4 — KRDS / UI·UX 가이드라인 (v2.x, 웹품질 확장)
+
+**목표:** [디지털 정부서비스 UIUX 가이드라인(2025.08)](https://www.krds.go.kr/html/site/community/community_01_01.html?nttId=9) 검증을 **웹품질과 동일 엔진·시나리오**로 실행하되, **규칙·보고서·UI 탭은 분리**.
+
+| # | 작업 | 주요 파일 | 완료 기준 |
+|---|------|-----------|-----------|
+| 4.1 | **krds_uiux rule catalog** + JSON Schema | `rules/krds_uiux.json`, `krds_uiux.schema.json` | ✅ `UX-KRDS-*` id, `category: uiux` |
+| 4.2 | catalog 로더·API | `catalog.py`, `GET /v1/web-quality/rules` | ✅ `krds_uiux` 배열 반환 |
+| 4.3 | 런타임 KRDS 휴리스틱 | `krds_scanner.py`, `runtime_common.scan_page_states` | ✅ 화면별 DOM/CSS 검사 |
+| 4.4 | 정적 KRDS (포털 TSX) | `krds_scanner.scan_krds_static_files` | ✅ layout·krds 클래스·viewport |
+| 4.5 | 수동 UX 패턴 체크리스트 | `append_krds_manual_findings` | ✅ 신청·동의·로그인·오류 UX |
+| 4.6 | WQ UI **「UI·UX(KRDS)」** 탭 + 옵션 | `web-quality/page.tsx`, `include_krds` Form | ✅ 탭 필터·체크박스 |
+| 4.7 | Excel **KRDS_UIUX** 시트 | `report.py` | ✅ 규칙·수동확인 시트 |
+| 4.8 | catalog 검증 스크립트 | `scripts/validate_krds_catalog.py` | ✅ CI/로컬 실행 |
+| 4.9 | 서비스 패턴 시나리오 확대 (선택) | frozen preset + 오류/동의 state | Phase 3 preset과 연계 |
+| 4.10 | Figma·시각 diff (선택) | — | v2.1+ |
+
+**원칙**
+
+- KWCAG·전자정부 finding과 **섞지 않음** (`category: uiux` 고정).
+- `include_krds=false` 로 기존 웹품질-only 실행 가능 (호환).
+- perf-test·source-scan은 **변경 없음** (WQ 전용 rule pack).
+
+**영향:** 소스 보안 × / WQ ★★★ / perf ×
+
+---
+
 ## 5. 진단별 — Phase별 수정 필요 여부
 
 | Phase | 소스코드·보안 | 웹 품질 | 성능 진단 |
@@ -165,6 +192,7 @@
 | 1 | △ (이력) | ○ | ○ |
 | 2 | ○ (manifest) | ○ | △ |
 | 3 | × | ○ | ○ |
+| 4 | × | ○ (KRDS 모듈) | × |
 
 ○ = 수정 권장/필요 · △ = 경미 · × = 불필요
 

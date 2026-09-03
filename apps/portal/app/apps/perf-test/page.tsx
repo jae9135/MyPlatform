@@ -40,7 +40,42 @@ const SESSION_STATUS = {
   launching: "로그인 창 실행 중…",
   loginRequired: "로그인하세요 — API 서버 Chromium 창에서 로그인을 완료하세요.",
   done: "로그인 완료",
+  autoConnected: "기존 로그인 세션 자동 연결",
 } as const;
+
+const LOGIN_SESSION_NOT_READY = "미로그인시 로그인 시나리오는 선택·진단 불가";
+
+function isBrowserClosedSessionError(msg: string): boolean {
+  if (msg.includes("브라우저 창이 닫혔")) return true;
+  const lower = msg.toLowerCase();
+  return lower.includes("has been closed") || lower.includes("target page, context or browser");
+}
+
+function friendlySessionError(msg: string): string {
+  if (isBrowserClosedSessionError(msg)) {
+    return "브라우저 창이 닫혔습니다. 「로그인 창 띄움」을 다시 시도하세요.";
+  }
+  return msg;
+}
+
+function isLoginPreviewError(error: string): boolean {
+  const e = error.toLowerCase();
+  return (
+    e.includes("401") ||
+    e.includes("403") ||
+    e.includes("로그인") ||
+    e.includes("인증") ||
+    e.includes("unauthorized")
+  );
+}
+
+function isHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url.trim());
+}
+
+const HTTP_URL_REQUIRED_MSG = "URL은 http:// 또는 https:// 로 시작해야 합니다.";
+
+type LoginSessionMode = "browser" | "upload";
 
 function isIpmsLikeUrl(url: string): boolean {
   const raw = url.trim();
@@ -130,7 +165,21 @@ function buildAccessParam(includePublic: boolean, includeAuth: boolean): string 
   const tiers: string[] = [];
   if (includePublic) tiers.push("public");
   if (includeAuth) tiers.push("auth");
-  return tiers.join(",") || "public";
+  return tiers.join(",");
+}
+
+const IPMS_FULL_ACCESS = "public,auth";
+
+function filterCandidatesByAccess(
+  list: ScenarioCandidate[],
+  accessPublic: boolean,
+  accessAuth: boolean,
+): ScenarioCandidate[] {
+  if (!accessPublic && !accessAuth) return [];
+  const tiers = new Set<string>();
+  if (accessPublic) tiers.add("public");
+  if (accessAuth) tiers.add("auth");
+  return list.filter((c) => tiers.has((c.access || "public").toLowerCase()));
 }
 
 function defaultBaseUrlForTarget(targetId: string): string {
@@ -464,6 +513,7 @@ export default function PerfTestPage() {
   const [envLoading, setEnvLoading] = useState(true);
   const [envErr, setEnvErr] = useState("");
   const [target, setTarget] = useState("portal");
+  const targetRef = useRef(target);
   const [baseUrlInput, setBaseUrlInput] = useState("http://127.0.0.1:3000");
   const [appliedBaseUrl, setAppliedBaseUrl] = useState("http://127.0.0.1:3000");
   const [accessPublic, setAccessPublic] = useState(true);
@@ -484,18 +534,22 @@ export default function PerfTestPage() {
   const [candidates, setCandidates] = useState<ScenarioCandidate[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [scenarioMsg, setScenarioMsg] = useState("");
+  const [scenarioApplyMsg, setScenarioApplyMsg] = useState("");
   const [scenarioLoading, setScenarioLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewResult, setPreviewResult] = useState<ScenarioPreviewResult | null>(null);
   const [previewMsg, setPreviewMsg] = useState("");
   const previewBlockRef = useRef<HTMLDivElement | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<{ pct: number; message: string; live?: Record<string, unknown> } | null>(null);
+  const [busyByTarget, setBusyByTarget] = useState<Partial<Record<string, boolean>>>({});
+  const [progressByTarget, setProgressByTarget] = useState<
+    Partial<Record<string, { pct: number; message: string; live?: Record<string, unknown> }>>
+  >({});
   const [result, setResult] = useState<PerfResult | null>(null);
   const [lastJobId, setLastJobId] = useState("");
   const [error, setError] = useState("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [needLogin, setNeedLogin] = useState(false);
+  const [loginSessionMode, setLoginSessionMode] = useState<LoginSessionMode>("browser");
   const [sessionJobId, setSessionJobId] = useState("");
   const [sessionPageUrl, setSessionPageUrl] = useState("");
   const [sessionStorageFile, setSessionStorageFile] = useState<File | null>(null);
@@ -506,6 +560,7 @@ export default function PerfTestPage() {
   const sessionsByUrlRef = useRef<Record<string, CachedBrowserSession>>({});
   const uploadSessionByUrlRef = useRef<Record<string, File>>({});
   const baseUrlDirty = baseUrlInput.trim() !== appliedBaseUrl.trim();
+  const baseUrlInvalid = Boolean(baseUrlInput.trim() && !isHttpUrl(baseUrlInput));
   const sessionViaUpload = Boolean(sessionStorageFile);
   const sessionViaBrowser = Boolean(
     sessionJobId.trim() && sessionPageUrl.trim() === appliedBaseUrl.trim(),
@@ -593,7 +648,7 @@ export default function PerfTestPage() {
           job_id: jobId,
           status: "done",
           pct: 100,
-          message: SESSION_STATUS.done,
+          message: SESSION_STATUS.autoConnected,
         });
       }
       return;
@@ -753,6 +808,15 @@ export default function PerfTestPage() {
   }, [loadEnv, loadHistory]);
 
   useEffect(() => {
+    targetRef.current = target;
+  }, [target]);
+
+  const busyByTargetRef = useRef(busyByTarget);
+  useEffect(() => {
+    busyByTargetRef.current = busyByTarget;
+  }, [busyByTarget]);
+
+  useEffect(() => {
     if (target === "portal" && isPortalLocalBaseUrl(appliedBaseUrl)) {
       void loadPortalUrls();
     }
@@ -765,9 +829,12 @@ export default function PerfTestPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetchScanApi(`v1/web-quality/ipms/session/${persisted.jobId}`);
+        const res = await fetchScanApi(`v1/web-quality/jobs/${persisted.jobId}`);
         const j = await readJsonResponse(res);
-        if (cancelled || !res.ok || j.status !== "done") return;
+        if (cancelled || !res.ok || j.status !== "done") {
+          if (!cancelled) clearPersistedLoginSession();
+          return;
+        }
         setSessionJobId(persisted.jobId);
         setSessionPageUrl(persisted.pageUrl);
         setSessionValidated(false);
@@ -784,7 +851,7 @@ export default function PerfTestPage() {
           job_id: persisted.jobId,
           status: "done",
           pct: 100,
-          message: SESSION_STATUS.done,
+          message: SESSION_STATUS.autoConnected,
         });
       } catch {
         if (!cancelled) clearPersistedLoginSession();
@@ -795,6 +862,24 @@ export default function PerfTestPage() {
     };
   }, [appliedBaseUrl, sessionJobId, sessionStorageFile]);
 
+  const scenarioFetchKeyRef = useRef("");
+  const scenarioTargetRef = useRef("");
+  const fullCandidatesRef = useRef<ScenarioCandidate[]>([]);
+
+  function applyScenarioCandidates(list: ScenarioCandidate[], defaultsSelected?: string[]) {
+    setCandidates(list);
+    const defaultsRaw = defaultsSelected?.length
+      ? defaultsSelected
+      : list
+          .filter((c) => c.recommended !== false && c.selectable !== false)
+          .map((c) => c.state_id);
+    const defaults = defaultsRaw.filter((id) => {
+      const c = list.find((x) => x.state_id === id);
+      return c ? scenarioCheckEnabled(c, sessionActiveRef.current) : false;
+    });
+    setSelectedIds(defaults);
+  }
+
   const loadScenarios = useCallback(async (opts?: { clearList?: boolean }) => {
     if (target === "manual" || target === "portal") return;
     if (target === "ipms-online" && showIpmsControls && !accessPublic && !accessAuth) {
@@ -802,6 +887,8 @@ export default function PerfTestPage() {
       setSelectedIds([]);
       setScenarioMsg("공개·로그인 시나리오 중 하나 이상 체크하세요.");
       setScenarioLoading(false);
+      setPreviewResult(null);
+      setPreviewMsg("");
       return;
     }
     setScenarioLoading(true);
@@ -811,28 +898,31 @@ export default function PerfTestPage() {
     try {
       const q = new URLSearchParams({ target });
       if (appliedBaseUrl) q.set("page_url", appliedBaseUrl);
-      if (target === "ipms-online" && showIpmsControls) q.set("access", accessParam);
+      if (target === "ipms-online" && showIpmsControls) q.set("access", IPMS_FULL_ACCESS);
       const res = await fetchScanApi(`v1/perf-test/scenarios?${q}`);
       const j = await readJsonResponse(res);
-      const list = Array.isArray(j.candidates) ? (j.candidates as ScenarioCandidate[]) : [];
-      setCandidates(list);
-      const defaultsRaw = Array.isArray(j.defaults_selected)
+      const fullList = Array.isArray(j.candidates) ? (j.candidates as ScenarioCandidate[]) : [];
+      fullCandidatesRef.current = fullList;
+      const list =
+        target === "ipms-online" && showIpmsControls
+          ? filterCandidatesByAccess(fullList, accessPublic, accessAuth)
+          : fullList;
+      const defaultsSelected = Array.isArray(j.defaults_selected)
         ? (j.defaults_selected as string[])
-        : list.filter((c) => c.recommended !== false && c.selectable !== false).map((c) => c.state_id);
-      const defaults = defaultsRaw.filter((id) => {
-        const c = list.find((x) => x.state_id === id);
-        return c ? scenarioCheckEnabled(c, sessionActiveRef.current) : false;
-      });
-      setSelectedIds(defaults);
-      setScenarioMsg(list.length ? `${list.length}개 시나리오` : "시나리오 없음");
+        : undefined;
+      applyScenarioCandidates(list, defaultsSelected);
+      setScenarioApplyMsg(fullList.length ? `시나리오 ${fullList.length}건 추출 성공` : "시나리오 없음");
+      setScenarioMsg("");
       setPreviewResult(null);
       setPreviewMsg("");
     } catch (e) {
+      fullCandidatesRef.current = [];
+      setScenarioApplyMsg("");
       setScenarioMsg(wrapScanFetchError(e).message);
     } finally {
       setScenarioLoading(false);
     }
-  }, [target, appliedBaseUrl, accessParam, showIpmsControls, accessPublic, accessAuth]);
+  }, [target, appliedBaseUrl, showIpmsControls, accessPublic, accessAuth]);
 
   function applyBaseUrl() {
     const trimmed = baseUrlInput.trim();
@@ -840,8 +930,13 @@ export default function PerfTestPage() {
       setError("Base URL을 입력하세요.");
       return;
     }
+    if (!isHttpUrl(trimmed)) {
+      return;
+    }
     setError("");
     scenarioFetchKeyRef.current = "";
+    fullCandidatesRef.current = [];
+    setScenarioApplyMsg("");
     setAppliedBaseUrl(trimmed);
     restoreSessionForUrl(trimmed);
     if (target === "portal") {
@@ -863,8 +958,24 @@ export default function PerfTestPage() {
     }
   }
 
-  const scenarioFetchKeyRef = useRef("");
-  const scenarioTargetRef = useRef("");
+  useEffect(() => {
+    if (target !== "ipms-online" || !showIpmsControls) return;
+    if (!fullCandidatesRef.current.length) return;
+
+    if (!accessPublic && !accessAuth) {
+      setCandidates([]);
+      setSelectedIds([]);
+      setScenarioMsg("공개·로그인 시나리오 중 하나 이상 체크하세요.");
+      return;
+    }
+
+    const filtered = filterCandidatesByAccess(
+      fullCandidatesRef.current,
+      accessPublic,
+      accessAuth,
+    );
+    applyScenarioCandidates(filtered);
+  }, [target, showIpmsControls, accessPublic, accessAuth, sessionActive]);
 
   useEffect(() => {
     if (target === "manual" || target === "portal") {
@@ -873,6 +984,7 @@ export default function PerfTestPage() {
       setCandidates([]);
       setSelectedIds([]);
       setScenarioMsg("");
+      setScenarioApplyMsg("");
       return;
     }
     if (scenarioTargetRef.current !== target) {
@@ -888,17 +1000,17 @@ export default function PerfTestPage() {
       setScenarioMsg("IPMS URL이 아닙니다. IPMS 주소를 적용하거나 「URL 직접 입력」 탭을 사용하세요.");
       return;
     }
-    const fetchKey = `${target}|${appliedBaseUrl}|${accessParam}`;
+    const fetchKey = `${target}|${appliedBaseUrl}`;
     if (scenarioFetchKeyRef.current === fetchKey) {
       return;
     }
     scenarioFetchKeyRef.current = fetchKey;
     void loadScenarios({ clearList: true });
-  }, [target, appliedBaseUrl, accessParam, loadScenarios]);
+  }, [target, appliedBaseUrl, loadScenarios]);
 
   async function pollSessionJob(jobId: string, targetUrl: string): Promise<void> {
     for (let i = 0; i < 900; i++) {
-      const res = await fetchScanApi(`v1/web-quality/ipms/session/${jobId}`);
+      const res = await fetchScanApi(`v1/web-quality/jobs/${jobId}`);
       const j = await readJsonResponse(res);
       if (!res.ok) throw new Error(String(j.message || j.detail || "세션 상태 조회 실패"));
       setSessionProgress({
@@ -927,8 +1039,24 @@ export default function PerfTestPage() {
         });
         return;
       }
-      if (j.status === "error") throw new Error(String(j.error || j.message || "세션 생성 실패"));
-      if (j.status === "cancelled") throw new Error("세션 생성이 취소되었습니다.");
+      if (j.status === "error") {
+        clearPersistedLoginSession();
+        const errMsg = friendlySessionError(String(j.error || j.message || "세션 생성 실패"));
+        setSessionProgress(null);
+        setSessionValidated(false);
+        setSessionJobId("");
+        setSessionPageUrl("");
+        setError(errMsg);
+        return;
+      }
+      if (j.status === "cancelled") {
+        setSessionProgress(null);
+        setSessionValidated(false);
+        setSessionJobId("");
+        setSessionPageUrl("");
+        setError("로그인 세션이 취소되었습니다.");
+        return;
+      }
       await new Promise((r) => setTimeout(r, 800));
     }
     throw new Error("세션 생성 시간 초과");
@@ -951,17 +1079,21 @@ export default function PerfTestPage() {
   }
 
   async function cancelRun() {
-    const jobId = lastJobId.trim();
-    if (!jobId || !busy) return;
+    const jobId =
+      targetPrefsRef.current[target]?.lastJobId?.trim() || lastJobId.trim();
+    if (!jobId || !busyByTarget[target]) return;
     try {
       const res = await fetchScanApi(`v1/perf-test/jobs/${jobId}/cancel`, { method: "POST" });
       if (!res.ok) {
         const j = await readJsonResponse(res);
         throw new Error(String(j.detail || `취소 실패 (HTTP ${res.status})`));
       }
-      setProgress((prev) =>
-        prev ? { ...prev, message: "취소 요청됨 — 작업 종료 대기 중…" } : prev,
-      );
+      setProgressByTarget((prev) => ({
+        ...prev,
+        [target]: prev[target]
+          ? { ...prev[target], message: "취소 요청됨 — 작업 종료 대기 중…" }
+          : { pct: 0, message: "취소 요청됨 — 작업 종료 대기 중…" },
+      }));
     } catch (e) {
       setError(wrapScanFetchError(e).message);
     }
@@ -1099,6 +1231,11 @@ export default function PerfTestPage() {
       setError("Base URL을 적용한 뒤 세션을 생성하세요.");
       return;
     }
+    if (await tryConnectExistingSession()) {
+      setSessionValidated(true);
+      setError("");
+      return;
+    }
     setSessionJobId("");
     setSessionPageUrl("");
     setSessionStorageFile(null);
@@ -1131,7 +1268,7 @@ export default function PerfTestPage() {
       });
       await pollSessionJob(jobId, targetUrl);
     } catch (e) {
-      setError(wrapScanFetchError(e).message);
+      setError(friendlySessionError(wrapScanFetchError(e).message));
       setSessionProgress(null);
     }
   }
@@ -1249,7 +1386,8 @@ export default function PerfTestPage() {
 
   function switchTarget(nextTarget: string) {
     if (nextTarget === target) return;
-    targetPrefsRef.current[target] = {
+    const leavingTarget = target;
+    targetPrefsRef.current[leavingTarget] = {
       baseUrlInput,
       appliedBaseUrl,
       needLogin,
@@ -1257,7 +1395,6 @@ export default function PerfTestPage() {
       lastJobId,
       error,
     };
-    setProgress(null);
     scenarioFetchKeyRef.current = "";
     setPreviewResult(null);
     setPreviewMsg("");
@@ -1269,7 +1406,9 @@ export default function PerfTestPage() {
       setAppliedBaseUrl(saved.appliedBaseUrl);
       setNeedLogin(saved.needLogin);
       setResult(saved.result);
-      setLastJobId(saved.lastJobId);
+      if (!busyByTarget[nextTarget]) {
+        setLastJobId(saved.lastJobId);
+      }
       setError(saved.error);
       nextApplied = saved.appliedBaseUrl;
     } else {
@@ -1277,7 +1416,9 @@ export default function PerfTestPage() {
       setBaseUrlInput(next);
       setAppliedBaseUrl(next);
       setResult(null);
-      setLastJobId("");
+      if (!busyByTarget[nextTarget]) {
+        setLastJobId("");
+      }
       setError("");
       nextApplied = next;
       if (nextTarget === "manual") {
@@ -1420,6 +1561,13 @@ export default function PerfTestPage() {
       setPreviewResult(j);
       const ok = j.summary?.ok ?? 0;
       const fail = j.summary?.fail ?? 0;
+      const loginFailed = (j.items || []).some(
+        (item) => !item.ok && isLoginPreviewError(String(item.error || "")),
+      );
+      if (loginFailed) {
+        setNeedLogin(true);
+        void handleNeedLoginChange(true);
+      }
       setPreviewMsg(`미리보기 완료 — 성공 ${ok} / 실패 ${fail}`);
       requestAnimationFrame(() => {
         previewBlockRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1432,16 +1580,19 @@ export default function PerfTestPage() {
     }
   }
 
-  async function pollJob(jobId: string): Promise<PerfResult | null> {
+  async function pollJob(jobId: string, runTarget: string): Promise<PerfResult | null> {
     for (;;) {
       await new Promise((r) => setTimeout(r, 800));
       const res = await fetchScanJobApi(`v1/perf-test/jobs/${jobId}`);
       const j = await readJsonResponse(res);
-      setProgress({
-        pct: Number(j.pct) || 0,
-        message: String(j.message || ""),
-        live: (j.live_stats as Record<string, unknown>) || undefined,
-      });
+      setProgressByTarget((prev) => ({
+        ...prev,
+        [runTarget]: {
+          pct: Number(j.pct) || 0,
+          message: String(j.message || ""),
+          live: (j.live_stats as Record<string, unknown>) || undefined,
+        },
+      }));
       const st = String(j.status || "");
       if (st === "done") return (j.result as PerfResult) || null;
       if (st === "error" || st === "cancelled") {
@@ -1453,8 +1604,14 @@ export default function PerfTestPage() {
   }
 
   async function runTest() {
+    const runTarget = target;
+    if (Object.values(busyByTargetRef.current).some(Boolean)) {
+      if (targetRef.current === runTarget) {
+        setError("다른 탭 성능검사가 진행 중입니다. 완료 후 다시 시도하세요.");
+      }
+      return;
+    }
     setError("");
-    setResult(null);
     if (baseUrlDirty) {
       setError("Base URL 변경 후 「Base URL 적용」을 누르세요.");
       return;
@@ -1495,8 +1652,27 @@ export default function PerfTestPage() {
       );
       return;
     }
-    setBusy(true);
-    setProgress({ pct: 0, message: "검증 중…" });
+    setResult(null);
+    setLastJobId("");
+    targetPrefsRef.current[runTarget] = {
+      ...(targetPrefsRef.current[runTarget] || {
+        baseUrlInput,
+        appliedBaseUrl,
+        needLogin,
+        error: "",
+      }),
+      baseUrlInput,
+      appliedBaseUrl,
+      needLogin,
+      result: null,
+      lastJobId: "",
+      error: "",
+    };
+    setBusyByTarget((prev) => ({ ...prev, [runTarget]: true }));
+    setProgressByTarget((prev) => ({
+      ...prev,
+      [runTarget]: { pct: 0, message: "검증 중…" },
+    }));
     try {
       const vfd = buildForm();
       const vRes = await postScanMultipart("v1/perf-test/validate", vfd);
@@ -1511,28 +1687,80 @@ export default function PerfTestPage() {
       }
       const jobId = String(start.job_id || "");
       if (!jobId) throw new Error("job_id 없음");
-      setLastJobId(jobId);
-      const payload = await pollJob(jobId);
-      setResult(payload);
+      targetPrefsRef.current[runTarget] = {
+        ...(targetPrefsRef.current[runTarget] || {
+          baseUrlInput,
+          appliedBaseUrl,
+          needLogin,
+          error: "",
+          result: null,
+        }),
+        lastJobId: jobId,
+      };
+      if (targetRef.current === runTarget) {
+        setLastJobId(jobId);
+      }
+      const payload = await pollJob(jobId, runTarget);
+      targetPrefsRef.current[runTarget] = {
+        ...(targetPrefsRef.current[runTarget] || {
+          baseUrlInput,
+          appliedBaseUrl,
+          needLogin,
+          error: "",
+        }),
+        result: payload,
+        lastJobId: jobId,
+      };
+      if (targetRef.current === runTarget) {
+        setResult(payload);
+        setLastJobId(jobId);
+      }
       void loadHistory();
     } catch (e) {
-      setError(wrapScanFetchError(e).message);
+      const errMsg = wrapScanFetchError(e).message;
+      targetPrefsRef.current[runTarget] = {
+        ...(targetPrefsRef.current[runTarget] || {
+          baseUrlInput,
+          appliedBaseUrl,
+          needLogin,
+          result: null,
+          lastJobId: "",
+        }),
+        error: errMsg,
+      };
+      if (targetRef.current === runTarget) {
+        setError(errMsg);
+      }
     } finally {
-      setBusy(false);
-      setProgress(null);
+      setBusyByTarget((prev) => {
+        const next = { ...prev };
+        delete next[runTarget];
+        return next;
+      });
+      setProgressByTarget((prev) => {
+        const next = { ...prev };
+        delete next[runTarget];
+        return next;
+      });
     }
   }
 
+  const anyScanBusy = useMemo(
+    () => Object.values(busyByTarget).some(Boolean),
+    [busyByTarget],
+  );
+  const isBusyHere = Boolean(busyByTarget[target]);
+  const activeProgress = isBusyHere ? (progressByTarget[target] ?? null) : null;
   const loadAllowed = Boolean(env?.load_allowed);
   const locustInstalled = Boolean(env?.locust_installed);
   const envReady = loadAllowed && locustInstalled;
   const summary = result?.summary;
 
   const liveLine = useMemo(() => {
-    const live = progress?.live;
+    const live = activeProgress?.live;
     if (!live) return "";
     return `VU ${live.users ?? "—"} · ${live.rps ?? "—"} rps · avg ${live.avg_ms ?? "—"} ms · p95 ${live.p95_ms ?? "—"} ms`;
-  }, [progress]);
+  }, [activeProgress]);
 
   const failPctClass =
     summary?.fail_ratio != null && summary.fail_ratio > 0.05 ? "warn" : "good";
@@ -1657,14 +1885,41 @@ export default function PerfTestPage() {
   }
 
   function renderSessionPanel() {
+    const sessionLegendChip = needLogin ? (
+      sessionReady ? (
+        <span className="wq-chip ok" style={{ marginLeft: "0.5rem" }}>
+          로그인 완료 — 로그인 시나리오 선택 가능
+        </span>
+      ) : sessionProgress?.status === "error" ? (
+        <span className="wq-chip err" style={{ marginLeft: "0.5rem" }}>
+          로그인 실패
+        </span>
+      ) : sessionProgress?.status === "checking" ? (
+        <span className="wq-chip warn" style={{ marginLeft: "0.5rem" }}>
+          확인 중…
+        </span>
+      ) : sessionProgress?.status === "running" || sessionProgress?.status === "queued" ? (
+        <span className="wq-chip warn" style={{ marginLeft: "0.5rem" }}>
+          로그인 대기 중…
+        </span>
+      ) : (
+        <span className="wq-chip warn" style={{ marginLeft: "0.5rem" }}>
+          {LOGIN_SESSION_NOT_READY}
+        </span>
+      )
+    ) : null;
+
     return (
-      <div className="wq-runtime-block perf-session-block">
-        <h3 style={{ marginTop: 0 }}>로그인 세션 (HAR · Locust)</h3>
-        <p className="hint">
-          로그인 필요 사이트는 API 서버에서 Chromium을 열어{" "}
-          <strong>storage_state</strong>를 저장합니다. 로컬 포털은{" "}
-          <strong>/login</strong>에서 암호 로그인까지 완료해야 시나리오·HAR에 사용됩니다.
-        </p>
+      <fieldset
+        className={`wq-runtime-block wq-session-fieldset perf-session-block${
+          needLogin && sessionReady ? " is-ready" : needLogin ? " is-pending" : ""
+        }`}
+      >
+        <legend className="hint" style={{ marginBottom: "0.5rem" }}>
+          <strong>로그인 세션 (HAR · Locust)</strong>
+          {sessionLegendChip}
+        </legend>
+        <p className="hint">공동인증서(2단계)는 세션 JSON 업로드를 권장합니다.</p>
         <label className="check-row">
           <input
             type="checkbox"
@@ -1679,121 +1934,146 @@ export default function PerfTestPage() {
           </p>
         ) : null}
         {needLogin ? (
-          <>
-            <div className="btn-row" style={{ marginTop: "0.5rem" }}>
-              <button
-                type="button"
-                className="btn"
-                disabled={
-                  !appliedBaseUrl.trim() ||
-                  baseUrlDirty ||
-                  sessionProgress?.status === "running" ||
-                  sessionProgress?.status === "queued"
-                }
-                onClick={() => void startBrowserSession()}
-              >
-                {sessionProgress?.status === "running" || sessionProgress?.status === "queued"
-                  ? "세션 생성 중…"
-                  : "로그인 세션 자동 생성"}
-              </button>
-              {sessionProgress?.status === "running" || sessionProgress?.status === "queued" ? (
-                <button type="button" className="btn ghost" onClick={() => void cancelSession()}>
-                  세션 취소
-                </button>
-              ) : null}
-            </div>
-            {sessionProgress &&
-            (sessionProgress.status === "checking" ||
-              sessionProgress.status === "running" ||
-              sessionProgress.status === "queued" ||
-              sessionProgress.status === "done" ||
-              sessionProgress.status === "error") ? (
-              <div className="run-progress source-scan-progress" style={{ marginTop: "0.5rem" }}>
-                <div className="progress-bar">
-                  <div
-                    className="progress-fill"
-                    style={{ width: `${sessionProgress.pct}%` }}
-                  />
+          <div className="wq-session-methods" role="radiogroup" aria-label="로그인 세션 방식">
+            <label className="wq-ipms-source-option">
+              <input
+                type="radio"
+                name="perf-login-session"
+                checked={loginSessionMode === "browser"}
+                onChange={() => setLoginSessionMode("browser")}
+              />
+              로그인 세션 자동 생성
+            </label>
+            {loginSessionMode === "browser" ? (
+              <div className="wq-session-method-body">
+                <div className="btn-row">
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={
+                      !appliedBaseUrl.trim() ||
+                      baseUrlDirty ||
+                      sessionProgress?.status === "running" ||
+                      sessionProgress?.status === "queued"
+                    }
+                    onClick={() => void startBrowserSession()}
+                  >
+                    {sessionProgress?.status === "running" || sessionProgress?.status === "queued"
+                      ? "로그인 창 대기 중…"
+                      : "로그인 창 띄움"}
+                  </button>
+                  {sessionProgress?.status === "running" || sessionProgress?.status === "queued" ? (
+                    <button type="button" className="btn ghost" onClick={() => void cancelSession()}>
+                      세션 취소
+                    </button>
+                  ) : null}
                 </div>
-                <p
-                  className={`hint${
-                    sessionProgress.status === "done"
-                      ? " perf-session-done-msg"
-                      : sessionProgress.status === "error"
-                        ? " err"
-                        : ""
-                  }`}
-                >
-                  {sessionProgress.status === "error"
-                    ? sessionProgress.message
-                    : `${Math.round(sessionProgress.pct)}% · ${sessionProgress.message}`}
-                </p>
-                {sessionViaBrowser && sessionValidated && sessionProgress.status === "done" ? (
-                  <p className="hint perf-session-browser-done">
-                    <span className="wq-chip ok">브라우저 세션 연결됨</span>
-                    {" · "}
-                    {perfSessionNextStepHint(sessionWordingMode)}
-                  </p>
+                {sessionProgress &&
+                (sessionProgress.status === "checking" ||
+                  sessionProgress.status === "running" ||
+                  sessionProgress.status === "queued" ||
+                  sessionProgress.status === "done" ||
+                  sessionProgress.status === "error") ? (
+                  <div className="run-progress source-scan-progress">
+                    <div className="progress-bar">
+                      <div className="progress-fill" style={{ width: `${sessionProgress.pct}%` }} />
+                    </div>
+                    <p
+                      className={`hint${
+                        sessionProgress.status === "done"
+                          ? " perf-session-done-msg"
+                          : sessionProgress.status === "error"
+                            ? " err"
+                            : ""
+                      }`}
+                    >
+                      {sessionProgress.status === "error"
+                        ? sessionProgress.message
+                        : `${Math.round(sessionProgress.pct)}% · ${sessionProgress.message}`}
+                    </p>
+                    {sessionProgress.status === "running" || sessionProgress.status === "queued" ? (
+                      <p className="hint">
+                        창이 뒤에 가려지면 작업 표시줄 또는 Alt+Tab으로 창을 선택하세요.
+                      </p>
+                    ) : null}
+                    {sessionViaBrowser && sessionValidated && sessionProgress.status === "done" ? (
+                      <p className="hint perf-session-browser-done">
+                        <span className="wq-chip ok">브라우저 세션 연결됨</span>
+                        {" · "}
+                        {perfSessionNextStepHint(sessionWordingMode)}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             ) : null}
-            {sessionProgress?.status !== "running" && sessionProgress?.status !== "queued" ? (
-              <label className="source-scan-field source-scan-field-full" style={{ marginTop: "0.75rem" }}>
-                <span>또는 storage_state JSON 업로드</span>
-                <input
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0] ?? null;
-                    setSessionStorageFile(file);
-                    if (file) {
-                      const url = appliedBaseUrl.trim();
-                      setSessionJobId("");
-                      setSessionPageUrl(url);
-                      setSessionValidated(false);
-                      clearPersistedLoginSession();
-                      cacheUploadSession(url, file);
-                      setSessionProgress({
-                        job_id: "upload",
-                        status: "checking",
-                        pct: 50,
-                        message: SESSION_STATUS.checking,
-                      });
-                      void validateUploadSession(file, url).then((ok) => {
-                        if (ok) {
-                          setSessionProgress({
-                            job_id: "upload",
-                            status: "done",
-                            pct: 100,
-                            message: SESSION_STATUS.done,
-                          });
-                        } else {
-                          setSessionStorageFile(null);
-                          delete uploadSessionByUrlRef.current[url];
-                        }
-                      });
-                    } else {
-                      setSessionValidated(false);
-                      setSessionProgress(null);
-                    }
-                  }}
-                />
+            <label className="wq-ipms-source-option">
+              <input
+                type="radio"
+                name="perf-login-session"
+                checked={loginSessionMode === "upload"}
+                onChange={() => setLoginSessionMode("upload")}
+              />
+              세션 JSON 업로드
+            </label>
+            {loginSessionMode === "upload" ? (
+              <div className="wq-session-method-body">
+                <label className="wq-ipms-source-file">
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      setSessionStorageFile(file);
+                      if (file) {
+                        const url = appliedBaseUrl.trim();
+                        setSessionJobId("");
+                        setSessionPageUrl(url);
+                        setSessionValidated(false);
+                        clearPersistedLoginSession();
+                        cacheUploadSession(url, file);
+                        setSessionProgress({
+                          job_id: "upload",
+                          status: "checking",
+                          pct: 50,
+                          message: SESSION_STATUS.checking,
+                        });
+                        void validateUploadSession(file, url).then((ok) => {
+                          if (ok) {
+                            setSessionProgress({
+                              job_id: "upload",
+                              status: "done",
+                              pct: 100,
+                              message: SESSION_STATUS.done,
+                            });
+                          } else {
+                            setSessionStorageFile(null);
+                            delete uploadSessionByUrlRef.current[url];
+                          }
+                        });
+                      } else {
+                        setSessionValidated(false);
+                        setSessionProgress(null);
+                      }
+                    }}
+                  />
+                </label>
                 {sessionViaUpload && sessionValidated ? (
                   <p className="hint perf-session-upload-done">
                     <span className="wq-chip ok">JSON 업로드됨</span>
                     {" · "}
                     {perfSessionNextStepHint(sessionWordingMode)}
                   </p>
+                ) : sessionProgress?.status === "checking" ? (
+                  <p className="msg wq-session-status">로그인 세션 확인 중…</p>
+                ) : sessionProgress?.status === "error" ? (
+                  <p className="msg err wq-session-status">로그인 실패</p>
                 ) : null}
-              </label>
-            ) : (
-              <p className="hint" style={{ marginTop: "0.75rem" }}>
-                Chromium 로그인 진행 중 — 완료 후 브라우저 세션이 자동 연결됩니다.
-              </p>
-            )}
-          </>
+              </div>
+            ) : null}
+          </div>
         ) : null}
-      </div>
+      </fieldset>
     );
   }
 
@@ -1884,38 +2164,50 @@ export default function PerfTestPage() {
 
           <div className="wq-step-block">
             <p className="hint">{targetHint}</p>
-            <div className="form-grid perf-base-url-grid">
-              <label className="perf-base-url-field">
-                Base URL
-                <input
-                  className={target === "manual" ? "perf-url-placeholder-input" : undefined}
-                  value={baseUrlInput}
-                  onChange={(e) => setBaseUrlInput(e.target.value)}
-                  placeholder={baseUrlPlaceholderForTarget(target)}
-                />
-              </label>
+            <fieldset className="wq-ipms-source">
+              <legend>화면 시나리오 가져오기</legend>
+              <div className="wq-ipms-source-url-block">
+                <label className="wq-ipms-source-option">
+                  <input type="radio" name="perf-scenario-source" checked readOnly />
+                  접속 URL
+                </label>
+                <div className="wq-ipms-source-url-controls">
+                  <input
+                    type="url"
+                    className={`wq-ipms-source-input${target === "manual" ? " perf-url-placeholder-input" : ""}`}
+                    value={baseUrlInput}
+                    onChange={(e) => setBaseUrlInput(e.target.value)}
+                    placeholder={baseUrlPlaceholderForTarget(target)}
+                  />
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={!baseUrlDirty || scenarioLoading || baseUrlInvalid}
+                    onClick={() => applyBaseUrl()}
+                  >
+                    {scenarioLoading ? "적용 중…" : "적용"}
+                  </button>
+                </div>
+                {baseUrlInvalid ? (
+                  <p className="msg err wq-ipms-source-url-validation">{HTTP_URL_REQUIRED_MSG}</p>
+                ) : null}
+                {!baseUrlInvalid && scenarioLoading ? (
+                  <p className="msg wq-ipms-source-apply-msg-inline">시나리오 불러오는 중…</p>
+                ) : !baseUrlInvalid &&
+                  !baseUrlDirty &&
+                  appliedBaseUrl.trim() &&
+                  scenarioApplyMsg.includes("추출 성공") ? (
+                  <p className="msg ok wq-ipms-source-apply-msg-inline">{scenarioApplyMsg}</p>
+                ) : null}
+              </div>
               {target === "manual" ? (
-                <p className="hint perf-base-url-sample">
-                  placeholder <code>{MANUAL_BASE_URL_PLACEHOLDER}</code> 는 예시입니다 — 비워 두거나 직접 입력하세요.
+                <p className="hint wq-ipms-source-foot perf-base-url-sample">
+                  placeholder <code>{MANUAL_BASE_URL_PLACEHOLDER}</code> 는 예시입니다 — 비워 두거나 직접
+                  입력하세요.
                 </p>
               ) : null}
-              <div className="perf-base-url-actions">
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={!baseUrlDirty || scenarioLoading}
-                  onClick={() => applyBaseUrl()}
-                >
-                  Base URL 적용
-                </button>
-                {baseUrlDirty ? (
-                  <p className="hint">URL 변경됨 — 적용 후 시나리오·부하 대상이 갱신됩니다.</p>
-                ) : appliedBaseUrl.trim() ? (
-                  <p className="hint">적용 URL: <code>{appliedBaseUrl}</code></p>
-                ) : (
-                  <p className="hint">적용 URL: (미입력)</p>
-                )}
-              </div>
+            </fieldset>
+            <div className="form-grid perf-base-url-grid">
               {showIpmsControls ? (
                 <div className="perf-access-tiers">
                   <span className="perf-access-tiers-label">시나리오 범위</span>
@@ -2274,7 +2566,7 @@ export default function PerfTestPage() {
                 type="button"
                 className="btn"
                 disabled={
-                  busy ||
+                  anyScanBusy ||
                   !envReady ||
                   (target === "portal" &&
                     portalUrlPreview.length > 0 &&
@@ -2285,9 +2577,13 @@ export default function PerfTestPage() {
                 }
                 onClick={() => void runTest()}
               >
-                {busy ? "실행 중…" : "성능검사 실행"}
+                {anyScanBusy
+                  ? isBusyHere
+                    ? "실행 중…"
+                    : "다른 탭 실행 중…"
+                  : "성능검사 실행"}
               </button>
-              {busy ? (
+              {isBusyHere ? (
                 <button type="button" className="btn ghost" onClick={() => void cancelRun()}>
                   취소
                 </button>
@@ -2317,18 +2613,20 @@ export default function PerfTestPage() {
             </p>
           )}
 
-          {progress ? (
+          {activeProgress ? (
             <div className="run-progress source-scan-progress">
               <div className="progress-bar">
-                <div className="progress-fill" style={{ width: `${progress.pct}%` }} />
+                <div className="progress-fill" style={{ width: `${activeProgress.pct}%` }} />
               </div>
-              <p className="hint">{progress.message}</p>
+              <p className="hint">
+                {activeProgress.message}
+              </p>
               {liveLine ? <p className="perf-live-stats">{liveLine}</p> : null}
-              {progress.live?.total_requests != null ? (
+              {activeProgress.live?.total_requests != null ? (
                 <p className="hint">
-                  누적 HTTP 요청 {String(progress.live.total_requests)}건
-                  {progress.live.fail_ratio != null
-                    ? ` · 오류율 ${(Number(progress.live.fail_ratio) * 100).toFixed(1)}%`
+                  누적 HTTP 요청 {String(activeProgress.live.total_requests)}건
+                  {activeProgress.live.fail_ratio != null
+                    ? ` · 오류율 ${(Number(activeProgress.live.fail_ratio) * 100).toFixed(1)}%`
                     : ""}
                 </p>
               ) : null}
@@ -2337,7 +2635,7 @@ export default function PerfTestPage() {
           {error ? <p className="msg err">{error}</p> : null}
         </section>
 
-        {summary ? (
+        {summary && !isBusyHere ? (
           <>
             <section className="panel perf-result-panel">
             <div className="perf-result-head">

@@ -13,7 +13,7 @@ from web_quality.runtime_common import (
     _attach_console_findings,
     scan_page_states,
 )
-from web_quality.runtime_env import _friendly_playwright_error, _launch_chromium
+from web_quality.runtime_env import _friendly_playwright_error, _launch_chromium, playwright_runtime_scan_slot
 from web_quality.scenario_steps import open_state_by_steps
 from web_quality.static_scanner import Finding, StaticScanResult, _add, _fid
 
@@ -63,8 +63,24 @@ def fetch_ipms_shell_static(base_url: str) -> StaticScanResult:
 
 
 def _goto_home(page, base_url: str) -> None:
-    page.goto(base_url, wait_until="domcontentloaded", timeout=60000)
-    page.wait_for_selector("#gnb .gnb-main-trigger", timeout=45000)
+    home = base_url if base_url.endswith("/") else f"{base_url}/"
+    last_err: Exception | None = None
+    for wait_until in ("domcontentloaded", "load", "commit"):
+        try:
+            timeout = 90000 if wait_until == "domcontentloaded" else 60000
+            page.goto(home, wait_until=wait_until, timeout=timeout)
+            last_err = None
+            break
+        except Exception as e:
+            last_err = e
+    if last_err is not None:
+        raise last_err
+    try:
+        page.wait_for_selector("#gnb .gnb-main-trigger", timeout=20000)
+    except Exception:
+        if page.locator("#logout, .btn-logout, #login-user").count():
+            return
+        raise
 
 
 def ipms_establish_session(
@@ -109,6 +125,38 @@ def ipms_establish_session(
     return False, "로그인 실패 또는 추가 인증 필요"
 
 
+def validate_ipms_storage_session(
+    base_url: str,
+    storage_state: dict[str, Any],
+) -> tuple[bool, str]:
+    """Playwright storage_state로 IPMS 홈 접속 후 로그인 여부 확인."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return False, "Playwright 미설치 — API 서버에서 playwright install chromium 실행"
+
+    url = (base_url or IPMS_DEFAULT_BASE).strip()
+    if not url.endswith("/"):
+        url += "/"
+
+    try:
+        with sync_playwright() as p:
+            browser = _launch_chromium(p)
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 900},
+                storage_state=storage_state,
+            )
+            page = context.new_page()
+            _goto_home(page, url)
+            if page.locator("#logout, .btn-logout, #login-user").count():
+                browser.close()
+                return True, ""
+            browser.close()
+            return False, "로그인 세션이 만료되었거나 해당 URL과 맞지 않습니다."
+    except Exception as e:
+        return False, _friendly_playwright_error(e)
+
+
 def scan_ipms_online_runtime(
     base_url: str,
     *,
@@ -120,6 +168,8 @@ def scan_ipms_online_runtime(
     storage_state: dict[str, Any] | None = None,
     skip_runtime: bool = False,
     on_progress=None,
+    include_krds: bool = True,
+    queue_job_id: str | None = None,
 ) -> RuntimeScanResult:
     if skip_runtime:
         return RuntimeScanResult(
@@ -150,89 +200,103 @@ def scan_ipms_online_runtime(
         )
 
     console_errors: list[str] = []
-    try:
-        with sync_playwright() as p:
-            browser = _launch_chromium(p)
-            ctx_kwargs: dict[str, Any] = {"viewport": {"width": 1280, "height": 900}}
-            if storage_state:
-                ctx_kwargs["storage_state"] = storage_state
-            context = browser.new_context(**ctx_kwargs)
-            page = context.new_page()
 
-            def on_console(msg):
-                if msg.type == "error":
-                    text = msg.text
-                    if "favicon" not in text.lower():
-                        console_errors.append(text)
+    def on_queue_wait() -> None:
+        if queue_job_id:
+            from web_quality.job_progress import update_job
 
-            page.on("console", on_console)
-
-            tier = (access or "public").strip().lower()
-            if tier == "auth":
-                if storage_state:
-                    _goto_home(page, url)
-                    if not page.locator("#logout, .btn-logout").count():
-                        return RuntimeScanResult(
-                            runtime_available=False,
-                            runtime_error="storage_state 세션이 만료되었거나 유효하지 않습니다.",
-                            screen_coverage=[
-                                ScreenCoverage(
-                                    s["state_id"],
-                                    s.get("label", s["state_id"]),
-                                    False,
-                                    "세션 무효",
-                                    s.get("description", ""),
-                                )
-                                for s in ui_states
-                            ],
-                        )
-                else:
-                    ok, reason = ipms_establish_session(
-                        page, url, username=username, password=password
-                    )
-                    if not ok:
-                        return RuntimeScanResult(
-                            runtime_available=False,
-                            runtime_error=reason,
-                            screen_coverage=[
-                                ScreenCoverage(
-                                    s["state_id"],
-                                    s.get("label", s["state_id"]),
-                                    False,
-                                    reason,
-                                    s.get("description", ""),
-                                )
-                                for s in ui_states
-                            ],
-                        )
-            else:
-                _goto_home(page, url)
-
-            by_id = {c["state_id"]: c for c in scenario_candidates}
-
-            def open_fn(pg, sid: str) -> tuple[bool, str]:
-                if sid not in by_id:
-                    return False, f"unknown state: {sid}"
-                # 메뉴 시나리오는 홈에서 GNB 클릭
-                if sid != "login_form":
-                    try:
-                        _goto_home(pg, url)
-                    except Exception:
-                        pass
-                return open_state_by_steps(pg, by_id[sid], base_url=url)
-
-            result = scan_page_states(
-                page,
-                ui_states,
-                open_state_fn=open_fn,
-                filename_prefix="screenshots/ipms-online",
-                url_hint=url,
-                on_progress=on_progress,
+            update_job(
+                queue_job_id,
+                pct=2,
+                message="동일 URL 다른 진단 대기 중…",
+                step_label="대기",
             )
-            _attach_console_findings(console_errors, result.findings)
-            result.console_errors = console_errors
-            browser.close()
-            return result
+
+    try:
+        with playwright_runtime_scan_slot(url, on_wait=on_queue_wait):
+            with sync_playwright() as p:
+                browser = _launch_chromium(p)
+                ctx_kwargs: dict[str, Any] = {"viewport": {"width": 1280, "height": 900}}
+                if storage_state:
+                    ctx_kwargs["storage_state"] = storage_state
+                context = browser.new_context(**ctx_kwargs)
+                page = context.new_page()
+
+                def on_console(msg):
+                    if msg.type == "error":
+                        text = msg.text
+                        if "favicon" not in text.lower():
+                            console_errors.append(text)
+
+                page.on("console", on_console)
+
+                tier = (access or "public").strip().lower()
+                if tier == "auth":
+                    if storage_state:
+                        _goto_home(page, url)
+                        if not page.locator("#logout, .btn-logout").count():
+                            return RuntimeScanResult(
+                                runtime_available=False,
+                                runtime_error="storage_state 세션이 만료되었거나 유효하지 않습니다.",
+                                screen_coverage=[
+                                    ScreenCoverage(
+                                        s["state_id"],
+                                        s.get("label", s["state_id"]),
+                                        False,
+                                        "세션 무효",
+                                        s.get("description", ""),
+                                    )
+                                    for s in ui_states
+                                ],
+                            )
+                    else:
+                        ok, reason = ipms_establish_session(
+                            page, url, username=username, password=password
+                        )
+                        if not ok:
+                            return RuntimeScanResult(
+                                runtime_available=False,
+                                runtime_error=reason,
+                                screen_coverage=[
+                                    ScreenCoverage(
+                                        s["state_id"],
+                                        s.get("label", s["state_id"]),
+                                        False,
+                                        reason,
+                                        s.get("description", ""),
+                                    )
+                                    for s in ui_states
+                                ],
+                            )
+                else:
+                    _goto_home(page, url)
+
+                by_id = {c["state_id"]: c for c in scenario_candidates}
+
+                def open_fn(pg, sid: str) -> tuple[bool, str]:
+                    if sid not in by_id:
+                        return False, f"unknown state: {sid}"
+                    # 메뉴 시나리오는 홈에서 GNB 클릭
+                    if sid != "login_form":
+                        try:
+                            _goto_home(pg, url)
+                        except Exception:
+                            pass
+                    return open_state_by_steps(pg, by_id[sid], base_url=url)
+
+                result = scan_page_states(
+                    page,
+                    ui_states,
+                    open_state_fn=open_fn,
+                    filename_prefix="screenshots/ipms-online",
+                    url_hint=url,
+                    on_progress=on_progress,
+                    include_krds=include_krds,
+                )
+                _attach_console_findings(console_errors, result.findings)
+                result.console_errors = console_errors
+                browser.close()
+                return result
     except Exception as e:
         err = _friendly_playwright_error(str(e))
         return RuntimeScanResult(

@@ -11,7 +11,7 @@ from web_quality.runtime_common import (
     scan_page_states,
 )
 from web_quality.runtime_env import _friendly_playwright_error, _launch_chromium
-from web_quality.scenario_steps import open_state_by_steps
+from web_quality.scenario_steps import IPMS_DIRECT_URL_MSG, is_java_direct_goto_page, open_state_by_steps
 
 
 def scan_java_upload_runtime(
@@ -20,7 +20,9 @@ def scan_java_upload_runtime(
     ui_states: list[dict[str, Any]],
     scenario_candidates: list[dict[str, Any]],
     login_cfg: ExternalLoginConfig | None = None,
+    storage_state: dict[str, Any] | None = None,
     skip_runtime: bool = False,
+    include_krds: bool = True,
 ) -> RuntimeScanResult:
     if skip_runtime:
         return RuntimeScanResult(
@@ -50,7 +52,10 @@ def scan_java_upload_runtime(
     try:
         with sync_playwright() as p:
             browser = _launch_chromium(p)
-            context = browser.new_context(viewport={"width": 1280, "height": 900})
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 900},
+                storage_state=storage_state,
+            )
             page = context.new_page()
 
             def on_console(msg):
@@ -73,9 +78,35 @@ def scan_java_upload_runtime(
                     login_cfg.password_selector,
                     login_cfg.submit_selector,
                 )
+            elif storage_state:
+                from web_quality.ipms_scanner import _goto_home
 
+                home = base_url if base_url.endswith("/") else f"{base_url}/"
+                _goto_home(page, home)
+
+            ipms_deploy = "ipms.online" in (base_url or "").lower()
             by_id = {c["state_id"]: c for c in scenario_candidates}
-            open_fn = lambda pg, sid: open_state_by_steps(pg, by_id[sid], base_url=base_url)
+
+            def open_fn(pg, sid: str) -> tuple[bool, str]:
+                if sid not in by_id:
+                    return False, f"unknown state: {sid}"
+                cand = by_id[sid]
+                if ipms_deploy and is_java_direct_goto_page(cand):
+                    return False, IPMS_DIRECT_URL_MSG
+                if ipms_deploy and storage_state:
+                    try:
+                        from web_quality.ipms_scanner import _goto_home
+
+                        home = base_url if base_url.endswith("/") else f"{base_url}/"
+                        _goto_home(pg, home)
+                    except Exception:
+                        pass
+                return open_state_by_steps(
+                    pg,
+                    by_id[sid],
+                    base_url=base_url,
+                    ipms_deploy=ipms_deploy,
+                )
 
             result = scan_page_states(
                 page,
@@ -83,6 +114,7 @@ def scan_java_upload_runtime(
                 open_state_fn=open_fn,
                 filename_prefix="screenshots/java-upload",
                 url_hint=base_url,
+                include_krds=include_krds,
             )
             _attach_console_findings(console_errors, result.findings)
             result.console_errors = console_errors

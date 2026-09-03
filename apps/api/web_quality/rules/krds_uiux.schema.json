@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://myplatform.local/schemas/krds_uiux.rule.json",
+  "title": "KRDS / 디지털 정부 UI·UX 가이드라인 규칙",
+  "description": "디지털 정부서비스 UIUX 가이드라인(2025.08) 및 KRDS 적용 검증용 rule catalog 항목 스키마",
+  "type": "object",
+  "required": ["id", "category", "section", "title", "description", "automatable"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^UX-KRDS-[0-9]+\\.[0-9]+$",
+      "description": "규칙 ID (예: UX-KRDS-1.1)"
+    },
+    "category": {
+      "type": "string",
+      "const": "uiux",
+      "description": "finding.category — 웹품질 결과 탭 'UI·UX(KRDS)'와 매핑"
+    },
+    "section": {
+      "type": "string",
+      "enum": [
+        "공공 브랜딩",
+        "KRDS 컴포넌트",
+        "디자인 토큰",
+        "UX 패턴",
+        "서비스 패턴",
+        "포용·설정"
+      ]
+    },
+    "principle": {
+      "type": "string",
+      "description": "가이드라인 장·원칙 (보고서용)"
+    },
+    "title": { "type": "string" },
+    "description": { "type": "string" },
+    "automatable": {
+      "type": "string",
+      "enum": ["auto", "semi", "manual", "na"]
+    },
+    "severity_default": {
+      "type": "string",
+      "enum": ["error", "warning", "info"],
+      "default": "warning"
+    },
+    "runtime_checks": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "krds_scanner.RUNTIME_CHECKS 키"
+    },
+    "static_checks": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "krds_scanner.STATIC_CHECKS 키"
+    },
+    "kwcag_map": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "KWCAG 2.2 항목과 중복·연계 시 참조"
+    },
+    "krds_ref": {
+      "type": "string",
+      "description": "KRDS 또는 가이드라인 절·URL"
+    },
+    "ref_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "관련근거 KRDS/KWCAG 페이지 URL"
+    },
+    "ref_anchor": {
+      "type": "string",
+      "description": "페이지 내 HTML id 앵커 (text fragment보다 안정적)"
+    },
+    "ref_text": {
+      "type": "string",
+      "description": "앵커 없을 때 Chrome text fragment용 (8자 이상 권장)"
+    },
+    "ref_fallback_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "primary URL 실패 시 대체 목록/상위 페이지"
+    },
+    "fix_hint": {
+      "type": "string",
+      "description": "개선안 기본 문구"
+    },
+    "guideline_version": {
+      "type": "string",
+      "default": "2025.08"
+    },
+    "review_state_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "수동 검토 권장 state_id 목록"
+    },
+    "review_hint": {
+      "type": "string",
+      "description": "수동 검토 위치 안내"
+    }
+  },
+  "additionalProperties": false
+}

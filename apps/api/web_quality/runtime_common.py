@@ -9,6 +9,7 @@ from urllib.parse import urljoin
 
 from web_quality.catalog import axe_rule_to_egov, axe_rule_to_kwcag
 from web_quality.fix_guides import resolve_finding_fix
+from web_quality.krds_scanner import attach_krds_runtime_findings
 
 AXE_CDN = "https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.2/axe.min.js"
 MAX_ELEMENT_CAPTURES_PER_STATE = 3
@@ -364,6 +365,7 @@ def scan_page_states(
     filename_prefix: str = "screenshots",
     url_hint: str = "",
     on_progress=None,
+    include_krds: bool = True,
 ) -> RuntimeScanResult:
     findings: list[dict[str, Any]] = []
     coverage: list[ScreenCoverage] = []
@@ -377,6 +379,12 @@ def scan_page_states(
         if on_progress:
             on_progress(idx, total, label)
         ok, reason = open_state_fn(page, sid)
+        if not ok:
+            try:
+                page.wait_for_timeout(2000)
+            except Exception:
+                pass
+            ok, reason = open_state_fn(page, sid)
         if not ok:
             coverage.append(ScreenCoverage(sid, label, False, reason, desc))
             findings.append(
@@ -442,6 +450,15 @@ def scan_page_states(
                     "screenshot_id": state_capture_id,
                 }
             )
+
+        attach_krds_runtime_findings(
+            page,
+            state_id=sid,
+            state_label=label,
+            state_description=desc,
+            findings=findings,
+            include_krds=include_krds,
+        )
 
         if sid != ui_states[0]["state_id"]:
             try:

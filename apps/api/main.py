@@ -1332,15 +1332,17 @@ def web_quality_targets(mode: str = Query("")) -> dict:
 @app.get("/v1/web-quality/rules")
 def web_quality_rules(category: str = Query("")) -> dict:
     _ensure_api_path()
-    from web_quality.catalog import load_egov_rules, load_kwcag_rules  # type: ignore
+    from web_quality.catalog import load_egov_rules, load_krds_uiux_rules, load_kwcag_rules  # type: ignore
 
     kwcag = load_kwcag_rules()
     egov = load_egov_rules()
+    krds_uiux = load_krds_uiux_rules()
     if category:
         cat = category.strip().lower()
         kwcag = [r for r in kwcag if r.get("category") == cat]
         egov = [r for r in egov if r.get("category") == cat]
-    return {"kwcag": kwcag, "egov": egov}
+        krds_uiux = [r for r in krds_uiux if r.get("category") == cat]
+    return {"kwcag": kwcag, "egov": egov, "krds_uiux": krds_uiux}
 
 
 @app.get("/v1/web-quality/environment")
@@ -1446,6 +1448,64 @@ async def web_quality_scenarios_upload(
         raise HTTPException(400, detail=str(e)) from e
 
 
+@app.post("/v1/web-quality/scenarios/resolve")
+async def web_quality_scenarios_resolve(
+    extractor: str = Form("auto"),
+    target: str = Form(""),
+    base_url: str = Form(""),
+    page_url: str = Form(""),
+    access: str = Form("public,auth"),
+    allow_playwright_fallback: str = Form("false"),
+    need_login: str = Form("false"),
+    login_url: str = Form(""),
+    login_username: str = Form(""),
+    login_password: str = Form(""),
+    password: str = Form(""),
+    login_user_selector: str = Form(""),
+    login_password_selector: str = Form(""),
+    login_submit_selector: str = Form(""),
+    session_job_id: str = Form(""),
+    file: UploadFile | None = File(None),
+    session_storage: UploadFile | None = File(None),
+) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    zip_bytes: bytes | None = None
+    if file is not None:
+        zip_bytes = await file.read()
+        if not zip_bytes:
+            zip_bytes = None
+    session_bytes: bytes | None = None
+    if session_storage is not None:
+        session_bytes = await session_storage.read()
+        if not session_bytes:
+            session_bytes = None
+    url = (base_url or page_url or "").strip()
+    allow_fb = (allow_playwright_fallback or "false").lower() in ("1", "true", "yes")
+    need = (need_login or "false").lower() in ("1", "true", "yes")
+    try:
+        return wq.resolve_web_quality_scenarios(
+            extractor=extractor,
+            target=target,
+            base_url=url,
+            access=access,
+            zip_bytes=zip_bytes,
+            allow_playwright_fallback=allow_fb,
+            need_login=need or bool(session_bytes) or bool(session_job_id.strip()),
+            login_url=login_url,
+            login_username=login_username,
+            login_password=login_password,
+            portal_password=password,
+            login_user_selector=login_user_selector,
+            login_password_selector=login_password_selector,
+            login_submit_selector=login_submit_selector,
+            session_storage_bytes=session_bytes,
+            session_job_id=session_job_id,
+        )
+    except Exception as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
 @app.get("/v1/web-quality/jobs/{job_id}")
 def web_quality_job(job_id: str) -> dict:
     _ensure_api_path()
@@ -1462,6 +1522,21 @@ async def web_quality_ipms_session(
     return wq.start_ipms_session(page_url)
 
 
+@app.post("/v1/web-quality/ipms/session/validate")
+async def web_quality_ipms_session_validate(
+    base_url: str = Form(""),
+    session_storage: UploadFile | None = File(None),
+) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    session_bytes: bytes | None = None
+    if session_storage is not None:
+        session_bytes = await session_storage.read()
+        if not session_bytes:
+            session_bytes = None
+    return wq.validate_ipms_session(base_url=base_url, session_storage_bytes=session_bytes)
+
+
 @app.post("/v1/web-quality/session")
 async def web_quality_browser_session(
     page_url: str = Form(""),
@@ -1473,6 +1548,13 @@ async def web_quality_browser_session(
     if kind not in ("generic", "ipms"):
         raise HTTPException(400, detail="detect must be generic|ipms")
     return wq.start_browser_session(page_url, detect=kind)  # type: ignore[arg-type]
+
+
+@app.get("/v1/web-quality/ipms/session/{job_id}/validate")
+def web_quality_ipms_session_validate_job(job_id: str, base_url: str = "") -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    return wq.validate_ipms_session_job(job_id, base_url=base_url)
 
 
 @app.get("/v1/web-quality/ipms/session/{job_id}")
@@ -1490,10 +1572,12 @@ async def web_quality_validate(
     password: str = Form(""),
     page_url: str = Form(""),
     include_runtime: str = Form("true"),
+    include_krds: str = Form("true"),
     ipms_access: str = Form("public"),
 ) -> dict:
     wq = _load_web_quality()
     include_rt = (include_runtime or "true").lower() not in ("0", "false", "no")
+    include_kr = (include_krds or "true").lower() not in ("0", "false", "no")
     return await asyncio.to_thread(
         wq.validate_web_quality,
         mode,
@@ -1502,6 +1586,7 @@ async def web_quality_validate(
         password,
         page_url,
         include_runtime=include_rt,
+        include_krds=include_kr,
         ipms_access=ipms_access,
     )
 
@@ -1514,6 +1599,7 @@ async def web_quality_run(
     password: str = Form(""),
     format: str = Form("json"),
     include_runtime: str = Form("true"),
+    include_krds: str = Form("true"),
     page_url: str = Form(""),
     login_url: str = Form(""),
     login_username: str = Form(""),
@@ -1549,6 +1635,7 @@ async def web_quality_run(
 
     wq = _load_web_quality()
     include_rt = (include_runtime or "true").lower() not in ("0", "false", "no")
+    include_kr = (include_krds or "true").lower() not in ("0", "false", "no")
     use_async = (async_progress or "false").lower() in ("1", "true", "yes")
     need = (need_login or "false").lower() in ("1", "true", "yes")
     try:
@@ -1563,6 +1650,7 @@ async def web_quality_run(
                 base_url,
                 password,
                 include_runtime=include_rt,
+                include_krds=include_kr,
                 page_url=page_url,
                 state_ids=state_ids,
                 ipms_access=ipms_access,
@@ -1587,6 +1675,7 @@ async def web_quality_run(
             base_url,
             password,
             include_runtime=include_rt,
+            include_krds=include_kr,
             page_url=page_url,
             login_url=login_url,
             login_username=login_username,
@@ -1650,6 +1739,67 @@ def web_quality_fix_guides() -> dict:
     return wq.get_fix_guides_catalog()
 
 
+@app.get("/v1/web-quality/ref-links")
+def web_quality_ref_links() -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    return wq.get_ref_links_catalog()
+
+
+@app.post("/v1/web-quality/scenarios/preview")
+async def web_quality_scenarios_preview(
+    mode: str = Form("ipms-public"),
+    page_url: str = Form(""),
+    state_ids: str = Form(""),
+    ipms_access: str = Form("public"),
+    need_login: str = Form("false"),
+    login_url: str = Form(""),
+    login_username: str = Form(""),
+    login_password: str = Form(""),
+    portal_password: str = Form(""),
+    login_user_selector: str = Form(""),
+    login_password_selector: str = Form(""),
+    login_submit_selector: str = Form(""),
+    session_job_id: str = Form(""),
+    candidates_json: str = Form(""),
+    session_storage: UploadFile | None = File(None),
+) -> dict:
+    _ensure_api_path()
+    from web_quality.scenario_preview import parse_candidates_json, preview_wq_scenarios  # type: ignore
+
+    session_bytes: bytes | None = None
+    if session_storage is not None:
+        session_bytes = await session_storage.read()
+        if not session_bytes:
+            session_bytes = None
+    need = (need_login or "false").lower() in ("1", "true", "yes")
+    try:
+        candidates_override = parse_candidates_json(candidates_json)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    try:
+        return await asyncio.to_thread(
+            preview_wq_scenarios,
+            mode=mode,
+            page_url=page_url,
+            state_ids=state_ids or None,
+            ipms_access=ipms_access,
+            need_login=need,
+            login_url=login_url,
+            login_username=login_username,
+            login_password=login_password,
+            portal_password=portal_password,
+            login_user_selector=login_user_selector,
+            login_password_selector=login_password_selector,
+            login_submit_selector=login_submit_selector,
+            session_storage_bytes=session_bytes,
+            session_job_id=session_job_id,
+            candidates_override=candidates_override,
+        )
+    except Exception as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
 @app.post("/v1/web-quality/export")
 async def web_quality_export(request: Request):
     _ensure_api_path()
@@ -1659,8 +1809,9 @@ async def web_quality_export(request: Request):
     if not isinstance(payload, dict):
         raise HTTPException(400, detail="payload required")
     wq = _load_web_quality()
+    export_scope = body.get("export_scope") if isinstance(body.get("export_scope"), dict) else None
     try:
-        data, fname, media_type = wq.export_web_quality_payload(payload, fmt)
+        data, fname, media_type = wq.export_web_quality_payload(payload, fmt, export_scope=export_scope)
     except ValueError as e:
         raise HTTPException(400, detail=str(e)) from e
     return StreamingResponse(

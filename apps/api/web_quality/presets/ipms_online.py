@@ -93,6 +93,18 @@ def _menu_candidate(
     )
 
 
+def parse_ipms_access_tiers(raw: str) -> set[str]:
+    text = (raw or "public,auth").strip().lower()
+    if text in ("both", "all"):
+        return {"public", "auth"}
+    tiers = {
+        p.strip()
+        for p in text.replace(";", ",").split(",")
+        if p.strip() in ("public", "auth")
+    }
+    return tiers or {"public"}
+
+
 def build_ipms_candidates() -> list[ScenarioCandidate]:
     out: list[ScenarioCandidate] = []
 
@@ -170,32 +182,7 @@ def build_ipms_candidates() -> list[ScenarioCandidate]:
     return out
 
 
-def extract_ipms_scenarios(
-    *,
-    base_url: str = "",
-    access: str = "public,auth",
-) -> dict[str, Any]:
-    url = (base_url or IPMS_DEFAULT_BASE).strip()
-    if not url.endswith("/"):
-        url += "/"
-
-    def _parse_tiers(raw: str) -> set[str]:
-        text = (raw or "public,auth").strip().lower()
-        if text in ("both", "all"):
-            return {"public", "auth"}
-        tiers = {
-            p.strip()
-            for p in text.replace(";", ",").split(",")
-            if p.strip() in ("public", "auth")
-        }
-        return tiers or {"public"}
-
-    tiers = _parse_tiers(access)
-
-    all_c = build_ipms_candidates()
-    candidates = [c for c in all_c if getattr(c, "access", "public") in tiers]
-    defaults = [c.state_id for c in candidates if c.recommended and c.selectable]
-
+def _access_tier_warnings(tiers: set[str]) -> list[str]:
     warnings: list[str] = []
     if "public" in tiers and "auth" in tiers:
         warnings.append(
@@ -210,16 +197,25 @@ def extract_ipms_scenarios(
             "로그인 후 메뉴(민원신청·주민수용성·내정보관리)입니다. "
             "ID/PW만으로는 공동인증서 2단계가 필요할 수 있어 Playwright storage_state(JSON) 업로드를 권장합니다."
         )
+    return warnings
 
-    return {
-        "ok": True,
-        "target": "ipms-online",
-        "target_name": "전기사업정보시스템",
-        "extractable": True,
-        "access": ",".join(sorted(tiers)),
-        "base_url": url,
-        "candidates": [c.to_dict() for c in candidates],
-        "defaults_selected": defaults,
-        "warnings": warnings,
-        "static_only_hint": "공개 HTML(shell) 정적 규칙은 런타임 없이도 fetch 가능합니다.",
-    }
+
+def extract_ipms_scenarios(
+    *,
+    base_url: str = "",
+    access: str = "public,auth",
+    zip_bytes: bytes | None = None,
+) -> dict[str, Any]:
+    from web_quality.scenario_resolve import resolve_ipms_scenarios
+
+    url = (base_url or IPMS_DEFAULT_BASE).strip()
+    if not url.endswith("/"):
+        url += "/"
+
+    result = resolve_ipms_scenarios(base_url=url, access=access, zip_bytes=zip_bytes)
+    tiers = parse_ipms_access_tiers(access)
+    for w in _access_tier_warnings(tiers):
+        if w not in result.get("warnings", []):
+            result.setdefault("warnings", []).append(w)
+    result["static_only_hint"] = "공개 HTML(shell) 정적 규칙은 런타임 없이도 fetch 가능합니다."
+    return result

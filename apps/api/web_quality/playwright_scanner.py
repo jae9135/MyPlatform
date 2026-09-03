@@ -24,6 +24,7 @@ def scan_portal_target_runtime(
     skip_runtime: bool = False,
     ui_states: list[dict[str, Any]] | None = None,
     scenario_candidates: list[dict[str, Any]] | None = None,
+    include_krds: bool = True,
 ) -> RuntimeScanResult:
     cfg = get_target(target_id)
     if not cfg or cfg.get("mode") != "portal":
@@ -102,6 +103,7 @@ def scan_portal_target_runtime(
                 open_state_fn=open_fn,
                 filename_prefix=f"screenshots/{target_id}",
                 url_hint=cfg.get("name", target_id),
+                include_krds=include_krds,
             )
             _attach_console_findings(console_errors, result.findings)
             result.console_errors = console_errors

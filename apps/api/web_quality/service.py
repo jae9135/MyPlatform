@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from web_quality.catalog import load_egov_rules, load_kwcag_rules
+from web_quality.catalog import krds_catalog_meta, load_egov_rules, load_krds_uiux_rules, load_kwcag_rules
 from web_quality.external_scanner import ExternalLoginConfig, scan_external_url_runtime
 from web_quality.external_scenario_extract import discover_external_scenarios
 from web_quality.fix_guides import enrich_finding
+from web_quality.krds_scanner import append_krds_manual_findings, scan_krds_static_files
 from web_quality.findings_utils import compute_diff
 from web_quality.history import find_previous_scan, list_history, load_history, save_scan_result
 from web_quality.manifest import (
@@ -15,6 +16,7 @@ from web_quality.manifest import (
     get_source_files,
     get_target,
     get_ui_states,
+    resolve_source_path,
 )
 from web_quality.playwright_scanner import scan_portal_target_runtime
 from web_quality.runtime_common import RuntimeScanResult
@@ -26,7 +28,11 @@ from web_quality.scenario_extract import (
     parse_state_ids,
 )
 from web_quality.java_runtime_scanner import scan_java_upload_runtime
-from web_quality.java_scenario_extract import extract_java_scenarios, extract_java_zip_scenarios
+from web_quality.java_scenario_extract import (
+    extract_java_scenarios,
+    extract_java_zip_scenarios,
+    is_jsp_auto_modal,
+)
 from web_quality.java_static_scanner import scan_java_upload_sources
 from web_quality.ipms_scanner import (
     fetch_ipms_shell_static,
@@ -52,6 +58,7 @@ from web_quality.presets.ipms_online import (
     IPMS_DEFAULT_BASE,
     build_ipms_candidates,
     extract_ipms_scenarios,
+    parse_ipms_access_tiers,
 )
 
 
@@ -68,6 +75,42 @@ def _ipms_access_from_mode(mode: str, ipms_access: str = "public") -> str:
 
 def _is_ipms_mode(mode: str) -> bool:
     return (mode or "").strip().lower() in ("ipms-online", "ipms-public", "ipms-auth")
+
+
+def _is_ipms_deploy_url(page_url: str) -> bool:
+    return "ipms.online" in (page_url or "").lower()
+
+
+def _resolve_external_ipms_access(
+    ipms_access: str,
+    state_ids: list[str] | None,
+    *,
+    need_login: bool,
+    has_session: bool,
+) -> str:
+    """외부 URL 탭에서 ipms.online 진단 시 IPMS 탭과 동일 access tier."""
+    tiers = set(parse_ipms_access_tiers(ipms_access or "public"))
+    if state_ids:
+        by_id = {c.state_id: c for c in build_ipms_candidates()}
+        for sid in state_ids:
+            cand = by_id.get(sid)
+            if cand and cand.access == "auth":
+                tiers.add("auth")
+                tiers.add("public")
+                break
+    elif need_login or has_session:
+        tiers.add("auth")
+    if not tiers:
+        tiers.add("public")
+    return ",".join(sorted(tiers))
+
+
+def _relabel_external_ipms_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    out = dict(payload)
+    out["mode"] = "external"
+    out["target"] = "external"
+    out["target_name"] = "외부 URL"
+    return out
 
 
 def _finalize_scan_result(payload: dict[str, Any], job_id: str | None = None) -> dict[str, Any]:
@@ -91,6 +134,7 @@ def validate_web_quality(
     page_url: str = "",
     *,
     include_runtime: bool = True,
+    include_krds: bool = True,
     ipms_access: str = "public",
 ) -> dict[str, Any]:
     mode = (mode or "external").strip().lower()
@@ -189,6 +233,7 @@ def run_web_quality(
     password: str = "",
     *,
     include_runtime: bool = True,
+    include_krds: bool = True,
     page_url: str = "",
     login_url: str = "",
     login_username: str = "",
@@ -212,6 +257,7 @@ def run_web_quality(
             return start_ipms_run_job(
                 page_url=page_url or base_url,
                 include_runtime=include_runtime,
+                include_krds=include_krds,
                 state_ids=state_ids,
                 ipms_access=tier,
                 session_storage_bytes=session_storage_bytes,
@@ -222,6 +268,7 @@ def run_web_quality(
             _run_ipms_online(
             page_url=page_url or base_url,
             include_runtime=include_runtime,
+            include_krds=include_krds,
             state_ids=state_ids,
             ipms_access=tier,
             session_storage_bytes=session_storage_bytes,
@@ -238,6 +285,7 @@ def run_web_quality(
                 zip_bytes=zip_bytes,
                 page_url=page_url,
                 include_runtime=include_runtime,
+                include_krds=include_krds,
                 state_ids=state_ids,
                 login_url=login_url,
                 login_username=login_username,
@@ -245,12 +293,15 @@ def run_web_quality(
                 login_user_selector=login_user_selector,
                 login_password_selector=login_password_selector,
                 login_submit_selector=login_submit_selector,
+                session_storage_bytes=session_storage_bytes,
+                session_job_id=session_job_id,
             )
         return _finalize_scan_result(
             _run_java_upload(
             zip_bytes,
             page_url=page_url,
             include_runtime=include_runtime,
+            include_krds=include_krds,
             state_ids=state_ids,
             login_url=login_url,
             login_username=login_username,
@@ -258,6 +309,8 @@ def run_web_quality(
             login_user_selector=login_user_selector,
             login_password_selector=login_password_selector,
             login_submit_selector=login_submit_selector,
+            session_storage_bytes=session_storage_bytes,
+            session_job_id=session_job_id,
             )
         )
 
@@ -269,6 +322,7 @@ def run_web_quality(
             return start_external_run_job(
                 page_url=page_url,
                 include_runtime=include_runtime,
+                include_krds=include_krds,
                 state_ids=state_ids,
                 login_url=login_url,
                 login_username=login_username,
@@ -280,11 +334,13 @@ def run_web_quality(
                 session_storage_bytes=session_storage_bytes,
                 session_job_id=session_job_id,
                 need_login=need_login,
+                ipms_access=ipms_access,
             )
         return _finalize_scan_result(
             _run_external(
             page_url=page_url,
             include_runtime=include_runtime,
+            include_krds=include_krds,
             state_ids=state_ids,
             login_url=login_url,
             login_username=login_username,
@@ -296,6 +352,7 @@ def run_web_quality(
             session_storage_bytes=session_storage_bytes,
             session_job_id=session_job_id,
             need_login=need_login,
+            ipms_access=ipms_access,
             )
         )
 
@@ -346,6 +403,7 @@ def run_web_quality(
             skip_runtime=not include_runtime,
             ui_states=runtime_states,
             scenario_candidates=scenario_payload,
+            include_krds=include_krds,
         )
 
     return _finalize_scan_result(
@@ -360,6 +418,7 @@ def run_web_quality(
         source_files=get_source_files(target),
         ui_states=coverage_states,
         extra_screen_reasons=extra_reasons,
+        include_krds=include_krds,
         )
     )
 
@@ -414,6 +473,7 @@ def _run_ipms_online(
     *,
     page_url: str,
     include_runtime: bool,
+    include_krds: bool = True,
     state_ids: str | list | None,
     ipms_access: str = "public",
     session_storage_bytes: bytes | None = None,
@@ -424,13 +484,11 @@ def _run_ipms_online(
     url = (page_url or IPMS_DEFAULT_BASE).strip()
     if not url.endswith("/"):
         url += "/"
-    tier = (ipms_access or "public").strip().lower()
-    if tier not in ("public", "auth"):
-        tier = "public"
+    tiers = parse_ipms_access_tiers(ipms_access)
 
     static = fetch_ipms_shell_static(url)
     all_candidates = build_ipms_candidates()
-    tier_candidates = [c for c in all_candidates if c.access == tier]
+    tier_candidates = [c for c in all_candidates if c.access in tiers]
     selected_ids = parse_state_ids(state_ids)
 
     by_id = {c.state_id: c for c in tier_candidates}
@@ -458,10 +516,12 @@ def _run_ipms_online(
     elif session_storage_bytes:
         storage_state = parse_storage_state(session_storage_bytes)
 
-    if tier == "auth" and include_runtime and not storage_state:
+    chosen_auth = any(c.access == "auth" for c in chosen)
+    if chosen_auth and include_runtime and not storage_state:
         raise ValueError(
             "로그인 후 진단에는 「로그인 세션 생성」 또는 세션 JSON 업로드가 필요합니다."
         )
+    scan_access = "auth" if chosen_auth else "public"
 
     def on_progress(idx: int, total: int, label: str) -> None:
         if progress_job_id:
@@ -489,10 +549,12 @@ def _run_ipms_online(
                 url,
                 ui_states=[c.to_ui_state() for c in chosen],
                 scenario_candidates=[c.to_dict() for c in chosen],
-                access=tier,
+                access=scan_access,
                 storage_state=storage_state,
                 skip_runtime=False,
                 on_progress=on_progress,
+                include_krds=include_krds,
+                queue_job_id=progress_job_id,
             )
     else:
         runtime = RuntimeScanResult(
@@ -511,9 +573,10 @@ def _run_ipms_online(
         source_files=sorted(static.scanned_files),
         ui_states=coverage_states,
         extra_screen_reasons=extra,
+        include_krds=include_krds,
     )
-    payload["ipms_access"] = tier
-    payload["scenario"] = extract_ipms_scenarios(base_url=url, access=tier)
+    payload["ipms_access"] = ",".join(sorted(tiers))
+    payload["scenario"] = extract_ipms_scenarios(base_url=url, access=payload["ipms_access"])
     return payload
 
 
@@ -522,6 +585,7 @@ def _run_java_upload(
     *,
     page_url: str,
     include_runtime: bool,
+    include_krds: bool = True,
     state_ids: str | list | None,
     login_url: str = "",
     login_username: str = "",
@@ -529,9 +593,12 @@ def _run_java_upload(
     login_user_selector: str = "",
     login_password_selector: str = "",
     login_submit_selector: str = "",
+    session_storage_bytes: bytes | None = None,
+    session_job_id: str = "",
     progress_job_id: str | None = None,
 ) -> dict[str, Any]:
     from source_scan.zip_ingest import cleanup_ingest, ingest_zip, validate_zip_bytes
+    from web_quality.ipms_scanner import parse_storage_state
 
     if progress_job_id:
         update_job(progress_job_id, pct=3, message="ZIP 검증·압축 해제…", step_label="준비")
@@ -553,9 +620,17 @@ def _run_java_upload(
             unknown = [sid for sid in selected_ids if sid not in by_id]
             if unknown:
                 raise ValueError(f"알 수 없는 state_id: {', '.join(unknown)}")
-            chosen = [c for c in candidates if c.state_id in selected_ids and c.selectable]
+            chosen = [
+                c
+                for c in candidates
+                if c.state_id in selected_ids and c.selectable and not is_jsp_auto_modal(c)
+            ]
         else:
-            chosen = [c for c in candidates if c.recommended and c.selectable]
+            chosen = [
+                c
+                for c in candidates
+                if c.recommended and c.selectable and not is_jsp_auto_modal(c)
+            ]
 
         coverage_states = [c.to_ui_state() for c in candidates]
         extra: dict[str, str] = {}
@@ -563,11 +638,16 @@ def _run_java_upload(
         for c in candidates:
             if c.state_id in chosen_ids:
                 continue
-            extra[c.state_id] = (
-                c.skip_reason or "실행 불가"
-                if not c.selectable
-                else "사용자 제외"
-            )
+            if is_jsp_auto_modal(c) and (
+                selected_ids is None or c.state_id in (selected_ids or [])
+            ):
+                extra[c.state_id] = c.skip_reason or "JSP 모달 — 자동 화면 진단 제외"
+            else:
+                extra[c.state_id] = (
+                    c.skip_reason or "실행 불가"
+                    if not c.selectable
+                    else "사용자 제외"
+                )
 
         login_cfg = None
         if login_url.strip() and login_username.strip() and login_password.strip():
@@ -579,6 +659,12 @@ def _run_java_upload(
                 password_selector=login_password_selector.strip(),
                 submit_selector=login_submit_selector.strip(),
             )
+
+        storage_state = None
+        if session_job_id.strip():
+            storage_state = load_session_json(session_job_id.strip())
+        elif session_storage_bytes:
+            storage_state = parse_storage_state(session_storage_bytes)
 
         base_url = page_url.strip().rstrip("/")
         if include_runtime:
@@ -602,7 +688,9 @@ def _run_java_upload(
                     ui_states=[c.to_ui_state() for c in chosen],
                     scenario_candidates=[c.to_dict() for c in chosen],
                     login_cfg=login_cfg,
+                    storage_state=storage_state,
                     skip_runtime=False,
+                    include_krds=include_krds,
                 )
         else:
             runtime = RuntimeScanResult(
@@ -622,6 +710,7 @@ def _run_java_upload(
             source_files=source_files,
             ui_states=coverage_states,
             extra_screen_reasons=extra,
+            include_krds=include_krds,
         )
         payload["scenario"] = {
             "candidates": [c.to_dict() for c in candidates],
@@ -635,6 +724,53 @@ def _run_java_upload(
 
 def extract_java_upload_scenarios(zip_bytes: bytes) -> dict[str, Any]:
     return extract_java_zip_scenarios(zip_bytes)
+
+
+def resolve_web_quality_scenarios(
+    *,
+    extractor: str = "auto",
+    target: str = "",
+    base_url: str = "",
+    access: str = "public,auth",
+    zip_bytes: bytes | None = None,
+    allow_playwright_fallback: bool = False,
+    need_login: bool = False,
+    login_url: str = "",
+    login_username: str = "",
+    login_password: str = "",
+    portal_password: str = "",
+    login_user_selector: str = "",
+    login_password_selector: str = "",
+    login_submit_selector: str = "",
+    session_storage_bytes: bytes | None = None,
+    session_job_id: str = "",
+) -> dict[str, Any]:
+    from web_quality.scenario_resolve import resolve_scenarios
+
+    def discover_fn(page_url: str) -> dict[str, Any]:
+        return discover_external_scenarios_from_params(
+            page_url=page_url,
+            need_login=need_login,
+            login_url=login_url,
+            login_username=login_username,
+            login_password=login_password,
+            portal_password=portal_password,
+            login_user_selector=login_user_selector,
+            login_password_selector=login_password_selector,
+            login_submit_selector=login_submit_selector,
+            session_storage_bytes=session_storage_bytes,
+            session_job_id=session_job_id,
+        )
+
+    return resolve_scenarios(
+        extractor=extractor,
+        target=target,
+        base_url=base_url,
+        access=access,
+        zip_bytes=zip_bytes,
+        allow_playwright_fallback=allow_playwright_fallback,
+        discover_fn=discover_fn if allow_playwright_fallback else None,
+    )
 
 
 def discover_external_scenarios_from_params(
@@ -734,6 +870,7 @@ def _run_external(
     *,
     page_url: str,
     include_runtime: bool,
+    include_krds: bool = True,
     state_ids: str | list | None = None,
     login_url: str = "",
     login_username: str = "",
@@ -746,10 +883,40 @@ def _run_external(
     session_job_id: str = "",
     need_login: bool = False,
     progress_job_id: str | None = None,
+    ipms_access: str = "public",
 ) -> dict[str, Any]:
     url = page_url.strip()
     if not url.startswith("http://") and not url.startswith("https://"):
         raise ValueError("page_url must start with http:// or https://")
+
+    if _is_ipms_deploy_url(url):
+        if progress_job_id:
+            update_job(
+                progress_job_id,
+                pct=3,
+                message="IPMS 동일 경로로 진단 준비…",
+                step_label="준비",
+            )
+        selected = parse_state_ids(state_ids)
+        has_session = bool(session_job_id.strip() or session_storage_bytes)
+        access = _resolve_external_ipms_access(
+            ipms_access,
+            selected,
+            need_login=need_login,
+            has_session=has_session,
+        )
+        payload = _run_ipms_online(
+            page_url=url,
+            include_runtime=include_runtime,
+            include_krds=include_krds,
+            state_ids=state_ids,
+            ipms_access=access,
+            session_storage_bytes=session_storage_bytes,
+            session_job_id=session_job_id,
+            display_mode="ipms-online",
+            progress_job_id=progress_job_id,
+        )
+        return _relabel_external_ipms_payload(payload)
 
     if progress_job_id:
         update_job(progress_job_id, pct=3, message="화면 시나리오 준비…", step_label="탐색")
@@ -861,7 +1028,11 @@ def _run_external(
         storage_state=storage,
         skip_runtime=not include_runtime,
         on_progress=on_progress,
+        include_krds=include_krds,
+        queue_job_id=progress_job_id,
     )
+
+    static = fetch_ipms_shell_static(url) if _is_ipms_deploy_url(url) else None
 
     return _build_payload(
         target="external",
@@ -869,11 +1040,12 @@ def _run_external(
         mode="external",
         base_url="",
         page_url=url,
-        static=None,
+        static=static,
         runtime=runtime,
-        source_files=[],
+        source_files=sorted(static.scanned_files) if static else [],
         ui_states=coverage_states,
         extra_screen_reasons=extra,
+        include_krds=include_krds,
     )
 
 
@@ -881,6 +1053,7 @@ def start_external_run_job(
     *,
     page_url: str,
     include_runtime: bool,
+    include_krds: bool = True,
     state_ids: str | list | None,
     login_url: str,
     login_username: str,
@@ -892,6 +1065,7 @@ def start_external_run_job(
     session_storage_bytes: bytes | None,
     session_job_id: str = "",
     need_login: bool,
+    ipms_access: str = "public",
 ) -> dict[str, Any]:
     job_id = create_job("external-scan", "진단 준비 중…")
 
@@ -901,6 +1075,7 @@ def start_external_run_job(
                 _run_external(
                 page_url=page_url,
                 include_runtime=include_runtime,
+                include_krds=include_krds,
                 state_ids=state_ids,
                 login_url=login_url,
                 login_username=login_username,
@@ -912,6 +1087,7 @@ def start_external_run_job(
                 session_storage_bytes=session_storage_bytes,
                 session_job_id=session_job_id,
                 need_login=need_login,
+                ipms_access=ipms_access,
                 progress_job_id=job_id,
                 ),
                 job_id=job_id,
@@ -944,6 +1120,7 @@ def start_java_upload_run_job(
     zip_bytes: bytes,
     page_url: str,
     include_runtime: bool,
+    include_krds: bool = True,
     state_ids: str | list | None,
     login_url: str = "",
     login_username: str = "",
@@ -951,6 +1128,8 @@ def start_java_upload_run_job(
     login_user_selector: str = "",
     login_password_selector: str = "",
     login_submit_selector: str = "",
+    session_storage_bytes: bytes | None = None,
+    session_job_id: str = "",
 ) -> dict[str, Any]:
     job_id = create_job("java-upload-scan", "Java ZIP 진단 준비 중…")
 
@@ -961,6 +1140,7 @@ def start_java_upload_run_job(
                     zip_bytes,
                     page_url=page_url,
                     include_runtime=include_runtime,
+                    include_krds=include_krds,
                     state_ids=state_ids,
                     login_url=login_url,
                     login_username=login_username,
@@ -968,6 +1148,8 @@ def start_java_upload_run_job(
                     login_user_selector=login_user_selector,
                     login_password_selector=login_password_selector,
                     login_submit_selector=login_submit_selector,
+                    session_storage_bytes=session_storage_bytes,
+                    session_job_id=session_job_id,
                     progress_job_id=job_id,
                 ),
                 job_id=job_id,
@@ -1007,12 +1189,26 @@ def _build_payload(
     source_files: list[str],
     ui_states: list[dict],
     extra_screen_reasons: dict[str, str] | None = None,
+    include_krds: bool = True,
 ) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     if static:
         findings.extend(f.to_dict() for f in static.findings)
     findings.extend(runtime.findings)
     findings = [enrich_finding(f) for f in findings]
+
+    if include_krds and static and getattr(static, "scanned_files", None):
+        contents: dict[str, str] = {}
+        for rel in static.scanned_files:
+            path = resolve_source_path(rel)
+            if path.is_file():
+                try:
+                    contents[rel] = path.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+        if contents:
+            findings.extend(f.to_dict() for f in scan_krds_static_files(contents))
+            findings = [enrich_finding(f) for f in findings]
 
     source_coverage = []
     scanned_files = static.scanned_files if static else set()
@@ -1073,7 +1269,7 @@ def _build_payload(
             f["screenshot_url"] = capture_by_id[sid].get("data_url")
             f["screenshot_filename"] = capture_by_id[sid].get("filename")
 
-    if mode in ("portal", "ipms-online", "ipms-public", "ipms-auth"):
+    if _is_ipms_mode(mode) or _is_ipms_deploy_url(page_url):
         for rule in load_egov_rules():
             if rule.get("automatable") != "manual":
                 continue
@@ -1093,6 +1289,9 @@ def _build_payload(
                 }
             )
 
+    if include_krds:
+        append_krds_manual_findings(findings, location=target or page_url or target_name)
+
     stats = _compute_stats(findings)
 
     return {
@@ -1105,6 +1304,7 @@ def _build_payload(
         "scanned_at": datetime.now(timezone.utc).isoformat(),
         "runtime_available": runtime.runtime_available,
         "runtime_error": runtime.runtime_error,
+        "include_krds": include_krds,
         "findings": findings,
         "stats": stats,
         "screenshots": screenshots,
@@ -1115,6 +1315,8 @@ def _build_payload(
         "rules": {
             "kwcag": load_kwcag_rules(),
             "egov": load_egov_rules(),
+            "krds_uiux": load_krds_uiux_rules(),
+            "krds_meta": krds_catalog_meta(),
         },
         "targets": [t for t in TARGETS if t.get("mode") == "portal"],
     }
@@ -1153,6 +1355,7 @@ def start_ipms_run_job(
     *,
     page_url: str,
     include_runtime: bool,
+    include_krds: bool = True,
     state_ids: str | list | None,
     ipms_access: str,
     session_storage_bytes: bytes | None,
@@ -1167,6 +1370,7 @@ def start_ipms_run_job(
                 _run_ipms_online(
                 page_url=page_url,
                 include_runtime=include_runtime,
+                include_krds=include_krds,
                 state_ids=state_ids,
                 ipms_access=ipms_access,
                 session_storage_bytes=session_storage_bytes,
@@ -1212,6 +1416,49 @@ def start_ipms_session(page_url: str = "") -> dict[str, Any]:
     return start_browser_session(page_url, detect="ipms")
 
 
+def validate_ipms_session(
+    *,
+    base_url: str = "",
+    session_storage_bytes: bytes | None = None,
+) -> dict[str, Any]:
+    from web_quality.ipms_scanner import parse_storage_state, validate_ipms_storage_session
+
+    if not session_storage_bytes:
+        return {"ok": False, "message": "세션 JSON 파일이 필요합니다."}
+    try:
+        storage = parse_storage_state(session_storage_bytes)
+    except ValueError as e:
+        return {"ok": False, "message": str(e)}
+    except Exception:
+        return {"ok": False, "message": "storage_state JSON 형식이 아닙니다."}
+    if not storage:
+        return {"ok": False, "message": "storage_state JSON 형식이 아닙니다."}
+    ok, msg = validate_ipms_storage_session(base_url, storage)
+    return {
+        "ok": ok,
+        "message": "로그인 완료" if ok else (msg or "로그인 실패"),
+    }
+
+
+def validate_ipms_session_job(job_id: str, *, base_url: str = "") -> dict[str, Any]:
+    from web_quality.ipms_scanner import validate_ipms_storage_session
+
+    jid = (job_id or "").strip()
+    if not jid:
+        return {"ok": False, "message": "세션 job_id가 필요합니다."}
+    storage = load_session_json(jid)
+    if not storage:
+        return {
+            "ok": False,
+            "message": "세션 파일이 없습니다. 「로그인 창 띄움」을 다시 실행하세요.",
+        }
+    ok, msg = validate_ipms_storage_session(base_url, storage)
+    return {
+        "ok": ok,
+        "message": "로그인 완료" if ok else (msg or "로그인 실패"),
+    }
+
+
 def start_browser_session(page_url: str = "", *, detect: SessionDetect = "generic") -> dict[str, Any]:
     jid = start_browser_session_job(page_url, detect=detect)
     job = get_job(jid)
@@ -1229,33 +1476,49 @@ def get_fix_guides_catalog() -> dict[str, Any]:
     return {"ok": True, "guides": guides}
 
 
-def export_web_quality_payload(payload: dict[str, Any], fmt: str) -> tuple[bytes, str, str]:
+def get_ref_links_catalog() -> dict[str, Any]:
+    from web_quality.ref_links import ref_config_public
+
+    return {"ok": True, **ref_config_public()}
+
+
+def export_web_quality_payload(
+    payload: dict[str, Any],
+    fmt: str,
+    *,
+    export_scope: dict[str, Any] | None = None,
+) -> tuple[bytes, str, str]:
     """Returns (data, filename, media_type)."""
+    from web_quality.export_scope import apply_export_scope
     from web_quality.report import build_html_report, build_xlsx_bytes, build_zip_bytes
 
+    scoped = apply_export_scope(payload, export_scope)
     fmt = (fmt or "xlsx").lower().strip()
     if fmt not in ("xlsx", "html", "zip"):
         raise ValueError("format must be xlsx|html|zip")
 
-    slug = payload.get("target") or "scan"
-    date = str(payload.get("scanned_at", ""))[:10] or "report"
+    slug = scoped.get("target") or "scan"
+    date = str(scoped.get("scanned_at", ""))[:10] or "report"
+    scope_suffix = ""
+    if export_scope and export_scope.get("mode") != "all":
+        scope_suffix = f"_{scoped.get('export_scope_label', 'scoped')}".replace("·", "-").replace("/", "-")
 
     if fmt == "xlsx":
         return (
-            build_xlsx_bytes(payload, embed_images=True),
-            f"web_quality_{slug}_{date}.xlsx",
+            build_xlsx_bytes(scoped, embed_images=True),
+            f"web_quality_{slug}_{date}{scope_suffix}.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     if fmt == "zip":
         return (
-            build_zip_bytes(payload),
-            f"web_quality_{slug}_{date}.zip",
+            build_zip_bytes(scoped),
+            f"web_quality_{slug}_{date}{scope_suffix}.zip",
             "application/zip",
         )
-    html_text = build_html_report(payload, image_mode="embed")
+    html_text = build_html_report(scoped, image_mode="embed")
     return (
         html_text.encode("utf-8"),
-        f"web_quality_{slug}_{date}.html",
+        f"web_quality_{slug}_{date}{scope_suffix}.html",
         "text/html; charset=utf-8",
     )
 

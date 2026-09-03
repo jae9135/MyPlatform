@@ -35,6 +35,7 @@ class ScenarioCandidate:
     evidence: str = ""
     ready_selector: str = MY_GANTT_READY
     steps: list[dict[str, Any]] = field(default_factory=list)
+    fallback_paths: list[str] = field(default_factory=list)
     access: str = ""  # ipms-online: "public" | "auth"
 
     def to_dict(self) -> dict[str, Any]:
@@ -54,6 +55,8 @@ class ScenarioCandidate:
                 "steps": self.steps,
             },
         }
+        if self.fallback_paths:
+            d["fallback_paths"] = list(self.fallback_paths)
         if self.access:
             d["access"] = self.access
         return d

@@ -2,9 +2,37 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any
+import threading
+from contextlib import contextmanager
+from typing import Any, Callable
+from urllib.parse import urlparse
 
 _SANDBOX_BROWSERS_MARK = "cursor-sandbox-cache"
+_PLAYWRIGHT_SLOTS = threading.Semaphore(2)
+_HOST_LOCKS: dict[str, threading.Lock] = {}
+_HOST_GUARD = threading.Lock()
+
+
+def _runtime_host_key(url: str) -> str:
+    parsed = urlparse((url or "").strip())
+    return (parsed.netloc or parsed.path or url).lower()
+
+
+@contextmanager
+def playwright_runtime_scan_slot(page_url: str, *, on_wait: Callable[[], None] | None = None):
+    """동일 배포 URL Playwright 진단은 직렬화하고, 전체 동시 브라우저 수는 2로 제한."""
+    host = _runtime_host_key(page_url)
+    with _HOST_GUARD:
+        lock = _HOST_LOCKS.setdefault(host, threading.Lock())
+    if not lock.acquire(blocking=False):
+        if on_wait:
+            on_wait()
+        lock.acquire()
+    try:
+        with _PLAYWRIGHT_SLOTS:
+            yield
+    finally:
+        lock.release()
 
 
 def sanitize_playwright_browsers_path() -> str | None:
@@ -31,6 +59,11 @@ def _friendly_playwright_error(raw: str) -> str:
         return (
             "Playwright 환경 확인 중 내부 오류(비동기 충돌). "
             "진단 실행은 가능할 수 있으나 API validate 호출 방식을 수정 중입니다."
+        )
+    if "timeout" in text.lower() and "exceeded" in text.lower():
+        return (
+            "배포 URL 접속 시간 초과 — 서버 응답이 느리거나 Playwright(headless)에서 "
+            "페이지 로드가 완료되지 않았습니다. 네트워크·서버 상태를 확인하거나 잠시 후 다시 시도하세요."
         )
     if len(text) > 220:
         return text[:220] + "…"

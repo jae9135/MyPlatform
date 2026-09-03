@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Literal
 
-EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="web-quality")
+EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="web-quality")
 
 JobStatus = Literal["queued", "running", "done", "error", "cancelled"]
 

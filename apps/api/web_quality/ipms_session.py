@@ -81,6 +81,44 @@ def _generic_login_complete(page, target_url: str, initial_cookie_count: int) ->
     return True
 
 
+BROWSER_CLOSED_MSG = "브라우저 창이 닫혔습니다. 「로그인 창 띄움」을 다시 시도하세요."
+
+
+def _browser_window_closed(browser, page) -> bool:
+    try:
+        return not browser.is_connected() or page.is_closed()
+    except Exception:
+        return True
+
+
+def _raise_if_browser_closed(browser, page) -> None:
+    if _browser_window_closed(browser, page):
+        raise RuntimeError(BROWSER_CLOSED_MSG)
+
+
+def _is_target_closed(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    if "has been closed" in text or "target page, context or browser" in text:
+        return True
+    name = type(exc).__name__
+    return name in ("TargetClosedError", "Error") and "closed" in text
+
+
+def _session_error_message(exc: BaseException) -> str:
+    if _is_target_closed(exc):
+        return BROWSER_CLOSED_MSG
+    return str(exc)
+
+
+def _goto_or_fail(page, url: str, *, timeout: int = 60000) -> None:
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+    except Exception as e:
+        if _is_target_closed(e):
+            raise RuntimeError(BROWSER_CLOSED_MSG) from e
+        raise
+
+
 def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms") -> None:
     from playwright.sync_api import sync_playwright
 
@@ -112,7 +150,10 @@ def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms
     try:
         with sync_playwright() as p:
             try:
-                browser = p.chromium.launch(headless=False)
+                browser = p.chromium.launch(
+                    headless=False,
+                    args=["--start-maximized", "--window-position=0,0"],
+                )
             except Exception as e:
                 if "Executable doesn't exist" in str(e):
                     raise RuntimeError(
@@ -123,7 +164,15 @@ def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms
 
             context = browser.new_context(viewport={"width": 1280, "height": 900})
             page = context.new_page()
-            page.goto(target, wait_until="domcontentloaded", timeout=60000)
+            try:
+                page.bring_to_front()
+            except Exception:
+                pass
+            try:
+                page.evaluate("() => { window.focus(); }")
+            except Exception:
+                pass
+            _goto_or_fail(page, target)
             initial_cookies = len(context.cookies())
 
             update_job(
@@ -139,13 +188,19 @@ def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms
                 if is_cancelled(job_id):
                     browser.close()
                     raise ScanCancelled("cancelled")
-                if detect == "ipms":
-                    if page.locator("#logout, .btn-logout, #login-user").count():
+                _raise_if_browser_closed(browser, page)
+                try:
+                    if detect == "ipms":
+                        if page.locator("#logout, .btn-logout, #login-user").count():
+                            login_ready = True
+                            break
+                    elif _generic_login_complete(page, raw, initial_cookies):
                         login_ready = True
                         break
-                elif _generic_login_complete(page, raw, initial_cookies):
-                    login_ready = True
-                    break
+                except Exception as e:
+                    if _is_target_closed(e) or _browser_window_closed(browser, page):
+                        raise RuntimeError(BROWSER_CLOSED_MSG) from e
+                    raise
                 elapsed_sec = int(time.time() - (deadline - SESSION_TIMEOUT_SEC))
                 update_job(
                     job_id,
@@ -162,8 +217,12 @@ def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms
 
             if login_ready and detect == "generic" and _normalize_url(page.url) != _normalize_url(raw):
                 try:
-                    page.goto(raw, wait_until="domcontentloaded", timeout=60000)
+                    _goto_or_fail(page, raw)
                     page.wait_for_timeout(400)
+                except RuntimeError as e:
+                    if str(e) == BROWSER_CLOSED_MSG:
+                        raise
+                    pass
                 except Exception:
                     pass
 
@@ -180,8 +239,12 @@ def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms
             context.storage_state(path=str(out))
             browser.close()
 
+    except ScanCancelled:
+        update_job(job_id, status="cancelled", message="취소됨", error="cancelled", pct=0)
+        return
     except Exception as e:
-        update_job(job_id, status="error", error=str(e), message=str(e), pct=0)
+        msg = _session_error_message(e)
+        update_job(job_id, status="error", error=msg, message=msg, pct=0)
         return
 
     if not out.is_file():

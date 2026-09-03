@@ -78,22 +78,59 @@ def extract_axe_id_from_url(url: str) -> str:
 
 
 def enrich_finding(finding: dict[str, Any]) -> dict[str, Any]:
-    """Attach Korean fix text and optional fix_url to a finding dict (in-place copy)."""
+    """Attach Korean fix text, ref_url, and metadata to a finding dict (in-place copy)."""
+    from web_quality.catalog import rule_by_id
+    from web_quality.ref_links import GUIDELINE_UIUX_2025_URL, resolve_finding_ref_urls
+
     out = dict(finding)
     axe_id = str(out.get("axe_id") or "")
     if not axe_id:
         raw = str(out.get("fix") or "")
         if _URL_RE.match(raw.strip()):
             axe_id = extract_axe_id_from_url(raw)
-    rule_id = str(out.get("rule_id") or out.get("kwcag_id") or "")
+    rule_id = str(out.get("rule_id") or "")
+    kwcag_id = str(out.get("kwcag_id") or "")
     existing = str(out.get("fix") or "")
     fix_text, fix_url = resolve_finding_fix(
         axe_id=axe_id,
-        rule_id=rule_id,
+        rule_id=rule_id or kwcag_id,
         existing_fix=existing,
     )
     if fix_text:
         out["fix"] = fix_text
     if fix_url:
         out["fix_url"] = fix_url
+
+    catalog_rule = rule_by_id(rule_id) if rule_id else None
+    if catalog_rule:
+        if not kwcag_id:
+            km = catalog_rule.get("kwcag_map") or []
+            if km:
+                kwcag_id = str(km[0])
+                out["kwcag_id"] = kwcag_id
+        if catalog_rule.get("category") == "uiux":
+            out["guideline_url"] = GUIDELINE_UIUX_2025_URL
+            if not out.get("krds_ref"):
+                out["krds_ref"] = catalog_rule.get("krds_ref", "")
+            if not out.get("rule_title"):
+                out["rule_title"] = catalog_rule.get("title", "")
+            if catalog_rule.get("ref_anchor") and not out.get("ref_anchor"):
+                out["ref_anchor"] = catalog_rule.get("ref_anchor", "")
+
+    refs = resolve_finding_ref_urls(
+        rule_id=rule_id,
+        kwcag_id=kwcag_id,
+        category=str(out.get("category") or (catalog_rule or {}).get("category", "")),
+        rule_ref_url=str((catalog_rule or {}).get("ref_url") or ""),
+        rule_ref_anchor=str(
+            out.get("ref_anchor") or (catalog_rule or {}).get("ref_anchor") or ""
+        ),
+        rule_ref_text=str(out.get("ref_text") or (catalog_rule or {}).get("ref_text") or ""),
+        rule_ref_fallback=str((catalog_rule or {}).get("ref_fallback_url") or ""),
+    )
+    if refs.get("primary"):
+        out["ref_url"] = refs["primary"]
+    if refs.get("fallback"):
+        out["ref_fallback_url"] = refs["fallback"]
+
     return out

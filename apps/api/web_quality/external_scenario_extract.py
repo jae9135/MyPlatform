@@ -241,6 +241,72 @@ def _probe_wq_target(page, entry_url: str, target: str) -> tuple[bool, str, str]
         return False, str(e)[:120], ""
 
 
+def _discover_via_menutree(
+    entry: str,
+    *,
+    need_login: bool,
+    storage_state: dict[str, Any] | None,
+    progress_job_id: str | None,
+) -> dict[str, Any] | None:
+    from web_quality.job_progress import update_job
+    from web_quality.o2_spa_scenario_extract import extract_o2_spa_from_base_url, menu_candidate_count
+
+    def prog(pct: int, message: str, step_label: str = "MenuTree") -> None:
+        if progress_job_id:
+            update_job(
+                progress_job_id,
+                pct=pct,
+                message=message,
+                step_label=step_label,
+            )
+
+    prog(5, "MenuTree.js 확인…")
+    candidates, warnings, meta = extract_o2_spa_from_base_url(entry)
+    if menu_candidate_count(candidates) < 1:
+        return None
+
+    has_session = bool(storage_state) or need_login
+    menu_n = menu_candidate_count(candidates)
+    prog(100, f"MenuTree 시나리오 {menu_n}건", "완료")
+
+    out_warnings = [
+        f"O2 SPA MenuTree.js에서 GNB 메뉴 시나리오 {menu_n}건 추출.",
+        *warnings,
+    ]
+    if not has_session:
+        out_warnings.append(
+            "로그인 메뉴는 목록에 표시되며, 세션 생성 전까지 선택·미리보기가 비활성화됩니다."
+        )
+    else:
+        out_warnings.append("로그인·세션 기준으로 공개·권한 메뉴를 포함합니다.")
+    out_warnings.append(
+        "공동인증서·2단계 인증·파일 업로드 등이 필요한 화면은 자동 제외됩니다."
+    )
+
+    selectable = [c for c in candidates if c.selectable]
+    defaults = [
+        c.state_id
+        for c in selectable
+        if c.recommended and (c.access or "public").lower() != "auth"
+    ]
+    if not defaults:
+        defaults = [c.state_id for c in selectable if c.recommended]
+
+    return {
+        "ok": True,
+        "method": "o2_spa_url",
+        "target": "external",
+        "target_name": "외부 URL",
+        "extractable": True,
+        "page_url": entry,
+        "need_login": need_login,
+        "candidates": [c.to_dict() for c in candidates],
+        "defaults_selected": defaults,
+        "warnings": out_warnings,
+        "resolve_meta": meta,
+    }
+
+
 def discover_external_scenarios(
     page_url: str,
     *,
@@ -269,6 +335,15 @@ def discover_external_scenarios(
     entry = (page_url or "").strip()
     if not entry.startswith("http://") and not entry.startswith("https://"):
         return {"ok": False, "detail": "URL은 http:// 또는 https:// 로 시작해야 합니다."}
+
+    menutree = _discover_via_menutree(
+        entry,
+        need_login=need_login,
+        storage_state=storage_state,
+        progress_job_id=progress_job_id,
+    )
+    if menutree:
+        return menutree
 
     portal_cfg = match_portal_target_from_url(entry)
     warnings: list[str] = []
@@ -455,7 +530,7 @@ def discover_external_scenarios(
             "포털 앱 URL — 로그인 시 포털 암호만 입력하면 됩니다 (/login)."
         )
 
-    defaults = [c.state_id for c in selectable if c.recommended][:12]
+    defaults = [c.state_id for c in selectable if c.recommended]
     if sid0 in [c.state_id for c in selectable] and sid0 not in defaults:
         defaults.insert(0, sid0)
 
