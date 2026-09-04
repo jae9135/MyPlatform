@@ -182,26 +182,26 @@ function buildPortalManifestLinks(origin: string): ExternalLinkItem[] {
 }
 
 function linksFromScenarioCandidates(scenarios: ScenarioCandidate[]): ExternalLinkItem[] {
-  return scenarios
-    .filter((c) => c.kind === "page" && c.selectable)
-    .map((c) => {
-      const url = (c.description || c.evidence || "").trim();
-      if (!url.startsWith("http")) return null;
-      let path = "/";
-      try {
-        path = new URL(url).pathname || "/";
-      } catch {
-        /* ignore */
-      }
-      return {
-        url,
-        label: c.label.replace(/\s*·\s*화면$/, "").trim() || url,
-        path,
-        requires_auth: (c.access || "public").toLowerCase() === "auth",
-        recommended: Boolean(c.recommended && c.selectable),
-      };
-    })
-    .filter((x): x is ExternalLinkItem => x !== null);
+  const items: ExternalLinkItem[] = [];
+  for (const c of scenarios) {
+    if (c.kind !== "page" || !c.selectable) continue;
+    const url = (c.description || c.source?.evidence || "").trim();
+    if (!url.startsWith("http")) continue;
+    let path = "/";
+    try {
+      path = new URL(url).pathname || "/";
+    } catch {
+      /* ignore */
+    }
+    items.push({
+      url,
+      label: c.label.replace(/\s*·\s*화면$/, "").trim() || url,
+      path,
+      requires_auth: (c.access || "public").toLowerCase() === "auth",
+      recommended: Boolean(c.recommended && c.selectable),
+    });
+  }
+  return items;
 }
 
 function mergeExternalLinkItems(...lists: ExternalLinkItem[][]): ExternalLinkItem[] {

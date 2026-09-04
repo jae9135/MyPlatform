@@ -13,7 +13,14 @@ export const REGISTERED_TARGET_SITE_MESSAGE =
   registry.contact_message ||
   "등록되지 않은 사이트입니다. 접속 URL 등록은 관리자에게 문의하세요.";
 
-export const REGISTERED_TARGET_SITES: RegisteredTargetSiteEntry[] = registry.entries || [];
+export const REGISTERED_TARGET_SITES: RegisteredTargetSiteEntry[] = (
+  registry.entries || []
+).map((entry) => ({
+  id: entry.id,
+  label: entry.label,
+  match: entry.match as RegisteredSiteMatch,
+  value: entry.value,
+}));
 
 function parseHttpUrl(url: string): URL | null {
   const trimmed = url.trim();
