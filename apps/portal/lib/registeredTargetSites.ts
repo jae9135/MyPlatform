@@ -1,4 +1,4 @@
-import registry from "../../../config/registered-target-sites.json";
+import registry from "../config/registered-target-sites.json";
 
 export type RegisteredSiteMatch = "host" | "host_suffix" | "origin_prefix";
 
@@ -15,7 +15,7 @@ export const REGISTERED_TARGET_SITE_MESSAGE =
 
 export const REGISTERED_TARGET_SITES: RegisteredTargetSiteEntry[] = (
   registry.entries || []
-).map((entry) => ({
+).map((entry: { id: string; label?: string; match: string; value: string }) => ({
   id: entry.id,
   label: entry.label,
   match: entry.match as RegisteredSiteMatch,

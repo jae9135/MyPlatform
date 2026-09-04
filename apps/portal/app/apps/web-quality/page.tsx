@@ -1812,6 +1812,7 @@ export default function WebQualityPage() {
     if (regErr) {
       setExternalSourceApplyMsg(regErr);
       setExternalSourceApplyTone("err");
+      setMsg("");
       return;
     }
     if (needLogin && !canAttachExternalSession(url)) {
@@ -1882,9 +1883,17 @@ export default function WebQualityPage() {
         setScenarioLoaded(false);
       }
       const err = String((e as Error).message || e);
-      setExternalSourceApplyMsg(`시나리오 추출 실패 — ${err}`);
+      const regErr = registeredTargetUrlError(url);
+      const applyMsg =
+        regErr && err.includes(regErr)
+          ? regErr
+          : err.startsWith("시나리오 추출 실패")
+            ? err
+            : `시나리오 추출 실패 — ${err}`;
+      setExternalSourceApplyMsg(applyMsg);
       setExternalSourceApplyTone("err");
-      setMsg(err);
+      setMsg("");
+      setPreviewMsg("");
       if (!keepExisting) setAppliedPageUrl("");
     } finally {
       if (gen === externalDiscoverGenRef.current) {
@@ -2433,7 +2442,9 @@ export default function WebQualityPage() {
       const regErr = registeredTargetUrlError(url);
       if (regErr) {
         setExternalLoginStatus("fail");
-        setMsg(regErr);
+        setExternalSourceApplyMsg(regErr);
+        setExternalSourceApplyTone("err");
+        setMsg("");
         return;
       }
       const fileKey = `${file.name}:${file.size}:${file.lastModified}`;
@@ -3322,8 +3333,10 @@ export default function WebQualityPage() {
     }
     const regErr = registeredTargetUrlError(url);
     if (regErr) {
-      setMsg(regErr);
+      setExternalSourceApplyMsg(regErr);
+      setExternalSourceApplyTone("err");
       setExternalLoginStatus("fail");
+      setMsg("");
       return;
     }
     setSessionJobId("");
@@ -4252,6 +4265,7 @@ export default function WebQualityPage() {
   }, [selectableScenarios, mode, hasSessionForMode]);
 
   const scenarioPanel =
+    mode === "external" && externalSourceApplyMsg && externalSourceApplyTone === "err" ? null :
     mode === "java-upload" && !zipFile ? null : mode === "external" && scenarioLoaded && !displayScenarios.length ? (
       <div className="wq-alert">
         <p>선택 가능한 화면 없음</p>
@@ -5560,6 +5574,7 @@ export default function WebQualityPage() {
           <p className="hint">{scanProgressHint}</p>
         ) : null}
         {msg &&
+        !(mode === "external" && externalSourceApplyMsg) &&
         !(mode === "java-upload" && zipFile && msg === javaZipStatusMsgRef.current) &&
         !(mode === "java-upload" && javaNeedLogin && javaSessionReady && msg === "로그인 완료") &&
         !(

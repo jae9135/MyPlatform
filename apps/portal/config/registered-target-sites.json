@@ -1,0 +1,36 @@
+{
+  "contact_message": "등록되지 않은 사이트입니다. 접속 URL 등록은 관리자에게 문의하세요.",
+  "entries": [
+    {
+      "id": "portal-localhost",
+      "label": "로컬 포털",
+      "match": "host",
+      "value": "localhost"
+    },
+    {
+      "id": "portal-127",
+      "label": "로컬 포털",
+      "match": "host",
+      "value": "127.0.0.1"
+    },
+    {
+      "id": "portal-vercel",
+      "label": "Vercel 배포 포털",
+      "match": "host_suffix",
+      "value": ".vercel.app"
+    },
+    {
+      "id": "ipms-online",
+      "label": "IPMS Online",
+      "match": "origin_prefix",
+      "value": "http://14.35.194.178:12000"
+    },
+    {
+      "id": "gw-geotwo",
+      "label": "GeoTwo GW",
+      "match": "host",
+      "value": "gw.geotwo.com"
+    }
+  ]
+}
+
