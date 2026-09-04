@@ -23,7 +23,7 @@ import {
 } from "@/lib/webQualityFix";
 import { formatUtcIsoToKst } from "@/lib/formatDateTime";
 import { PERF_TEST_PORTAL_URLS } from "@/lib/perfTestPortalUrls";
-import { registeredTargetUrlError } from "@/lib/registeredTargetSites";
+import { registeredTargetUrlError, REGISTERED_TARGET_SITE_MESSAGE } from "@/lib/registeredTargetSites";
 import { validateWqSessionJob, validateWqSessionUpload } from "@/lib/wqSessionValidate";
 import { buildWqPrefs, loadWqPrefs, saveWqPrefs } from "@/lib/wqPrefs";
 import {
@@ -134,7 +134,14 @@ type Screenshot = {
   data_url?: string;
 };
 
+function isRegisteredSiteMessage(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return t === REGISTERED_TARGET_SITE_MESSAGE || t.includes("등록되지 않은 사이트");
+}
+
 const EXTERNAL_URL_PLACEHOLDER = "https://example.com/";
+
 /** 하위 URL 선택 UI — 안정화 전까지 숨김 */
 const SHOW_EXTERNAL_SUB_URL_PICKER = false;
 
@@ -1887,9 +1894,11 @@ export default function WebQualityPage() {
       const applyMsg =
         regErr && err.includes(regErr)
           ? regErr
-          : err.startsWith("시나리오 추출 실패")
-            ? err
-            : `시나리오 추출 실패 — ${err}`;
+          : isRegisteredSiteMessage(err)
+            ? REGISTERED_TARGET_SITE_MESSAGE
+            : err.startsWith("시나리오 추출 실패")
+              ? err
+              : `시나리오 추출 실패 — ${err}`;
       setExternalSourceApplyMsg(applyMsg);
       setExternalSourceApplyTone("err");
       setMsg("");
@@ -5433,6 +5442,8 @@ export default function WebQualityPage() {
         designCheck.message &&
         !designCheck.checking &&
         designCheck.message !== HTTP_URL_REQUIRED_MSG &&
+        !(mode === "external" && externalSourceApplyMsg) &&
+        !(mode === "external" && isRegisteredSiteMessage(designCheck.message)) &&
         !(mode === "external" && externalUrlInvalid) &&
         !(isIpmsMode(mode) && ipmsUrlInvalid) &&
         (!designCheck.canRun ||

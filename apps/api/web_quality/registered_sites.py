@@ -5,16 +5,29 @@ import json
 from pathlib import Path
 from urllib.parse import urlparse
 
-_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "registered-target-sites.json"
+_API_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = _API_ROOT.parents[1]
+
+
+def _config_paths() -> list[Path]:
+    return [
+        _API_ROOT / "config" / "registered-target-sites.json",
+        _REPO_ROOT / "config" / "registered-target-sites.json",
+    ]
 
 
 def _load_registry() -> dict:
-    try:
-        raw = _CONFIG_PATH.read_text(encoding="utf-8")
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    for path in _config_paths():
+        try:
+            if not path.is_file():
+                continue
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            continue
+    return {}
 
 
 def registered_target_site_message() -> str:
