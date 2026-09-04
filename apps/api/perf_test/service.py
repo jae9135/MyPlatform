@@ -103,6 +103,14 @@ def validate_run(opts: PerfTestOptions, *, session_storage_bytes: bytes | None =
     if not opts.base_url and not opts.target:
         errors.append("base_url 또는 target이 필요합니다.")
 
+    if opts.base_url:
+        try:
+            from web_quality.registered_sites import assert_registered_target_url
+
+            assert_registered_target_url(opts.base_url)
+        except ValueError as e:
+            errors.append(str(e))
+
     if opts.users > DEFAULT_MAX_USERS:
         errors.append(f"동시 사용자 상한은 {DEFAULT_MAX_USERS}입니다.")
 

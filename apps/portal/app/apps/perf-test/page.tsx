@@ -22,6 +22,8 @@ import {
   PERF_TEST_PORTAL_URLS,
   type PerfPortalUrlItem,
 } from "@/lib/perfTestPortalUrls";
+import { registeredTargetUrlError } from "@/lib/registeredTargetSites";
+import { validateWqSessionJob, validateWqSessionUpload } from "@/lib/wqSessionValidate";
 import { formatUtcIsoToKst } from "@/lib/formatDateTime";
 import {
   aggregateByScenarioLabel,
@@ -560,13 +562,14 @@ export default function PerfTestPage() {
   const sessionsByUrlRef = useRef<Record<string, CachedBrowserSession>>({});
   const uploadSessionByUrlRef = useRef<Record<string, File>>({});
   const baseUrlDirty = baseUrlInput.trim() !== appliedBaseUrl.trim();
-  const baseUrlInvalid = Boolean(baseUrlInput.trim() && !isHttpUrl(baseUrlInput));
+  const [baseUrlApplyError, setBaseUrlApplyError] = useState("");
   const sessionViaUpload = Boolean(sessionStorageFile);
   const sessionViaBrowser = Boolean(
     sessionJobId.trim() && sessionPageUrl.trim() === appliedBaseUrl.trim(),
   );
-  const portalSessionGate = !isPortalLocalBaseUrl(appliedBaseUrl) || sessionValidated;
-  const sessionReady = (sessionViaUpload || sessionViaBrowser) && portalSessionGate;
+  const sessionAttached = sessionViaUpload || sessionViaBrowser;
+  const sessionGateOk = !needLogin || !sessionAttached || sessionValidated;
+  const sessionReady = sessionAttached && sessionGateOk;
   const sessionActive = sessionActiveForPerf(needLogin, sessionReady);
   const sessionActiveRef = useRef(sessionActive);
   sessionActiveRef.current = sessionActive;
@@ -926,11 +929,18 @@ export default function PerfTestPage() {
 
   function applyBaseUrl() {
     const trimmed = baseUrlInput.trim();
+    setBaseUrlApplyError("");
     if (!trimmed) {
       setError("Base URL을 입력하세요.");
       return;
     }
     if (!isHttpUrl(trimmed)) {
+      setBaseUrlApplyError(HTTP_URL_REQUIRED_MSG);
+      return;
+    }
+    const regErr = registeredTargetUrlError(trimmed);
+    if (regErr) {
+      setBaseUrlApplyError(regErr);
       return;
     }
     setError("");
@@ -1120,7 +1130,7 @@ export default function PerfTestPage() {
     const persisted = loadPersistedLoginSession();
     if (!persisted || persisted.pageUrl !== appliedBaseUrl.trim()) return false;
     try {
-      const res = await fetchScanApi(`v1/web-quality/ipms/session/${persisted.jobId}`);
+      const res = await fetchScanApi(`v1/web-quality/jobs/${persisted.jobId}`);
       const j = await readJsonResponse(res);
       if (!res.ok || j.status !== "done") {
         clearPersistedLoginSession();
@@ -1229,6 +1239,11 @@ export default function PerfTestPage() {
     const targetUrl = appliedBaseUrl.trim();
     if (!targetUrl) {
       setError("Base URL을 적용한 뒤 세션을 생성하세요.");
+      return;
+    }
+    const regErr = registeredTargetUrlError(targetUrl);
+    if (regErr) {
+      setError(regErr);
       return;
     }
     if (await tryConnectExistingSession()) {
@@ -1458,21 +1473,13 @@ export default function PerfTestPage() {
   }
 
   async function validateUploadSession(file: File, targetUrl: string): Promise<boolean> {
-    if (!isPortalLocalBaseUrl(targetUrl)) {
-      setSessionValidated(true);
-      return true;
-    }
     try {
-      const fd = new FormData();
-      fd.set("base_url", targetUrl.trim());
-      fd.append("session_storage", file);
-      const res = await postScanMultipart("v1/perf-test/session/validate", fd);
-      const j = await readJsonResponse(res);
-      if (j.valid) {
+      const result = await validateWqSessionUpload(file, targetUrl);
+      if (result.ok) {
         setSessionValidated(true);
         return true;
       }
-      const msg = String(j.message || "포털 세션(mp_portal) 검증 실패");
+      const msg = result.message || "로그인 세션 검증 실패";
       setSessionValidated(false);
       setSessionProgress({
         job_id: "upload",
@@ -1491,19 +1498,13 @@ export default function PerfTestPage() {
   }
 
   async function validateBrowserSession(jobId: string, targetUrl: string): Promise<boolean> {
-    if (!isPortalLocalBaseUrl(targetUrl)) {
-      setSessionValidated(true);
-      return true;
-    }
     try {
-      const q = new URLSearchParams({ job_id: jobId, base_url: targetUrl.trim() });
-      const res = await fetchScanApi(`v1/perf-test/session/validate?${q}`);
-      const j = await readJsonResponse(res);
-      if (j.valid) {
+      const ok = await validateWqSessionJob(jobId, targetUrl);
+      if (ok) {
         setSessionValidated(true);
         return true;
       }
-      const msg = String(j.message || "포털 세션(mp_portal) 검증 실패");
+      const msg = "로그인 세션이 유효하지 않습니다. 「로그인 창 띄움」 또는 세션 JSON 업로드를 다시 시도하세요.";
       setSessionJobId("");
       setSessionPageUrl("");
       setSessionValidated(false);
@@ -2176,27 +2177,26 @@ export default function PerfTestPage() {
                     type="url"
                     className={`wq-ipms-source-input${target === "manual" ? " perf-url-placeholder-input" : ""}`}
                     value={baseUrlInput}
-                    onChange={(e) => setBaseUrlInput(e.target.value)}
+                    onChange={(e) => {
+                      setBaseUrlInput(e.target.value);
+                      setBaseUrlApplyError("");
+                    }}
                     placeholder={baseUrlPlaceholderForTarget(target)}
                   />
                   <button
                     type="button"
                     className="btn"
-                    disabled={!baseUrlDirty || scenarioLoading || baseUrlInvalid}
+                    disabled={!baseUrlDirty || scenarioLoading}
                     onClick={() => applyBaseUrl()}
                   >
                     {scenarioLoading ? "적용 중…" : "적용"}
                   </button>
                 </div>
-                {baseUrlInvalid ? (
-                  <p className="msg err wq-ipms-source-url-validation">{HTTP_URL_REQUIRED_MSG}</p>
-                ) : null}
-                {!baseUrlInvalid && scenarioLoading ? (
+                {baseUrlApplyError ? (
+                  <p className="msg err wq-ipms-source-apply-msg-inline">{baseUrlApplyError}</p>
+                ) : scenarioLoading ? (
                   <p className="msg wq-ipms-source-apply-msg-inline">시나리오 불러오는 중…</p>
-                ) : !baseUrlInvalid &&
-                  !baseUrlDirty &&
-                  appliedBaseUrl.trim() &&
-                  scenarioApplyMsg.includes("추출 성공") ? (
+                ) : !baseUrlDirty && appliedBaseUrl.trim() && scenarioApplyMsg.includes("추출 성공") ? (
                   <p className="msg ok wq-ipms-source-apply-msg-inline">{scenarioApplyMsg}</p>
                 ) : null}
               </div>

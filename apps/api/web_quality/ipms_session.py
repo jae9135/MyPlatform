@@ -17,6 +17,7 @@ from web_quality.job_progress import (
     update_job,
 )
 from web_quality.presets.ipms_online import IPMS_DEFAULT_BASE
+from web_quality.runtime_common import has_auth_cookies, is_portal_like_url, looks_like_login_form, page_login_blocked
 
 SessionDetect = Literal["ipms", "generic"]
 
@@ -37,10 +38,7 @@ def _normalize_url(url: str) -> str:
 
 
 def _has_visible_password(page) -> bool:
-    try:
-        return page.locator('input[type="password"]:visible').count() > 0
-    except Exception:
-        return False
+    return looks_like_login_form(page)
 
 
 def _has_portal_session_cookie(context) -> bool:
@@ -54,11 +52,14 @@ def _has_portal_session_cookie(context) -> bool:
 
 
 def _generic_login_complete(page, target_url: str, initial_cookie_count: int) -> bool:
-    if _has_visible_password(page):
+    blocked, _ = page_login_blocked(page)
+    if blocked:
+        return False
+    if looks_like_login_form(page):
         return False
 
     path = urlparse(page.url).path or ""
-    if "/login" in path:
+    if any(k in path.lower() for k in ("/login", "signin", "sign-in")):
         return False
 
     target = urlparse(target_url)
@@ -66,16 +67,16 @@ def _generic_login_complete(page, target_url: str, initial_cookie_count: int) ->
     if host in ("localhost", "127.0.0.1", "::1"):
         return _has_portal_session_cookie(page.context)
 
-    current = page.url
-    if _normalize_url(current) == _normalize_url(target_url):
-        return True
     try:
         cookies = page.context.cookies()
     except Exception:
         cookies = []
     if len(cookies) <= initial_cookie_count:
         return False
-    current_p = urlparse(current)
+    if not has_auth_cookies(cookies, host):
+        return False
+
+    current_p = urlparse(page.url)
     if current_p.netloc != target.netloc:
         return False
     return True
@@ -119,6 +120,75 @@ def _goto_or_fail(page, url: str, *, timeout: int = 60000) -> None:
         raise
 
 
+def _portal_origin(url: str) -> str:
+    p = urlparse(url.strip())
+    if not p.scheme or not p.netloc:
+        return url.strip()
+    return f"{p.scheme}://{p.netloc}/"
+
+
+def _headed_browser_available() -> bool:
+    import os
+
+    if os.name == "nt":
+        return True
+    return bool(os.environ.get("DISPLAY", "").strip())
+
+
+def _try_headless_portal_session(job_id: str, url: str, password: str) -> bool:
+    """Render 등 headless API — PORTAL_PASSWORD로 /login 자동 로그인 (포털 URL만)."""
+    if not is_portal_like_url(url):
+        return False
+    from playwright.sync_api import sync_playwright
+
+    from web_quality.runtime_common import portal_login
+    from web_quality.runtime_env import _launch_chromium, sanitize_playwright_browsers_path
+
+    origin = _portal_origin(url)
+    out = _session_path(job_id)
+    update_job(
+        job_id,
+        pct=12,
+        message="포털 암호로 자동 로그인 중…",
+        step_label="로그인",
+    )
+    try:
+        sanitize_playwright_browsers_path()
+        with sync_playwright() as p:
+            browser = _launch_chromium(p)
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+            page = context.new_page()
+            portal_login(page, origin, password)
+            _goto_or_fail(page, url.strip())
+            page.wait_for_timeout(500)
+            blocked, reason = page_login_blocked(page)
+            if blocked:
+                browser.close()
+                return False
+            if not _has_portal_session_cookie(context):
+                host = (urlparse(url).hostname or "").lower()
+                if host in ("localhost", "127.0.0.1", "::1"):
+                    browser.close()
+                    return False
+            check_cancelled(job_id)
+            context.storage_state(path=str(out))
+            browser.close()
+    except Exception:
+        return False
+
+    if not out.is_file():
+        return False
+    update_job(
+        job_id,
+        status="done",
+        pct=100,
+        message="포털 로그인 세션이 생성되었습니다. 「적용」으로 시나리오를 다시 가져오세요.",
+        step_label="완료",
+        file_path=str(out),
+    )
+    return True
+
+
 def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms") -> None:
     from playwright.sync_api import sync_playwright
 
@@ -135,17 +205,52 @@ def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms
     )
 
     out = _session_path(job_id)
+    portal_target = detect == "generic" and is_portal_like_url(raw)
     wait_message = (
         "Chromium 창에서 http://…/login 으로 이동해 포털 암호 로그인을 완료하세요. "
         "mp_portal 쿠키가 생기면 자동 저장됩니다."
+        if portal_target
+        else "Chromium 창에서 해당 사이트 로그인을 완료하세요. 로그인 후 쿠키가 저장되면 자동 완료됩니다."
         if detect == "generic"
         else "브라우저에서 IPMS 로그인 + 공동인증서(2단계)를 완료하세요."
     )
     done_message = (
-        "로그인 세션이 생성되었습니다. 「화면 시나리오 가져오기」 후 진단을 실행하세요."
+        "로그인 세션이 생성되었습니다. 「적용」으로 시나리오를 다시 가져오세요."
         if detect == "generic"
         else "로그인 세션이 생성되었습니다. 「로그인 화면 진단」을 실행하세요."
     )
+
+    if detect == "generic":
+        from web_quality.runtime_env import ensure_portal_password_env
+
+        ensure_portal_password_env()
+        pw = __import__("os").environ.get("PORTAL_PASSWORD", "").strip()
+        if portal_target and pw and _try_headless_portal_session(job_id, raw, pw):
+            return
+        if not _headed_browser_available():
+            if portal_target:
+                update_job(
+                    job_id,
+                    status="error",
+                    error=(
+                        "배포 API에서는 브라우저 창을 띄울 수 없습니다. "
+                        "API에 PORTAL_PASSWORD를 설정했는지 확인하거나 세션 JSON 업로드를 사용하세요."
+                    ),
+                    message="포털 자동 로그인 실패 — 세션 JSON 업로드를 이용하세요.",
+                    pct=0,
+                )
+            else:
+                update_job(
+                    job_id,
+                    status="error",
+                    error=(
+                        "배포 API에서는 외부 사이트용 로그인 창을 띄울 수 없습니다. "
+                        "「세션 JSON 업로드」로 Playwright storage_state를 등록하세요."
+                    ),
+                    message="외부 URL — 세션 JSON 업로드를 이용하세요.",
+                    pct=0,
+                )
+            return
 
     try:
         with sync_playwright() as p:
@@ -233,6 +338,19 @@ def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms
                     raise RuntimeError(
                         "포털 로그인(mp_portal)이 확인되지 않았습니다. "
                         "Chromium 창에서 /login 으로 이동해 포털 암호 로그인을 완료한 뒤 다시 시도하세요."
+                    )
+                cookies = context.cookies()
+                if host not in ("localhost", "127.0.0.1", "::1") and not has_auth_cookies(cookies, host):
+                    browser.close()
+                    raise RuntimeError(
+                        "로그인 쿠키가 확인되지 않았습니다. "
+                        "Chromium 창에서 로그인을 완료한 뒤 다시 시도하세요."
+                    )
+                blocked, reason = page_login_blocked(page)
+                if blocked:
+                    browser.close()
+                    raise RuntimeError(
+                        reason or "로그인 화면이 확인되었습니다. 로그인을 완료한 뒤 다시 시도하세요."
                     )
 
             check_cancelled(job_id)

@@ -160,6 +160,15 @@ def check_portal_session(
     session_storage_bytes: bytes | None = None,
     base_url: str = "",
 ) -> dict[str, Any]:
+    from web_quality.registered_sites import assert_registered_target_url
+    from web_quality.session_validate import validate_session_job_for_url, validate_storage_session_for_url
+
+    if (base_url or "").strip():
+        try:
+            assert_registered_target_url(base_url)
+        except ValueError as e:
+            return {"ok": True, "valid": False, "message": str(e)}
+
     ensure_portal_password_env()
     try:
         state = resolve_storage_state(
@@ -171,7 +180,12 @@ def check_portal_session(
         return {"ok": True, "valid": False, "message": str(e)}
     if not state:
         return {"ok": True, "valid": False, "message": "세션이 없습니다."}
-    valid, message = validate_portal_storage_state(state, base_url)
+
+    if (session_job_id or "").strip() and not session_storage_bytes:
+        ok, msg = validate_session_job_for_url(session_job_id, base_url)
+    else:
+        ok, msg = validate_storage_session_for_url(base_url, state)
+
     names = [
         str(c.get("name"))
         for c in (state.get("cookies") or [])
@@ -179,8 +193,8 @@ def check_portal_session(
     ]
     return {
         "ok": True,
-        "valid": valid,
-        "message": message if not valid else "포털 세션(mp_portal) 확인됨",
+        "valid": ok,
+        "message": msg if not ok else "로그인 세션 확인됨",
         "cookie_names": names[:20],
         "has_mp_portal": any(n == "mp_portal" for n in names),
     }

@@ -1853,6 +1853,9 @@ button.wq-chip {
   grid-row: 2;
   margin: 0;
   align-self: start;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wq-ipms-source-url-row {

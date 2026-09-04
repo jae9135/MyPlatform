@@ -5,7 +5,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from web_quality.catalog import axe_rule_to_egov, axe_rule_to_kwcag
 from web_quality.fix_guides import resolve_finding_fix
@@ -283,6 +283,97 @@ def portal_login(page, base_url: str, password: str) -> None:
     page.fill('input[name="password"]', password)
     page.click('button[type="submit"]')
     page.wait_for_load_state("networkidle", timeout=60000)
+
+
+def is_portal_like_url(url: str) -> bool:
+    """MyPlatform 포털(localhost·Vercel) — PORTAL_PASSWORD /login 자동 로그인 대상."""
+    try:
+        host = (urlparse((url or "").strip()).hostname or "").lower()
+    except Exception:
+        return False
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return True
+    return host.endswith(".vercel.app")
+
+
+_AUTH_COOKIE_RE = re.compile(r"session|auth|token|login|jsession|sid|sso|remember", re.I)
+
+
+def _cookie_host_matches(cookie_domain: str, host: str) -> bool:
+    dom = (cookie_domain or "").lstrip(".").lower()
+    h = (host or "").lower()
+    if not dom or not h:
+        return False
+    return h == dom or h.endswith(f".{dom}") or dom.endswith(h)
+
+
+_ANALYTICS_COOKIE_RE = re.compile(r"^_ga|^_gid|^_gat|utm|fbp|gcl", re.I)
+
+
+def has_auth_cookies(cookies: list[dict[str, Any]], host: str) -> bool:
+    host_cookies: list[dict[str, Any]] = []
+    for c in cookies:
+        name = (c.get("name") or "").strip()
+        if not name:
+            continue
+        if not _cookie_host_matches(str(c.get("domain") or ""), host):
+            continue
+        host_cookies.append(c)
+        if _AUTH_COOKIE_RE.search(name):
+            return True
+    meaningful = [
+        c
+        for c in host_cookies
+        if not _ANALYTICS_COOKIE_RE.search((c.get("name") or "").lower())
+    ]
+    return len(meaningful) >= 2
+
+
+def looks_like_login_form(page) -> bool:
+    """Playwright page — 로그인 폼(커스텀 비밀번호 입력 포함) 여부."""
+    try:
+        if page.locator('input[type="password"]:visible').count():
+            return True
+        if page.locator('input[autocomplete="current-password"]:visible').count():
+            return True
+        if page.locator(
+            'input[name*="pass" i]:visible, input[id*="pass" i]:visible, '
+            'input[placeholder*="비밀번호" i]:visible, input[placeholder*="password" i]:visible'
+        ).count():
+            return True
+        user_visible = page.locator(
+            'input[type="email"]:visible, input[type="text"]:visible, '
+            'input[name*="user" i]:visible, input[name*="id" i]:visible, '
+            'input[name*="login" i]:visible, input[id*="user" i]:visible'
+        ).count()
+        login_btn = page.locator(
+            'button[type="submit"]:visible, input[type="submit"]:visible, '
+            'button:has-text("로그인"):visible, button:has-text("Login"):visible'
+        ).count()
+        has_app_shell = page.locator(
+            ".er-modeler, .app, main, [role='main'], #wrap, #container, .container, .gnb, .header"
+        ).count()
+        if user_visible > 0 and login_btn > 0 and has_app_shell == 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def page_login_blocked(page) -> tuple[bool, str]:
+    """Playwright page — 로그인·추가 인증 화면 여부 (외부 URL·포털 공통)."""
+    try:
+        if page.locator(".ui-dialog:visible, .pop-box.open-confirm:visible").count():
+            return True, "추가 인증(2단계·공동인증서) — 자동 탐색 제외"
+        if page.locator('[role="dialog"]:visible').count():
+            txt = (page.locator('[role="dialog"]:visible').first.inner_text() or "")[:200]
+            if any(k in txt for k in ("인증", "OTP", "2단계", "공동인증", "본인확인")):
+                return True, "추가 인증 대화상자 — 자동 탐색 제외"
+        if looks_like_login_form(page):
+            return True, "로그인 화면 — 로그인 후 재탐색 필요"
+    except Exception:
+        pass
+    return False, ""
 
 
 def external_login(

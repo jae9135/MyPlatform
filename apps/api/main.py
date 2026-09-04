@@ -1389,6 +1389,7 @@ async def web_quality_scenarios_discover(
     login_submit_selector: str = Form(""),
     session_job_id: str = Form(""),
     async_progress: str = Form("true"),
+    include_urls: str = Form(""),
     session_storage: UploadFile | None = File(None),
 ) -> dict:
     _ensure_api_path()
@@ -1400,6 +1401,17 @@ async def web_quality_scenarios_discover(
             session_bytes = None
     need = (need_login or "false").lower() in ("1", "true", "yes")
     use_async = (async_progress or "true").lower() in ("1", "true", "yes")
+    parsed_include: list[str] | None = None
+    raw_include = (include_urls or "").strip()
+    if raw_include:
+        try:
+            import json
+
+            parsed = json.loads(raw_include)
+            if isinstance(parsed, list):
+                parsed_include = [str(x).strip() for x in parsed if str(x).strip()]
+        except json.JSONDecodeError as e:
+            raise HTTPException(400, detail=f"include_urls JSON 오류: {e}") from e
     try:
         if use_async:
             return wq.start_discover_external_job(
@@ -1414,9 +1426,68 @@ async def web_quality_scenarios_discover(
                 login_submit_selector=login_submit_selector,
                 session_storage_bytes=session_bytes,
                 session_job_id=session_job_id,
+                include_urls=parsed_include,
             )
         return await asyncio.to_thread(
             wq.discover_external_scenarios_from_params,
+            page_url=page_url,
+            need_login=need,
+            login_url=login_url,
+            login_username=login_username,
+            login_password=login_password,
+            portal_password=password,
+            login_user_selector=login_user_selector,
+            login_password_selector=login_password_selector,
+            login_submit_selector=login_submit_selector,
+            session_storage_bytes=session_bytes,
+            session_job_id=session_job_id,
+            include_urls=parsed_include,
+        )
+    except Exception as e:
+        raise HTTPException(400, detail=str(e)) from e
+
+
+@app.post("/v1/web-quality/scenarios/link-preview")
+async def web_quality_scenarios_link_preview(
+    page_url: str = Form(""),
+    need_login: str = Form("false"),
+    login_url: str = Form(""),
+    login_username: str = Form(""),
+    login_password: str = Form(""),
+    password: str = Form(""),
+    login_user_selector: str = Form(""),
+    login_password_selector: str = Form(""),
+    login_submit_selector: str = Form(""),
+    session_job_id: str = Form(""),
+    async_progress: str = Form("true"),
+    session_storage: UploadFile | None = File(None),
+) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    session_bytes: bytes | None = None
+    if session_storage is not None:
+        session_bytes = await session_storage.read()
+        if not session_bytes:
+            session_bytes = None
+    need = (need_login or "false").lower() in ("1", "true", "yes")
+    use_async = (async_progress or "true").lower() in ("1", "true", "yes")
+    try:
+        if use_async:
+            return wq.start_preview_external_links_job(
+                page_url=page_url,
+                need_login=need,
+                login_url=login_url,
+                login_username=login_username,
+                login_password=login_password,
+                portal_password=password,
+                login_user_selector=login_user_selector,
+                login_password_selector=login_password_selector,
+                login_submit_selector=login_submit_selector,
+                session_storage_bytes=session_bytes,
+                session_job_id=session_job_id,
+            )
+        return await asyncio.to_thread(
+            wq.preview_external_links_from_params,
             page_url=page_url,
             need_login=need,
             login_url=login_url,
@@ -1537,6 +1608,21 @@ async def web_quality_ipms_session_validate(
     return wq.validate_ipms_session(base_url=base_url, session_storage_bytes=session_bytes)
 
 
+@app.post("/v1/web-quality/session/validate")
+async def web_quality_external_session_validate(
+    base_url: str = Form(""),
+    session_storage: UploadFile | None = File(None),
+) -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    session_bytes: bytes | None = None
+    if session_storage is not None:
+        session_bytes = await session_storage.read()
+        if not session_bytes:
+            session_bytes = None
+    return wq.validate_external_session(base_url=base_url, session_storage_bytes=session_bytes)
+
+
 @app.post("/v1/web-quality/session")
 async def web_quality_browser_session(
     page_url: str = Form(""),
@@ -1555,6 +1641,13 @@ def web_quality_ipms_session_validate_job(job_id: str, base_url: str = "") -> di
     _ensure_api_path()
     wq = _load_web_quality()
     return wq.validate_ipms_session_job(job_id, base_url=base_url)
+
+
+@app.get("/v1/web-quality/session/{job_id}/validate")
+def web_quality_external_session_validate_job(job_id: str, base_url: str = "") -> dict:
+    _ensure_api_path()
+    wq = _load_web_quality()
+    return wq.validate_external_session_job(job_id, base_url=base_url)
 
 
 @app.get("/v1/web-quality/ipms/session/{job_id}")

@@ -22,6 +22,9 @@ import {
   resolveFindingFix,
 } from "@/lib/webQualityFix";
 import { formatUtcIsoToKst } from "@/lib/formatDateTime";
+import { PERF_TEST_PORTAL_URLS } from "@/lib/perfTestPortalUrls";
+import { registeredTargetUrlError } from "@/lib/registeredTargetSites";
+import { validateWqSessionJob, validateWqSessionUpload } from "@/lib/wqSessionValidate";
 import { buildWqPrefs, loadWqPrefs, saveWqPrefs } from "@/lib/wqPrefs";
 import {
   diffScenarioLists,
@@ -132,11 +135,90 @@ type Screenshot = {
 };
 
 const EXTERNAL_URL_PLACEHOLDER = "https://example.com/";
+/** 하위 URL 선택 UI — 안정화 전까지 숨김 */
+const SHOW_EXTERNAL_SUB_URL_PICKER = false;
 
 type SessionScope = "ipms" | "external" | "java-upload" | null;
 
+type ExternalLinkItem = {
+  url: string;
+  label: string;
+  path?: string;
+  requires_auth?: boolean;
+  recommended?: boolean;
+};
+
 function normalizeWqPageUrl(url: string): string {
   return url.trim().replace(/\/+$/, "") || "/";
+}
+
+function portalOriginFromPageUrl(url: string): string | null {
+  try {
+    const u = new URL(url.trim());
+    const h = u.hostname.toLowerCase();
+    if (h === "localhost" || h === "127.0.0.1" || h.endsWith(".vercel.app")) {
+      return u.origin;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function joinOriginPath(origin: string, path: string): string {
+  const p = path.trim() || "/";
+  if (p === "/") return `${origin}/`;
+  return `${origin}${p.startsWith("/") ? p : `/${p}`}`;
+}
+
+function buildPortalManifestLinks(origin: string): ExternalLinkItem[] {
+  return PERF_TEST_PORTAL_URLS.map((item) => ({
+    url: joinOriginPath(origin, item.path),
+    label: item.name,
+    path: item.path,
+    requires_auth: item.requires_auth ?? !item.public_access,
+    recommended: Boolean(item.recommended ?? item.public_access),
+  }));
+}
+
+function linksFromScenarioCandidates(scenarios: ScenarioCandidate[]): ExternalLinkItem[] {
+  return scenarios
+    .filter((c) => c.kind === "page" && c.selectable)
+    .map((c) => {
+      const url = (c.description || c.evidence || "").trim();
+      if (!url.startsWith("http")) return null;
+      let path = "/";
+      try {
+        path = new URL(url).pathname || "/";
+      } catch {
+        /* ignore */
+      }
+      return {
+        url,
+        label: c.label.replace(/\s*·\s*화면$/, "").trim() || url,
+        path,
+        requires_auth: (c.access || "public").toLowerCase() === "auth",
+        recommended: Boolean(c.recommended && c.selectable),
+      };
+    })
+    .filter((x): x is ExternalLinkItem => x !== null);
+}
+
+function mergeExternalLinkItems(...lists: ExternalLinkItem[][]): ExternalLinkItem[] {
+  const byUrl = new Map<string, ExternalLinkItem>();
+  for (const list of lists) {
+    for (const item of list) {
+      const key = normalizeWqPageUrl(item.url);
+      if (!byUrl.has(key)) byUrl.set(key, item);
+    }
+  }
+  return [...byUrl.values()].sort((a, b) => {
+    const pa = a.path || a.url;
+    const pb = b.path || b.url;
+    if (pa === "/") return -1;
+    if (pb === "/") return 1;
+    return pa.localeCompare(pb);
+  });
 }
 
 function isStoredIpmsUrl(url: string): boolean {
@@ -333,6 +415,24 @@ type ExternalScenarioCache = {
   externalSourceApplyMsg: string;
   externalSourceApplyTone: "ok" | "warn" | "err";
   needLogin: boolean;
+  appliedPageUrl: string;
+  externalLinkItems: ExternalLinkItem[];
+  selectedLinkUrls: string[];
+  linkListBaseUrl: string;
+};
+
+type IpmsScenarioCache = {
+  ipmsUrl: string;
+  scenarios: ScenarioCandidate[];
+  scenarioLoaded: boolean;
+  resolveComplete: boolean;
+  selectedIds: string[];
+  lastScenarioPayload: ScenarioPayload | null;
+  scenarioWarnings: string[];
+  extractable: boolean;
+  scenarioSourceLabel: string;
+  ipmsUrlApplyMsg: string;
+  ipmsUrlApplyTone: "ok" | "warn" | "err";
 };
 
 function formatJavaZipExtractLabel(count: number): string {
@@ -397,15 +497,11 @@ function isJavaPreviewSessionError(error: string, sessionReady: boolean): boolea
 }
 
 async function validateIpmsSessionJob(jobId: string, baseUrl: string): Promise<boolean> {
-  if (!jobId.trim() || !isStoredIpmsUrl(baseUrl)) return true;
-  try {
-    const q = new URLSearchParams({ base_url: baseUrl.trim() });
-    const res = await fetchScanApi(`v1/web-quality/ipms/session/${jobId.trim()}/validate?${q}`);
-    const j = (await readJsonResponse(res)) as { ok?: boolean; message?: string };
-    return Boolean(res.ok && j.ok);
-  } catch {
-    return false;
-  }
+  return validateWqSessionJob(jobId, baseUrl);
+}
+
+async function validateExternalSessionJob(jobId: string, baseUrl: string): Promise<boolean> {
+  return validateWqSessionJob(jobId, baseUrl);
 }
 
 function isValidDeployUrl(url: string): boolean {
@@ -489,7 +585,14 @@ function isBrowserClosedSessionError(msg: string): boolean {
 
 function friendlySessionError(msg: string): string {
   if (isBrowserClosedSessionError(msg)) {
-    return "브라우저 창이 닫혔습니다. 「로그인 창 띄움」을 다시 시도하세요.";
+    if (isLocalPortalHost()) {
+      return "브라우저 창이 닫혔습니다. 「로그인 창 띄움」을 다시 시도하세요.";
+    }
+    return (
+      "배포 API에서는 로그인용 브라우저 창이 이 PC에 표시되지 않습니다. " +
+      "「포털 자동 로그인」을 다시 시도하거나 「세션 JSON 업로드」를 사용하세요. " +
+      "(Render API에 PORTAL_PASSWORD가 Vercel과 동일하게 설정되어 있어야 합니다.)"
+    );
   }
   return msg;
 }
@@ -995,6 +1098,7 @@ export default function WebQualityPage() {
   const [sessionScope, setSessionScope] = useState<SessionScope>(null);
   const [loginSessionMode, setLoginSessionMode] = useState<LoginSessionMode>("browser");
   const activeSessionKeyRef = useRef("");
+  const externalDiscoverGenRef = useRef(0);
   const [sessionProgress, setSessionProgress] = useState<WqJobProgress | null>(null);
   const [discoverProgress, setDiscoverProgress] = useState<WqJobProgress | null>(null);
   const [zipFile, setZipFile] = useState<File | null>(null);
@@ -1015,6 +1119,14 @@ export default function WebQualityPage() {
   const [ipmsFullZipPayload, setIpmsFullZipPayload] = useState<ScenarioPayload | null>(null);
   const [externalSourceApplyMsg, setExternalSourceApplyMsg] = useState("");
   const [externalSourceApplyTone, setExternalSourceApplyTone] = useState<"ok" | "warn" | "err">("ok");
+  const [appliedPageUrl, setAppliedPageUrl] = useState("");
+  const [externalRediscoverAfterLogin, setExternalRediscoverAfterLogin] = useState(false);
+  const [externalLinkItems, setExternalLinkItems] = useState<ExternalLinkItem[]>([]);
+  const [selectedLinkUrls, setSelectedLinkUrls] = useState<string[]>([]);
+  const [linkListBaseUrl, setLinkListBaseUrl] = useState("");
+  const [linkListLoading, setLinkListLoading] = useState(false);
+  const [linkListMsg, setLinkListMsg] = useState("");
+  const [linkPreviewProgress, setLinkPreviewProgress] = useState<WqJobProgress | null>(null);
   const [javaBaseUrl, setJavaBaseUrl] = useState("http://");
   const [javaNeedLogin, setJavaNeedLogin] = useState(false);
   const [javaLoginStatus, setJavaLoginStatus] = useState<IpmsLoginStatus>("none");
@@ -1058,6 +1170,7 @@ export default function WebQualityPage() {
   const javaZipStatusMsgRef = useRef("");
   const javaUploadCacheRef = useRef<JavaUploadCache | null>(null);
   const externalCacheRef = useRef<ExternalScenarioCache | null>(null);
+  const ipmsCacheRef = useRef<IpmsScenarioCache | null>(null);
   const prevModeRef = useRef<ScanMode>(mode);
   const [scanProgressByMode, setScanProgressByMode] = useState<
     Partial<Record<ScanMode, WqJobProgress>>
@@ -1436,22 +1549,42 @@ export default function WebQualityPage() {
   );
 
   const externalSessionReady = useMemo(() => {
-    if (sessionScope !== "external") return false;
+    if (mode !== "external") return false;
     const url = pageUrl.trim();
-    if (sessionStorageFile) return externalLoginStatus === "ok";
+    if (!url) return false;
+    if (sessionStorageFile) {
+      return (
+        externalLoginStatus === "ok" &&
+        (!sessionPageUrl.trim() || wqSessionMatchesUrl(sessionPageUrl, url))
+      );
+    }
     return Boolean(
       externalLoginStatus === "ok" &&
         sessionJobId.trim() &&
-        sessionPageUrl.trim() === url,
+        wqSessionMatchesUrl(sessionPageUrl, url),
     );
   }, [
+    mode,
     pageUrl,
     sessionJobId,
     sessionPageUrl,
     sessionStorageFile,
-    sessionScope,
     externalLoginStatus,
   ]);
+
+  const canAttachExternalSession = useCallback(
+    (targetUrl: string) => {
+      const url = targetUrl.trim();
+      if (!url) return false;
+      if (sessionStorageFile && externalLoginStatus === "ok") return true;
+      return Boolean(
+        sessionJobId.trim() &&
+        externalLoginStatus === "ok" &&
+        wqSessionMatchesUrl(sessionPageUrl, url),
+      );
+    },
+    [sessionStorageFile, sessionJobId, sessionPageUrl, externalLoginStatus],
+  );
 
   const scopedSessionProgress = useMemo(() => {
     if (!sessionProgress) return null;
@@ -1507,6 +1640,163 @@ export default function WebQualityPage() {
     throw new Error("시나리오 탐색 시간 초과");
   }
 
+  async function pollLinkPreviewJob(jobId: string): Promise<Record<string, unknown>> {
+    for (let i = 0; i < 300; i++) {
+      const res = await fetch(`${API_BASE}/v1/web-quality/jobs/${jobId}`);
+      const j = (await res.json()) as WqJobProgress & {
+        ok?: boolean;
+        result?: Record<string, unknown>;
+      };
+      if (!res.ok) throw new Error(j.message || "하위 URL 목록 조회 실패");
+      setLinkPreviewProgress({
+        job_id: jobId,
+        status: j.status,
+        pct: j.pct ?? 0,
+        message: j.message || "",
+        step_label: j.step_label,
+        error: j.error,
+      });
+      if (j.status === "done" && j.result) return j.result;
+      if (j.status === "error") throw new Error(j.error || j.message || "하위 URL 목록 실패");
+      await new Promise((r) => setTimeout(r, 800));
+    }
+    throw new Error("하위 URL 목록 시간 초과");
+  }
+
+  const resetExternalScenarioResultsForApply = useCallback((urlNorm: string) => {
+    const appliedNorm = appliedPageUrl ? normalizeWqPageUrl(appliedPageUrl) : "";
+    if (appliedNorm && appliedNorm === urlNorm && scenarioLoaded && scenarios.length > 0) {
+      return false;
+    }
+    externalCacheRef.current = null;
+    setScenarios([]);
+    setSelectedIds([]);
+    setScenarioLoaded(false);
+    setLastScenarioPayload(null);
+    setScenarioWarnings([]);
+    setJavaStaticHint("");
+    setPreviewItems([]);
+    setPreviewMsg("");
+    setPreviewMsgTone("ok");
+    setExtractable(false);
+    setResultsByMode((prev) => {
+      if (!prev.external) return prev;
+      const { external: _removed, ...rest } = prev;
+      return rest;
+    });
+    return true;
+  }, [appliedPageUrl, scenarioLoaded, scenarios.length]);
+
+  const loadExternalLinkList = useCallback(async () => {
+    const url = pageUrl.trim();
+    if (!url) {
+      setLinkListMsg("접속 URL을 입력하세요.");
+      return;
+    }
+    if (!isHttpUrl(url)) {
+      setLinkListMsg(HTTP_URL_REQUIRED_MSG);
+      return;
+    }
+    const regErr = registeredTargetUrlError(url);
+    if (regErr) {
+      setLinkListMsg(regErr);
+      return;
+    }
+    if (needLogin && !canAttachExternalSession(url)) {
+      setLinkListMsg("로그인 세션이 필요합니다. 「로그인 창 띄움」 후 다시 시도하세요.");
+      return;
+    }
+    setLinkListLoading(true);
+    setLinkListMsg("하위 URL 목록 불러오는 중…");
+    setLinkPreviewProgress({
+      job_id: "",
+      status: "running",
+      pct: 0,
+      message: "요청 중…",
+    });
+    const norm = normalizeWqPageUrl(url);
+    try {
+      const portalOrigin = portalOriginFromPageUrl(url);
+      let links: ExternalLinkItem[] = [];
+      let source = "";
+
+      if (portalOrigin) {
+        links = buildPortalManifestLinks(portalOrigin);
+        source = "manifest";
+      }
+
+      const appliedNorm = appliedPageUrl ? normalizeWqPageUrl(appliedPageUrl) : "";
+      if (scenarioLoaded && scenarios.length && (!appliedNorm || appliedNorm === norm)) {
+        links = mergeExternalLinkItems(links, linksFromScenarioCandidates(scenarios));
+        if (!source) source = "적용 결과";
+      }
+
+      if (!links.length) {
+        const fd = new FormData();
+        fd.append("page_url", url);
+        fd.append("need_login", needLogin ? "true" : "false");
+        fd.append("async_progress", "true");
+        if (canAttachExternalSession(url)) {
+          if (sessionJobId.trim()) fd.append("session_job_id", sessionJobId.trim());
+        }
+        if (sessionStorageFile) fd.append("session_storage", sessionStorageFile);
+        const res = await fetch(`${API_BASE}/v1/web-quality/scenarios/link-preview`, {
+          method: "POST",
+          body: fd,
+        });
+        const j = await res.json();
+        if (!res.ok || !j.ok) {
+          const detail = String(j.detail || j.message || "");
+          if (res.status === 404 || detail.toLowerCase().includes("not found")) {
+            throw new Error(
+              scenarioLoaded
+                ? "API link-preview 미배포 — 「적용」 결과에서 URL을 구성했습니다."
+                : "하위 URL API 미배포 — 먼저 「적용」을 실행하거나 Render API를 재배포하세요.",
+            );
+          }
+          throw new Error(detail || `하위 URL 목록 실패 (HTTP ${res.status})`);
+        }
+        const payload = j.job_id
+          ? await pollLinkPreviewJob(j.job_id as string)
+          : (j as Record<string, unknown>);
+        const apiLinks = Array.isArray(payload.links)
+          ? (payload.links as ExternalLinkItem[]).filter((x) => x?.url)
+          : [];
+        links = mergeExternalLinkItems(links, apiLinks);
+        source = String(payload.source || "API");
+      }
+
+      if (!links.length) {
+        throw new Error("하위 URL을 찾지 못했습니다. 「적용」 후 다시 시도하세요.");
+      }
+
+      const defaults = links.filter((x) => x.recommended).map((x) => x.url);
+      setExternalLinkItems(links);
+      setSelectedLinkUrls(defaults.length ? defaults : links.map((x) => x.url));
+      setLinkListBaseUrl(norm);
+      setLinkListMsg(
+        `${links.length}개 URL${source ? ` (${source})` : ""} · 선택 ${defaults.length || links.length}개`,
+      );
+    } catch (e) {
+      setExternalLinkItems([]);
+      setSelectedLinkUrls([]);
+      setLinkListBaseUrl("");
+      setLinkListMsg(String((e as Error).message || e));
+    } finally {
+      setLinkListLoading(false);
+      setLinkPreviewProgress(null);
+    }
+  }, [
+    pageUrl,
+    needLogin,
+    sessionJobId,
+    sessionStorageFile,
+    canAttachExternalSession,
+    scenarioLoaded,
+    scenarios,
+    appliedPageUrl,
+  ]);
+
   const loadExternalScenarios = useCallback(async () => {
     const url = pageUrl.trim();
     if (!url) {
@@ -1514,13 +1804,38 @@ export default function WebQualityPage() {
       return;
     }
     if (!isHttpUrl(url)) {
-      setExternalSourceApplyMsg("");
+      setExternalSourceApplyMsg(HTTP_URL_REQUIRED_MSG);
       setExternalSourceApplyTone("err");
       return;
     }
+    const regErr = registeredTargetUrlError(url);
+    if (regErr) {
+      setExternalSourceApplyMsg(regErr);
+      setExternalSourceApplyTone("err");
+      return;
+    }
+    if (needLogin && !canAttachExternalSession(url)) {
+      setExternalSourceApplyMsg("");
+      setExternalSourceApplyTone("warn");
+      setMsg("「로그인 필요」가 켜져 있습니다. 먼저 「로그인 창 띄움」으로 세션을 생성하세요.");
+      return;
+    }
+    const norm = normalizeWqPageUrl(url);
+    if (
+      SHOW_EXTERNAL_SUB_URL_PICKER &&
+      selectedLinkUrls.length > 0 &&
+      linkListBaseUrl &&
+      linkListBaseUrl !== norm
+    ) {
+      setMsg("URL이 변경되었습니다. 「하위 URL 목록」을 다시 가져온 뒤 「적용」하세요.");
+      return;
+    }
+    const gen = ++externalDiscoverGenRef.current;
+    const didReset = resetExternalScenarioResultsForApply(norm);
+    const keepExisting = !didReset;
     setScenarioBusy(true);
-    setScenarioLoaded(false);
     setExternalSourceApplyMsg("");
+    setExternalSourceApplyTone("ok");
     setDiscoverProgress({
       job_id: "",
       status: "running",
@@ -1532,38 +1847,50 @@ export default function WebQualityPage() {
       fd.append("page_url", pageUrl.trim());
       fd.append("need_login", needLogin ? "true" : "false");
       fd.append("async_progress", "true");
-      if (externalSessionReady && sessionJobId.trim()) {
-        fd.append("session_job_id", sessionJobId.trim());
+      if (canAttachExternalSession(url)) {
+        if (sessionJobId.trim()) fd.append("session_job_id", sessionJobId.trim());
       }
       if (sessionStorageFile) fd.append("session_storage", sessionStorageFile);
+      if (SHOW_EXTERNAL_SUB_URL_PICKER && selectedLinkUrls.length > 0) {
+        fd.append("include_urls", JSON.stringify(selectedLinkUrls));
+      }
       const res = await fetch(`${API_BASE}/v1/web-quality/scenarios/discover`, {
         method: "POST",
         body: fd,
       });
       const j = await res.json();
+      if (gen !== externalDiscoverGenRef.current) return;
       if (!res.ok || !j.ok) {
         throw new Error(j.detail || j.message || `시나리오 탐색 실패 (HTTP ${res.status})`);
       }
       const payload = j.job_id
         ? await pollDiscoverJob(j.job_id as string)
         : (j as Record<string, unknown>);
+      if (gen !== externalDiscoverGenRef.current) return;
       applyScenarioPayload(payload);
       const candidates = candidatesFromPayload(payload);
-      const selectable = candidates.filter((c) => c.selectable).length;
       setExternalSourceApplyMsg(`시나리오 ${candidates.length}건 추출 성공`);
       setExternalSourceApplyTone("ok");
+      setAppliedPageUrl(norm);
       setMsg("");
     } catch (e) {
-      setExtractable(false);
-      setScenarios([]);
-      setSelectedIds([]);
+      if (gen !== externalDiscoverGenRef.current) return;
+      if (!keepExisting) {
+        setExtractable(false);
+        setScenarios([]);
+        setSelectedIds([]);
+        setScenarioLoaded(false);
+      }
       const err = String((e as Error).message || e);
       setExternalSourceApplyMsg(`시나리오 추출 실패 — ${err}`);
       setExternalSourceApplyTone("err");
       setMsg(err);
+      if (!keepExisting) setAppliedPageUrl("");
     } finally {
-      setScenarioBusy(false);
-      setDiscoverProgress(null);
+      if (gen === externalDiscoverGenRef.current) {
+        setScenarioBusy(false);
+        setDiscoverProgress(null);
+      }
     }
   }, [
     applyScenarioPayload,
@@ -1571,7 +1898,31 @@ export default function WebQualityPage() {
     needLogin,
     sessionJobId,
     sessionStorageFile,
+    canAttachExternalSession,
+    selectedLinkUrls,
+    linkListBaseUrl,
+    resetExternalScenarioResultsForApply,
+  ]);
+
+  useEffect(() => {
+    if (!externalRediscoverAfterLogin || !externalSessionReady || mode !== "external" || !needLogin) {
+      return;
+    }
+    const url = pageUrl.trim();
+    setExternalRediscoverAfterLogin(false);
+    if (!url) {
+      setMsg("로그인 세션 생성 완료 — 「적용」으로 시나리오를 다시 가져오세요.");
+      return;
+    }
+    setMsg("로그인 완료 — 시나리오를 다시 탐색합니다.");
+    void loadExternalScenarios();
+  }, [
+    externalRediscoverAfterLogin,
     externalSessionReady,
+    mode,
+    needLogin,
+    pageUrl,
+    loadExternalScenarios,
   ]);
 
   const clearJavaUploadArtifacts = useCallback((opts?: { keepZip?: boolean }) => {
@@ -1638,9 +1989,74 @@ export default function WebQualityPage() {
     setExternalSourceApplyMsg(cache.externalSourceApplyMsg);
     setExternalSourceApplyTone(cache.externalSourceApplyTone);
     setNeedLogin(cache.needLogin);
+    setAppliedPageUrl(cache.appliedPageUrl);
+    setExternalLinkItems(cache.externalLinkItems);
+    setSelectedLinkUrls(cache.selectedLinkUrls);
+    setLinkListBaseUrl(cache.linkListBaseUrl);
     setMsg("");
     setScenarioBusy(false);
   }, [externalSessionReady]);
+
+  const snapshotIpmsCache = useCallback((): IpmsScenarioCache | null => {
+    const url = (ipmsUrl.trim() || IPMS_DEFAULT_URL).trim();
+    if (!url || !scenarioLoaded) return null;
+    return {
+      ipmsUrl: normalizeWqPageUrl(url),
+      scenarios,
+      scenarioLoaded,
+      resolveComplete: true,
+      selectedIds,
+      lastScenarioPayload,
+      scenarioWarnings,
+      extractable,
+      scenarioSourceLabel,
+      ipmsUrlApplyMsg,
+      ipmsUrlApplyTone,
+    };
+  }, [
+    ipmsUrl,
+    scenarios,
+    scenarioLoaded,
+    selectedIds,
+    lastScenarioPayload,
+    scenarioWarnings,
+    extractable,
+    scenarioSourceLabel,
+    ipmsUrlApplyMsg,
+    ipmsUrlApplyTone,
+  ]);
+
+  const applyIpmsCache = useCallback(
+    (cache: IpmsScenarioCache) => {
+      const hasSession = ipmsLoginStatus === "ok";
+      setScenarios(cache.scenarios);
+      setScenarioLoaded(cache.scenarioLoaded);
+      setSelectedIds(
+        filterSelectableScenarioIds(cache.selectedIds, cache.scenarios, hasSession, "ipms-online"),
+      );
+      setLastScenarioPayload(cache.lastScenarioPayload);
+      setScenarioWarnings(cache.scenarioWarnings);
+      setExtractable(cache.extractable);
+      setScenarioSourceLabel(cache.scenarioSourceLabel);
+      setIpmsUrlApplyMsg(cache.ipmsUrlApplyMsg);
+      setIpmsUrlApplyTone(cache.ipmsUrlApplyTone);
+      setMsg("");
+      setScenarioBusy(false);
+    },
+    [ipmsLoginStatus],
+  );
+
+  const clearIpmsScenarioArtifacts = useCallback(() => {
+    setScenarios([]);
+    setSelectedIds([]);
+    setScenarioLoaded(false);
+    setLastScenarioPayload(null);
+    setScenarioWarnings([]);
+    setScenarioSourceLabel("");
+    setPreviewItems([]);
+    setPreviewMsg("");
+    setPreviewMsgTone("ok");
+  }, []);
 
   const snapshotExternalCache = useCallback((): ExternalScenarioCache | null => {
     const url = pageUrl.trim();
@@ -1657,6 +2073,10 @@ export default function WebQualityPage() {
       externalSourceApplyMsg,
       externalSourceApplyTone,
       needLogin,
+      appliedPageUrl,
+      externalLinkItems,
+      selectedLinkUrls,
+      linkListBaseUrl,
     };
   }, [
     pageUrl,
@@ -1669,6 +2089,10 @@ export default function WebQualityPage() {
     externalSourceApplyMsg,
     externalSourceApplyTone,
     needLogin,
+    appliedPageUrl,
+    externalLinkItems,
+    selectedLinkUrls,
+    linkListBaseUrl,
   ]);
 
   const clearExternalArtifacts = useCallback(() => {
@@ -1683,6 +2107,11 @@ export default function WebQualityPage() {
     setPreviewMsgTone("ok");
     setExternalSourceApplyMsg("");
     setExternalSourceApplyTone("ok");
+    setAppliedPageUrl("");
+    setExternalLinkItems([]);
+    setSelectedLinkUrls([]);
+    setLinkListBaseUrl("");
+    setLinkListMsg("");
     setNeedLogin(false);
     setMsg("");
   }, []);
@@ -1836,6 +2265,17 @@ export default function WebQualityPage() {
       }
     }
 
+    if (prev === "ipms-online") {
+      const snap = snapshotIpmsCache();
+      if (snap) {
+        const ipmsIds = selectedIdsByMode["ipms-online"];
+        if (ipmsIds !== undefined) {
+          snap.selectedIds = [...ipmsIds];
+        }
+        ipmsCacheRef.current = snap;
+      }
+    }
+
     if (mode === "java-upload") {
       if (!zipFile) {
         clearJavaUploadArtifacts();
@@ -1860,7 +2300,18 @@ export default function WebQualityPage() {
       } else if (!url) {
         clearExternalArtifacts();
       } else {
+        clearExternalArtifacts();
         setNeedLogin(false);
+      }
+    }
+
+    if (mode === "ipms-online") {
+      const url = (ipmsUrl.trim() || IPMS_DEFAULT_URL).trim();
+      const cache = ipmsCacheRef.current;
+      if (cache?.ipmsUrl === normalizeWqPageUrl(url) && cache.resolveComplete) {
+        applyIpmsCache(cache);
+      } else {
+        clearIpmsScenarioArtifacts();
       }
     }
 
@@ -1869,15 +2320,19 @@ export default function WebQualityPage() {
     mode,
     zipFile,
     pageUrl,
+    ipmsUrl,
     selectedIdsByMode,
     javaBaseUrl,
     javaNeedLogin,
     snapshotJavaUploadCache,
     snapshotExternalCache,
+    snapshotIpmsCache,
     clearExternalArtifacts,
+    clearIpmsScenarioArtifacts,
     clearJavaUploadArtifacts,
     applyJavaUploadCache,
     applyExternalCache,
+    applyIpmsCache,
     loadJavaScenarios,
   ]);
 
@@ -1913,6 +2368,21 @@ export default function WebQualityPage() {
   ]);
 
   useEffect(() => {
+    if (mode !== "ipms-online") return;
+    const snap = snapshotIpmsCache();
+    if (snap) ipmsCacheRef.current = snap;
+  }, [
+    mode,
+    scenarioLoaded,
+    snapshotIpmsCache,
+    scenarios,
+    selectedIds,
+    scenarioSourceLabel,
+    ipmsUrlApplyMsg,
+    ipmsUrlApplyTone,
+  ]);
+
+  useEffect(() => {
     if (mode !== "java-upload" || !zipFile) return;
     const key = javaZipKey(zipFile);
     if (key === javaZipResolvedKeyRef.current) {
@@ -1923,6 +2393,7 @@ export default function WebQualityPage() {
   const validateIpmsSessionUpload = useCallback(
     async (file: File) => {
       const fileKey = `${file.name}:${file.size}:${file.lastModified}`;
+      const baseUrl = ipmsUrl.trim() || IPMS_DEFAULT_URL;
       setIpmsLoginStatus("checking");
       setSessionStorageFile(file);
       setSessionJobId("");
@@ -1930,19 +2401,16 @@ export default function WebQualityPage() {
       setSessionScope("ipms");
       setExternalLoginStatus("none");
       try {
-        const fd = new FormData();
-        fd.append("base_url", ipmsUrl.trim() || IPMS_DEFAULT_URL);
-        fd.append("session_storage", file);
-        const res = await postScanMultipart("v1/web-quality/ipms/session/validate", fd);
-        const j = (await readJsonResponse(res)) as { ok?: boolean; message?: string };
-        if (!res.ok || !j.ok) {
+        const result = await validateWqSessionUpload(file, baseUrl);
+        if (!result.ok) {
           setIpmsLoginStatus("fail");
           setSessionStorageFile(null);
           activeSessionKeyRef.current = "";
-          setMsg(j.message || "로그인 실패");
+          setMsg(result.message || "로그인 실패");
           return;
         }
         activeSessionKeyRef.current = fileKey;
+        setSessionPageUrl(baseUrl);
         setIpmsLoginStatus("ok");
         setMsg("");
       } catch (e) {
@@ -1953,6 +2421,99 @@ export default function WebQualityPage() {
       }
     },
     [ipmsUrl],
+  );
+
+  const validateExternalSessionUpload = useCallback(
+    async (file: File) => {
+      const url = pageUrl.trim();
+      if (!url) {
+        setMsg("진단 URL을 입력하세요.");
+        return;
+      }
+      const regErr = registeredTargetUrlError(url);
+      if (regErr) {
+        setExternalLoginStatus("fail");
+        setMsg(regErr);
+        return;
+      }
+      const fileKey = `${file.name}:${file.size}:${file.lastModified}`;
+      setExternalLoginStatus("checking");
+      setSessionStorageFile(file);
+      setSessionJobId("");
+      setSessionPageUrl(url);
+      setSessionScope("external");
+      setIpmsLoginStatus("none");
+      clearWqIpmsBrowserSession();
+      clearWqExternalBrowserSession();
+      try {
+        const result = await validateWqSessionUpload(file, url);
+        if (!result.ok) {
+          setExternalLoginStatus("fail");
+          setSessionStorageFile(null);
+          activeSessionKeyRef.current = "";
+          setMsg(result.message || "로그인 실패");
+          return;
+        }
+        activeSessionKeyRef.current = fileKey;
+        setExternalLoginStatus("ok");
+        setSessionProgress(null);
+        setMsg("");
+      } catch (e) {
+        setExternalLoginStatus("fail");
+        setSessionStorageFile(null);
+        activeSessionKeyRef.current = "";
+        setMsg(String((e as Error).message || "로그인 실패"));
+      }
+    },
+    [pageUrl],
+  );
+
+  const validateJavaSessionUpload = useCallback(
+    async (file: File) => {
+      const url = javaBaseUrl.trim();
+      if (!isValidDeployUrl(url)) {
+        setMsg("배포 URL(http:// 또는 https://)을 입력하세요.");
+        return;
+      }
+      const regErr = registeredTargetUrlError(url);
+      if (regErr) {
+        setJavaLoginStatus("fail");
+        setMsg(regErr);
+        return;
+      }
+      const fileKey = `${file.name}:${file.size}:${file.lastModified}`;
+      setJavaLoginStatus("checking");
+      setSessionStorageFile(file);
+      setSessionJobId("");
+      setSessionPageUrl(url);
+      setSessionScope("java-upload");
+      setIpmsLoginStatus("none");
+      setExternalLoginStatus("none");
+      clearWqIpmsBrowserSession();
+      clearWqExternalBrowserSession();
+      clearWqJavaBrowserSession();
+      try {
+        const result = await validateWqSessionUpload(file, url);
+        if (!result.ok) {
+          setJavaLoginStatus("fail");
+          setSessionStorageFile(null);
+          activeSessionKeyRef.current = "";
+          setMsg(result.message || "로그인 실패");
+          return;
+        }
+        activeSessionKeyRef.current = fileKey;
+        setJavaLoginStatus("ok");
+        if (isStoredIpmsUrl(url)) setIpmsLoginStatus("ok");
+        setSessionProgress(null);
+        setMsg("");
+      } catch (e) {
+        setJavaLoginStatus("fail");
+        setSessionStorageFile(null);
+        activeSessionKeyRef.current = "";
+        setMsg(String((e as Error).message || "로그인 실패"));
+      }
+    },
+    [javaBaseUrl],
   );
 
   const fetchIpmsScenarioResolve = useCallback(
@@ -2049,6 +2610,20 @@ export default function WebQualityPage() {
       setScenarioLoaded(false);
       setIpmsUrlApplyMsg("");
       setIpmsUrlApplyTone("ok");
+      const ipmsTargetUrl = (ipmsUrl.trim() || IPMS_DEFAULT_URL).trim();
+      if (!isHttpUrl(ipmsTargetUrl)) {
+        setIpmsUrlApplyMsg(HTTP_URL_REQUIRED_MSG);
+        setIpmsUrlApplyTone("err");
+        setScenarioBusy(false);
+        return;
+      }
+      const regErr = registeredTargetUrlError(ipmsTargetUrl);
+      if (regErr) {
+        setIpmsUrlApplyMsg(regErr);
+        setIpmsUrlApplyTone("err");
+        setScenarioBusy(false);
+        return;
+      }
       try {
         const j = await fetchIpmsScenarioResolve(null, IPMS_FULL_ACCESS);
         const fullList = candidatesFromPayload(j);
@@ -2227,7 +2802,7 @@ export default function WebQualityPage() {
     if (mode !== "external") return;
     const url = pageUrl.trim();
     if (!url) return;
-    if (sessionPageUrl && sessionPageUrl !== url) {
+    if (sessionPageUrl && !wqSessionMatchesUrl(sessionPageUrl, url)) {
       setSessionJobId("");
       setSessionPageUrl("");
       setSessionStorageFile(null);
@@ -2235,11 +2810,7 @@ export default function WebQualityPage() {
       setExternalLoginStatus("none");
       clearWqExternalBrowserSession();
     }
-    const cache = externalCacheRef.current;
-    if (cache && cache.pageUrl !== normalizeWqPageUrl(url)) {
-      clearExternalArtifacts();
-    }
-  }, [pageUrl, mode, sessionPageUrl, clearExternalArtifacts]);
+  }, [pageUrl, mode, sessionPageUrl]);
 
   useEffect(() => {
     if (!isIpmsMode(mode) || !accessAuth || !ipmsEnabled || !ipmsUnlocked) return;
@@ -2269,6 +2840,17 @@ export default function WebQualityPage() {
           if (!cancelled) {
             clearWqIpmsBrowserSession();
             setIpmsLoginStatus("none");
+            setSessionProgress(null);
+          }
+          return;
+        }
+        const valid = await validateIpmsSessionJob(persisted.jobId, url);
+        if (cancelled || !valid) {
+          if (!cancelled) {
+            clearWqIpmsBrowserSession();
+            setSessionJobId("");
+            setSessionPageUrl("");
+            setIpmsLoginStatus("fail");
             setSessionProgress(null);
           }
           return;
@@ -2312,7 +2894,7 @@ export default function WebQualityPage() {
     const url = pageUrl.trim();
     if (!url || sessionStorageFile || sessionJobId.trim()) return;
     const persisted = loadWqExternalBrowserSession();
-    if (!persisted || persisted.pageUrl !== url) return;
+    if (!persisted || !wqSessionMatchesUrl(persisted.pageUrl, url)) return;
 
     let cancelled = false;
     void (async () => {
@@ -2325,6 +2907,17 @@ export default function WebQualityPage() {
           if (!cancelled) {
             clearWqExternalBrowserSession();
             setExternalLoginStatus("none");
+            setSessionProgress(null);
+          }
+          return;
+        }
+        const valid = await validateExternalSessionJob(persisted.jobId, url);
+        if (cancelled || !valid) {
+          if (!cancelled) {
+            clearWqExternalBrowserSession();
+            setSessionJobId("");
+            setSessionPageUrl("");
+            setExternalLoginStatus("fail");
             setSessionProgress(null);
           }
           return;
@@ -2467,12 +3060,15 @@ export default function WebQualityPage() {
         setSessionProgress(null);
         return false;
       }
-      const valid = await validateIpmsSessionJob(persisted.jobId, url);
+      const valid = await validateWqSessionJob(persisted.jobId, url);
       if (!valid) {
         if (saveAs === "ipms") clearWqIpmsBrowserSession();
         else if (saveAs === "java") clearWqJavaBrowserSession();
         else clearWqExternalBrowserSession();
+        setSessionJobId("");
+        setSessionPageUrl("");
         setSessionProgress(null);
+        if (saveAs === "external") setExternalLoginStatus("fail");
         return false;
       }
       setSessionJobId(persisted.jobId);
@@ -2531,21 +3127,29 @@ export default function WebQualityPage() {
       });
       if (j.status === "done") {
         const trimmedUrl = targetUrl.trim();
-        if (saveAs === "java" || saveAs === "ipms") {
-          const valid = await validateIpmsSessionJob(jobId, trimmedUrl);
-          if (!valid) {
-            setSessionProgress(null);
-            if (saveAs === "java") {
-              setJavaLoginStatus("fail");
-              clearWqJavaBrowserSession();
-              if (isStoredIpmsUrl(trimmedUrl)) clearWqIpmsBrowserSession();
-            } else {
-              setIpmsLoginStatus("fail");
-              clearWqIpmsBrowserSession();
-            }
-            setMsg("로그인 세션이 만료되었거나 배포 URL과 맞지 않습니다. 「로그인 창 띄움」을 다시 실행하세요.");
-            return;
+        const valid = await validateWqSessionJob(jobId, trimmedUrl);
+        if (!valid) {
+          setSessionProgress(null);
+          setSessionJobId("");
+          setSessionPageUrl("");
+          if (saveAs === "java") {
+            setJavaLoginStatus("fail");
+            clearWqJavaBrowserSession();
+            if (isStoredIpmsUrl(trimmedUrl)) clearWqIpmsBrowserSession();
+          } else if (saveAs === "ipms") {
+            setIpmsLoginStatus("fail");
+            activeSessionKeyRef.current = "";
+            clearWqIpmsBrowserSession();
+          } else {
+            setExternalLoginStatus("fail");
+            clearWqExternalBrowserSession();
           }
+          setMsg(
+            saveAs === "external"
+              ? "로그인 세션이 유효하지 않습니다. Chromium에서 해당 사이트 로그인을 완료한 뒤 다시 시도하세요."
+              : "로그인 세션이 만료되었거나 배포 URL과 맞지 않습니다. 「로그인 창 띄움」을 다시 실행하세요.",
+          );
+          return;
         }
         setSessionJobId(jobId);
         setSessionPageUrl(trimmedUrl);
@@ -2570,7 +3174,8 @@ export default function WebQualityPage() {
         saveWqExternalBrowserSession(jobId, targetUrl.trim());
         setExternalLoginStatus("ok");
         setIpmsLoginStatus("none");
-        setMsg("로그인 세션 생성 완료 — 「화면 시나리오 가져오기」를 실행하세요.");
+        setExternalRediscoverAfterLogin(true);
+        setMsg("");
         return;
       }
       if (j.status === "error") {
@@ -2694,6 +3299,12 @@ export default function WebQualityPage() {
 
   async function startIpmsSession() {
     const url = (ipmsUrl.trim() || IPMS_DEFAULT_URL).trim();
+    const regErr = registeredTargetUrlError(url);
+    if (regErr) {
+      setMsg(regErr);
+      setIpmsLoginStatus("fail");
+      return;
+    }
     if (await tryReconnectBrowserSession(url, "ipms")) return;
     setSessionStorageFile(null);
     setSessionScope("ipms");
@@ -2705,6 +3316,19 @@ export default function WebQualityPage() {
 
   async function startExternalSession() {
     const url = pageUrl.trim();
+    if (!url) {
+      setMsg("진단 URL을 입력하세요.");
+      return;
+    }
+    const regErr = registeredTargetUrlError(url);
+    if (regErr) {
+      setMsg(regErr);
+      setExternalLoginStatus("fail");
+      return;
+    }
+    setSessionJobId("");
+    setSessionPageUrl("");
+    setSessionProgress(null);
     if (await tryReconnectBrowserSession(url, "external")) return;
     setSessionStorageFile(null);
     setSessionScope("external");
@@ -2718,6 +3342,12 @@ export default function WebQualityPage() {
     const url = javaBaseUrl.trim();
     if (!isValidDeployUrl(url)) {
       setMsg("배포 URL(http:// 또는 https://)을 입력하세요.");
+      return;
+    }
+    const regErr = registeredTargetUrlError(url);
+    if (regErr) {
+      setMsg(regErr);
+      setJavaLoginStatus("fail");
       return;
     }
     if (await tryReconnectBrowserSession(url, "java", { scope: "java-upload" })) return;
@@ -3087,6 +3717,14 @@ export default function WebQualityPage() {
   );
   const hasSessionForMode = wqHasSessionForMode(mode, wqSessionBundle);
   const externalUrlInvalid = Boolean(pageUrl.trim() && !isHttpUrl(pageUrl));
+  const externalTargetIsPortal = Boolean(portalOriginFromPageUrl(pageUrl.trim()));
+  const externalBrowserSessionAvailable = isLocalPortalHost() || externalTargetIsPortal;
+  const externalLinkListStale = useMemo(() => {
+    const url = pageUrl.trim();
+    return Boolean(
+      linkListBaseUrl && url && linkListBaseUrl !== normalizeWqPageUrl(url) && externalLinkItems.length > 0,
+    );
+  }, [pageUrl, linkListBaseUrl, externalLinkItems.length]);
   const ipmsUrlInvalid = Boolean(ipmsUrl.trim() && !isHttpUrl(ipmsUrl));
 
   const runnableSelectedCount = useMemo(
@@ -3625,10 +4263,15 @@ export default function WebQualityPage() {
         </ul>
       </div>
     ) : scenarioLoaded && displayScenarios.length ? (
-      <div className="wq-scenario-block">
+      <div className={`wq-scenario-block${scenarioBusy ? " is-busy" : ""}`}>
         <div className="wq-scenario-head">
           <h3>
             화면 시나리오
+            {scenarioBusy ? (
+              <span className="wq-chip warn" style={{ marginLeft: "0.5rem" }}>
+                재탐색 중…
+              </span>
+            ) : null}
             {isIpmsMode(mode) && scenarioSourceLabel ? (
               <span className="wq-scenario-source"> (출처: {scenarioSourceLabel})</span>
             ) : null}
@@ -3736,12 +4379,17 @@ export default function WebQualityPage() {
             제외됩니다.
           </p>
         ) : mode === "external" ? (
+          <ul className="hint">
+            <li>사이트 메뉴 파일이 있으면 메뉴 기준으로, 없으면 페이지 링크를 자동 수집합니다.</li>
+            <li>로그인·2단계 인증·공동인증서가 필요한 화면은 자동 진단 대상에서 제외됩니다.</li>
+            <li>「선택 시나리오 미리보기」는 화면만 열어 검증 가능 여부를 확인합니다.</li>
+          </ul>
+        ) : isIpmsMode(mode) ? (
           <p className="hint">
-            O2 SPA는 MenuTree.js를 우선 분석하고, 없으면 Playwright 링크 탐색을 사용합니다.
-            2단계 인증 등 접근 불가 화면은 제외됩니다.
+            「선택 시나리오 미리보기」는 화면만 열어 검증 가능 여부를 확인합니다.
           </p>
         ) : null}
-        {scenarioWarnings.length && mode !== "ipms-online" ? (
+        {scenarioWarnings.length && mode !== "ipms-online" && mode !== "external" ? (
           <ul className="hint">
             {scenarioWarnings.map((w) => (
               <li key={w}>{w}</li>
@@ -3775,9 +4423,6 @@ export default function WebQualityPage() {
             ) : null}
           </p>
         ) : null}
-        <p className="hint">
-          「선택 시나리오 미리보기」는 화면만 열어 검증 가능 여부를 확인합니다.
-        </p>
         {previewMsg ? (
           <p className={`msg ${previewMsgTone}`}>{previewMsg}</p>
         ) : null}
@@ -4291,17 +4936,7 @@ export default function WebQualityPage() {
                     className="wq-ipms-source-input"
                     value={pageUrl}
                     onChange={(e) => {
-                      const next = e.target.value;
-                      if (normalizeWqPageUrl(next.trim()) !== normalizeWqPageUrl(pageUrl.trim())) {
-                        externalCacheRef.current = null;
-                        setScenarios([]);
-                        setSelectedIds([]);
-                        setScenarioLoaded(false);
-                        setLastScenarioPayload(null);
-                        setScenarioWarnings([]);
-                        setNeedLogin(false);
-                      }
-                      setPageUrl(next);
+                      setPageUrl(e.target.value);
                       setExternalSourceApplyMsg("");
                       setExternalSourceApplyTone("ok");
                     }}
@@ -4310,16 +4945,13 @@ export default function WebQualityPage() {
                   <button
                     type="button"
                     className="btn"
-                    disabled={scenarioBusy || !pageUrl.trim() || externalUrlInvalid}
+                    disabled={scenarioBusy || !pageUrl.trim()}
                     onClick={() => void loadExternalScenarios()}
                   >
                     {scenarioBusy ? "적용 중…" : "적용"}
                   </button>
                 </div>
-                {externalUrlInvalid ? (
-                  <p className="msg err wq-ipms-source-url-validation">{HTTP_URL_REQUIRED_MSG}</p>
-                ) : null}
-                {!externalUrlInvalid && externalSourceApplyMsg ? (
+                {externalSourceApplyMsg ? (
                   <p className={`msg wq-ipms-source-apply-msg-inline ${externalSourceApplyTone}`}>
                     {externalSourceApplyMsg}
                   </p>
@@ -4346,6 +4978,122 @@ export default function WebQualityPage() {
                 </div>
               ) : null}
             </fieldset>
+            {SHOW_EXTERNAL_SUB_URL_PICKER ? (
+            <div className="wq-scenario-block" style={{ marginTop: "0.75rem" }}>
+              <div className="wq-scenario-head">
+                <h3>하위 URL 선택</h3>
+                <div className="btn-row">
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={linkListLoading || scenarioBusy || !pageUrl.trim()}
+                    onClick={() => void loadExternalLinkList()}
+                  >
+                    {linkListLoading ? "불러오는 중…" : "하위 URL 목록"}
+                  </button>
+                  {externalLinkItems.length > 0 ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        onClick={() => setSelectedLinkUrls(externalLinkItems.map((x) => x.url))}
+                      >
+                        전체 선택
+                      </button>
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        onClick={() =>
+                          setSelectedLinkUrls(
+                            externalLinkItems.filter((x) => x.recommended).map((x) => x.url),
+                          )
+                        }
+                      >
+                        권장만
+                      </button>
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        onClick={() => setSelectedLinkUrls([])}
+                      >
+                        모두 해제
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+              <p className="hint">
+                「하위 URL 목록」에서 경로를 고른 뒤 「적용」하면 선택한 URL만 시나리오로 만듭니다.
+                이 포털(Vercel·로컬)은 manifest + 「적용」 결과를 합쳐 목록을 표시합니다.
+                목록 없이 「적용」하면 접속 URL 페이지 링크를 자동 수집합니다.
+                {externalLinkListStale ? (
+                  <> URL이 변경되었습니다 — 목록을 다시 가져오세요.</>
+                ) : null}
+              </p>
+              {linkListMsg ? <p className="hint">{linkListMsg}</p> : null}
+              {linkPreviewProgress ? (
+                <div className="run-progress source-scan-progress">
+                  <div
+                    className="progress-bar"
+                    role="progressbar"
+                    aria-valuenow={Math.round(linkPreviewProgress.pct)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  >
+                    <div
+                      className="progress-fill"
+                      style={{ width: `${linkPreviewProgress.pct}%` }}
+                    />
+                  </div>
+                  <p className="hint">
+                    {Math.round(linkPreviewProgress.pct)}% · {linkPreviewProgress.message}
+                  </p>
+                </div>
+              ) : null}
+              {externalLinkItems.length > 0 ? (
+                <ul className="wq-scenario-list">
+                  {externalLinkItems.map((item) => {
+                    const authBlocked =
+                      Boolean(item.requires_auth) && needLogin && !hasExternalSession;
+                    return (
+                      <li key={item.url}>
+                        <label className={`check-row${authBlocked ? " is-disabled" : ""}`}>
+                          <input
+                            type="checkbox"
+                            checked={selectedLinkUrls.includes(item.url)}
+                            disabled={authBlocked}
+                            onChange={() => {
+                              setSelectedLinkUrls((prev) =>
+                                prev.includes(item.url)
+                                  ? prev.filter((u) => u !== item.url)
+                                  : [...prev, item.url],
+                              );
+                            }}
+                          />
+                          <span>
+                            {item.label}
+                            <span className="wq-scenario-meta">
+                              {" "}
+                              · <code>{item.path || item.url}</code>
+                              {item.requires_auth ? (
+                                <span className="perf-url-badge auth">로그인 필요</span>
+                              ) : (
+                                <span className="perf-url-badge public">공개</span>
+                              )}
+                              {item.recommended ? " · 권장" : ""}
+                            </span>
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+              {selectedLinkUrls.length > 0 && !externalLinkListStale ? (
+                <p className="hint">적용 대상 {selectedLinkUrls.length}개 URL</p>
+              ) : null}
+            </div>
+            ) : null}
             <label className="check-row" style={{ marginTop: "0.75rem" }}>
               <input
                 type="checkbox"
@@ -4381,6 +5129,20 @@ export default function WebQualityPage() {
                 </legend>
                 <p className="hint">
                   공동인증서(2단계)는 세션 JSON 업로드를 권장합니다.
+                  {externalTargetIsPortal && !isLocalPortalHost() ? (
+                    <>
+                      {" "}
+                      Vercel 등 배포 포털 URL은 API가 포털 암호(<code>PORTAL_PASSWORD</code>)로
+                      자동 로그인합니다. 이 PC에 Chromium 창은 뜨지 않습니다.
+                    </>
+                  ) : !externalTargetIsPortal ? (
+                    <>
+                      {" "}
+                      네이버 등 <strong>외부 사이트</strong>는 포털 자동 로그인을 사용하지 않습니다.
+                      로컬 API에서는 로그인 창을 띄울 수 있고, 배포 API에서는 「세션 JSON 업로드」를
+                      사용하세요.
+                    </>
+                  ) : null}
                 </p>
                 <div className="wq-session-methods" role="radiogroup" aria-label="로그인 세션 방식">
                   <label className="wq-ipms-source-option">
@@ -4400,6 +5162,7 @@ export default function WebQualityPage() {
                           className="btn"
                           disabled={
                             !pageUrl.trim() ||
+                            !externalBrowserSessionAvailable ||
                             scopedSessionProgress?.status === "running" ||
                             scopedSessionProgress?.status === "queued"
                           }
@@ -4407,10 +5170,20 @@ export default function WebQualityPage() {
                         >
                           {scopedSessionProgress?.status === "running" ||
                           scopedSessionProgress?.status === "queued"
-                            ? "로그인 창 대기 중…"
-                            : "로그인 창 띄움"}
+                            ? externalTargetIsPortal && !isLocalPortalHost()
+                              ? "포털 자동 로그인 중…"
+                              : "로그인 창 대기 중…"
+                            : externalTargetIsPortal && !isLocalPortalHost()
+                              ? "포털 자동 로그인"
+                              : "로그인 창 띄움"}
                         </button>
                       </div>
+                      {!externalBrowserSessionAvailable ? (
+                        <p className="hint">
+                          배포 API에서는 외부 사이트 로그인 창을 띄울 수 없습니다. 「세션 JSON 업로드」를
+                          선택하세요.
+                        </p>
+                      ) : null}
                       {scopedSessionProgress ? (
                         <div className="run-progress source-scan-progress">
                           <div
@@ -4426,12 +5199,19 @@ export default function WebQualityPage() {
                             />
                           </div>
                           <p className="hint">
-                            {Math.round(scopedSessionProgress.pct)}% · {scopedSessionProgress.message}
+                            {Math.round(scopedSessionProgress.pct)}% ·{" "}
+                            {!externalTargetIsPortal &&
+                            scopedSessionProgress.message.includes("포털 암호")
+                              ? "해당 사이트 로그인 대기 중…"
+                              : scopedSessionProgress.message}
                           </p>
-                          {scopedSessionProgress.status === "running" ||
-                          scopedSessionProgress.status === "queued" ? (
+                          {isLocalPortalHost() &&
+                          (scopedSessionProgress.status === "running" ||
+                            scopedSessionProgress.status === "queued") ? (
                             <p className="hint">
-                              창이 뒤에 가려지면 작업 표시줄 또는 Alt+Tab으로 창을 선택하세요.
+                              {externalTargetIsPortal
+                                ? "창이 뒤에 가려지면 작업 표시줄 또는 Alt+Tab으로 창을 선택하세요."
+                                : "Chromium 창에서 해당 사이트 로그인을 완료하세요. 창이 가려지면 작업 표시줄 또는 Alt+Tab으로 선택하세요."}
                             </p>
                           ) : null}
                         </div>
@@ -4461,15 +5241,7 @@ export default function WebQualityPage() {
                               activeSessionKeyRef.current = "";
                               return;
                             }
-                            setSessionScope("external");
-                            setIpmsLoginStatus("none");
-                            setSessionJobId("");
-                            setSessionPageUrl(pageUrl.trim());
-                            setSessionStorageFile(file);
-                            clearWqIpmsBrowserSession();
-                            clearWqExternalBrowserSession();
-                            setExternalLoginStatus("ok");
-                            setSessionProgress(null);
+                            void validateExternalSessionUpload(file);
                           }}
                         />
                       </label>
@@ -4606,17 +5378,7 @@ export default function WebQualityPage() {
                               activeSessionKeyRef.current = "";
                               return;
                             }
-                            setSessionScope("java-upload");
-                            setIpmsLoginStatus("none");
-                            setExternalLoginStatus("none");
-                            setSessionJobId("");
-                            setSessionPageUrl(javaBaseUrl.trim());
-                            setSessionStorageFile(file);
-                            clearWqIpmsBrowserSession();
-                            clearWqExternalBrowserSession();
-                            clearWqJavaBrowserSession();
-                            setJavaLoginStatus("ok");
-                            setSessionProgress(null);
+                            void validateJavaSessionUpload(file);
                           }}
                         />
                       </label>

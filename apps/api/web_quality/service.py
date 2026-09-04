@@ -5,7 +5,8 @@ from typing import Any
 
 from web_quality.catalog import krds_catalog_meta, load_egov_rules, load_krds_uiux_rules, load_kwcag_rules
 from web_quality.external_scanner import ExternalLoginConfig, scan_external_url_runtime
-from web_quality.external_scenario_extract import discover_external_scenarios
+from web_quality.external_scenario_extract import discover_external_scenarios, preview_external_links
+from web_quality.registered_sites import assert_registered_target_url
 from web_quality.fix_guides import enrich_finding
 from web_quality.krds_scanner import append_krds_manual_findings, scan_krds_static_files
 from web_quality.findings_utils import compute_diff
@@ -81,6 +82,19 @@ def _is_ipms_deploy_url(page_url: str) -> bool:
     return "ipms.online" in (page_url or "").lower()
 
 
+def _assert_registered_for_mode(mode: str, *, page_url: str = "", base_url: str = "") -> None:
+    m = (mode or "").strip().lower()
+    url = ""
+    if m == "external":
+        url = (page_url or "").strip()
+    elif _is_ipms_mode(m):
+        url = (page_url or base_url or "").strip()
+    elif m == "java-upload":
+        url = (page_url or "").strip()
+    if url:
+        assert_registered_target_url(url)
+
+
 def _resolve_external_ipms_access(
     ipms_access: str,
     state_ids: list[str] | None,
@@ -141,6 +155,11 @@ def validate_web_quality(
     allowed = ("external", "ipms-online", "ipms-public", "ipms-auth", "java-upload")
     if mode not in allowed:
         return {"ok": False, "can_run": False, "message": "mode는 external|ipms-public|ipms-auth|java-upload"}
+
+    try:
+        _assert_registered_for_mode(mode, page_url=page_url, base_url=base_url)
+    except ValueError as e:
+        return {"ok": False, "can_run": False, "message": str(e)}
 
     env = get_environment_status()
     pw_env = env.get("portal_password_set")
@@ -214,6 +233,11 @@ def validate_web_quality(
     hints = ["외부 URL · 실시간 화면 시나리오 진단"]
     if include_runtime and not runtime_ready:
         hints.append(playwright.get("message") or "Playwright Chromium 미설치")
+    from web_quality.runtime_common import is_portal_like_url
+    from web_quality.ipms_session import _headed_browser_available
+
+    if not is_portal_like_url(url) and not _headed_browser_available():
+        hints.append("배포 API — 외부 사이트 로그인은 세션 JSON 업로드 필요")
     return {
         "ok": True,
         "can_run": True,
@@ -250,6 +274,7 @@ def run_web_quality(
     need_login: bool = False,
 ) -> dict[str, Any]:
     mode = (mode or "portal").strip().lower()
+    _assert_registered_for_mode(mode, page_url=page_url, base_url=base_url)
 
     if _is_ipms_mode(mode):
         tier = _ipms_access_from_mode(mode, ipms_access)
@@ -747,6 +772,9 @@ def resolve_web_quality_scenarios(
 ) -> dict[str, Any]:
     from web_quality.scenario_resolve import resolve_scenarios
 
+    if (base_url or "").strip():
+        assert_registered_target_url(base_url)
+
     def discover_fn(page_url: str) -> dict[str, Any]:
         return discover_external_scenarios_from_params(
             page_url=page_url,
@@ -787,7 +815,9 @@ def discover_external_scenarios_from_params(
     session_storage_bytes: bytes | None = None,
     session_job_id: str = "",
     progress_job_id: str | None = None,
+    include_urls: list[str] | None = None,
 ) -> dict[str, Any]:
+    assert_registered_target_url(page_url)
     storage = None
     if session_job_id.strip():
         storage = load_session_json(session_job_id.strip())
@@ -797,6 +827,46 @@ def discover_external_scenarios_from_params(
         storage = parse_storage_state(session_storage_bytes)
     pw = (portal_password or "").strip() or __import__("os").environ.get("PORTAL_PASSWORD", "").strip()
     return discover_external_scenarios(
+        page_url,
+        need_login=need_login or bool(storage),
+        login_url=login_url,
+        login_username=login_username,
+        login_password=login_password,
+        portal_password=pw,
+        login_user_selector=login_user_selector,
+        login_password_selector=login_password_selector,
+        login_submit_selector=login_submit_selector,
+        storage_state=storage,
+        progress_job_id=progress_job_id,
+        include_urls=include_urls,
+    )
+
+
+def preview_external_links_from_params(
+    *,
+    page_url: str,
+    need_login: bool = False,
+    login_url: str = "",
+    login_username: str = "",
+    login_password: str = "",
+    portal_password: str = "",
+    login_user_selector: str = "",
+    login_password_selector: str = "",
+    login_submit_selector: str = "",
+    session_storage_bytes: bytes | None = None,
+    session_job_id: str = "",
+    progress_job_id: str | None = None,
+) -> dict[str, Any]:
+    assert_registered_target_url(page_url)
+    storage = None
+    if session_job_id.strip():
+        storage = load_session_json(session_job_id.strip())
+        if not storage:
+            raise ValueError("세션 job_id가 없거나 만료되었습니다. 로그인 세션을 다시 생성하세요.")
+    elif session_storage_bytes:
+        storage = parse_storage_state(session_storage_bytes)
+    pw = (portal_password or "").strip() or __import__("os").environ.get("PORTAL_PASSWORD", "").strip()
+    return preview_external_links(
         page_url,
         need_login=need_login or bool(storage),
         login_url=login_url,
@@ -824,6 +894,7 @@ def start_discover_external_job(
     login_submit_selector: str = "",
     session_storage_bytes: bytes | None = None,
     session_job_id: str = "",
+    include_urls: list[str] | None = None,
 ) -> dict[str, Any]:
     job_id = create_job("external-discover", "화면 시나리오 탐색 준비…")
 
@@ -842,6 +913,7 @@ def start_discover_external_job(
                 session_storage_bytes=session_storage_bytes,
                 session_job_id=session_job_id,
                 progress_job_id=job_id,
+                include_urls=include_urls,
             )
             if not result.get("ok"):
                 raise ValueError(result.get("detail") or "시나리오 탐색 실패")
@@ -850,6 +922,61 @@ def start_discover_external_job(
                 status="done",
                 pct=100,
                 message="탐색 완료",
+                step_label="완료",
+                result=result,
+            )
+        except Exception as e:
+            update_job(job_id, status="error", error=str(e), message=str(e))
+
+    submit_job(job_id, work)
+    job = get_job(job_id)
+    return {
+        "ok": True,
+        "async": True,
+        "job_id": job_id,
+        **(job_to_dict(job) if job else {"status": "queued", "pct": 0}),
+    }
+
+
+def start_preview_external_links_job(
+    *,
+    page_url: str,
+    need_login: bool = False,
+    login_url: str = "",
+    login_username: str = "",
+    login_password: str = "",
+    portal_password: str = "",
+    login_user_selector: str = "",
+    login_password_selector: str = "",
+    login_submit_selector: str = "",
+    session_storage_bytes: bytes | None = None,
+    session_job_id: str = "",
+) -> dict[str, Any]:
+    job_id = create_job("external-link-preview", "하위 URL 목록 준비…")
+
+    def work() -> None:
+        try:
+            result = preview_external_links_from_params(
+                page_url=page_url,
+                need_login=need_login,
+                login_url=login_url,
+                login_username=login_username,
+                login_password=login_password,
+                portal_password=portal_password,
+                login_user_selector=login_user_selector,
+                login_password_selector=login_password_selector,
+                login_submit_selector=login_submit_selector,
+                session_storage_bytes=session_storage_bytes,
+                session_job_id=session_job_id,
+                progress_job_id=job_id,
+            )
+            if not result.get("ok"):
+                raise ValueError(result.get("detail") or "하위 URL 목록 실패")
+            update_job(
+                job_id,
+                status="done",
+                pct=100,
+                message=f"하위 URL {len(result.get('links') or [])}건",
                 step_label="완료",
                 result=result,
             )
@@ -1421,8 +1548,11 @@ def validate_ipms_session(
     base_url: str = "",
     session_storage_bytes: bytes | None = None,
 ) -> dict[str, Any]:
-    from web_quality.ipms_scanner import parse_storage_state, validate_ipms_storage_session
+    from web_quality.ipms_scanner import parse_storage_state
+    from web_quality.session_validate import validate_storage_session_for_url
 
+    if (base_url or "").strip():
+        assert_registered_target_url(base_url)
     if not session_storage_bytes:
         return {"ok": False, "message": "세션 JSON 파일이 필요합니다."}
     try:
@@ -1433,33 +1563,39 @@ def validate_ipms_session(
         return {"ok": False, "message": "storage_state JSON 형식이 아닙니다."}
     if not storage:
         return {"ok": False, "message": "storage_state JSON 형식이 아닙니다."}
-    ok, msg = validate_ipms_storage_session(base_url, storage)
+    ok, msg = validate_storage_session_for_url(base_url, storage)
     return {
         "ok": ok,
         "message": "로그인 완료" if ok else (msg or "로그인 실패"),
     }
+
+
+def validate_external_session(
+    *,
+    base_url: str = "",
+    session_storage_bytes: bytes | None = None,
+) -> dict[str, Any]:
+    return validate_ipms_session(base_url=base_url, session_storage_bytes=session_storage_bytes)
 
 
 def validate_ipms_session_job(job_id: str, *, base_url: str = "") -> dict[str, Any]:
-    from web_quality.ipms_scanner import validate_ipms_storage_session
+    from web_quality.session_validate import validate_session_job_for_url
 
-    jid = (job_id or "").strip()
-    if not jid:
-        return {"ok": False, "message": "세션 job_id가 필요합니다."}
-    storage = load_session_json(jid)
-    if not storage:
-        return {
-            "ok": False,
-            "message": "세션 파일이 없습니다. 「로그인 창 띄움」을 다시 실행하세요.",
-        }
-    ok, msg = validate_ipms_storage_session(base_url, storage)
+    if (base_url or "").strip():
+        assert_registered_target_url(base_url)
+    ok, msg = validate_session_job_for_url(job_id, base_url)
     return {
         "ok": ok,
         "message": "로그인 완료" if ok else (msg or "로그인 실패"),
     }
 
 
+def validate_external_session_job(job_id: str, *, base_url: str = "") -> dict[str, Any]:
+    return validate_ipms_session_job(job_id, base_url=base_url)
+
+
 def start_browser_session(page_url: str = "", *, detect: SessionDetect = "generic") -> dict[str, Any]:
+    assert_registered_target_url(page_url)
     jid = start_browser_session_job(page_url, detect=detect)
     job = get_job(jid)
     return {
