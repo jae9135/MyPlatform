@@ -281,8 +281,18 @@ def portal_login(page, base_url: str, password: str) -> None:
     login_url = urljoin(base_url.rstrip("/") + "/", "login")
     page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
     page.fill('input[name="password"]', password)
-    page.click('button[type="submit"]')
-    page.wait_for_load_state("networkidle", timeout=60000)
+    try:
+        with page.expect_navigation(wait_until="domcontentloaded", timeout=60000):
+            page.click('button[type="submit"]')
+    except Exception:
+        page.click('button[type="submit"]')
+    try:
+        page.wait_for_function(
+            "() => !window.location.pathname.toLowerCase().includes('/login')",
+            timeout=30000,
+        )
+    except Exception:
+        page.wait_for_load_state("domcontentloaded", timeout=15000)
 
 
 def is_portal_like_url(url: str) -> bool:
@@ -296,7 +306,16 @@ def is_portal_like_url(url: str) -> bool:
     return host.endswith(".vercel.app")
 
 
-_AUTH_COOKIE_RE = re.compile(r"session|auth|token|login|jsession|sid|sso|remember", re.I)
+_AUTH_COOKIE_RE = re.compile(r"session|auth|token|login|jsession|sid|sso|remember|portal|trial", re.I)
+_PORTAL_AUTH_COOKIE_NAMES = frozenset({"mp_portal", "mp_trial", "mp_code_session"})
+
+
+def has_portal_auth_cookie(cookies: list[dict[str, Any]]) -> bool:
+    for c in cookies:
+        name = (c.get("name") or "").strip()
+        if name in _PORTAL_AUTH_COOKIE_NAMES and str(c.get("value") or "").strip():
+            return True
+    return False
 
 
 def _cookie_host_matches(cookie_domain: str, host: str) -> bool:
@@ -319,6 +338,8 @@ def has_auth_cookies(cookies: list[dict[str, Any]], host: str) -> bool:
         if not _cookie_host_matches(str(c.get("domain") or ""), host):
             continue
         host_cookies.append(c)
+        if name in _PORTAL_AUTH_COOKIE_NAMES:
+            return True
         if _AUTH_COOKIE_RE.search(name):
             return True
     meaningful = [

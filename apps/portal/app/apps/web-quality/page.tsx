@@ -28,7 +28,9 @@ import {
   DEPLOY_PORTAL_AUTO_LOGIN_HINT,
   DEPLOY_SESSION_UPLOAD_HINT,
   isHeadedBrowserSessionAvailable,
+  isPortalLikeBaseUrl,
   validateWqSessionJob,
+  validateWqSessionJobDetailed,
   validateWqSessionUpload,
 } from "@/lib/wqSessionValidate";
 import { buildWqPrefs, loadWqPrefs, saveWqPrefs } from "@/lib/wqPrefs";
@@ -3148,7 +3150,10 @@ export default function WebQualityPage() {
       });
       if (j.status === "done") {
         const trimmedUrl = targetUrl.trim();
-        const valid = await validateWqSessionJob(jobId, trimmedUrl);
+        const { ok: valid, message: validateMsg } = await validateWqSessionJobDetailed(
+          jobId,
+          trimmedUrl,
+        );
         if (!valid) {
           setSessionProgress(null);
           setSessionJobId("");
@@ -3165,10 +3170,18 @@ export default function WebQualityPage() {
             setExternalLoginStatus("fail");
             clearWqExternalBrowserSession();
           }
+          const portalHint =
+            saveAs === "external" && isPortalLikeBaseUrl(trimmedUrl) && !isLocalPortalHost()
+              ? validateMsg ||
+                "포털 자동 로그인 검증 실패 — Render API PORTAL_PASSWORD를 Vercel과 동일하게 설정하세요."
+              : "";
           setMsg(
-            saveAs === "external"
-              ? "로그인 세션이 유효하지 않습니다. Chromium에서 해당 사이트 로그인을 완료한 뒤 다시 시도하세요."
-              : "로그인 세션이 만료되었거나 배포 URL과 맞지 않습니다. 「로그인 창 띄움」을 다시 실행하세요.",
+            portalHint ||
+              (saveAs === "external"
+                ? validateMsg ||
+                  "로그인 세션이 유효하지 않습니다. Chromium에서 해당 사이트 로그인을 완료한 뒤 다시 시도하세요."
+                : validateMsg ||
+                  "로그인 세션이 만료되었거나 배포 URL과 맞지 않습니다. 「로그인 창 띄움」을 다시 실행하세요."),
           );
           return;
         }
@@ -3200,7 +3213,7 @@ export default function WebQualityPage() {
         return;
       }
       if (j.status === "error") {
-        const errMsg = String(j.error || j.message || "세션 생성 실패");
+        const errMsg = String(j.message || j.error || "세션 생성 실패");
         setSessionProgress(null);
         if (isBrowserClosedSessionError(errMsg)) {
           if (saveAs === "ipms") {

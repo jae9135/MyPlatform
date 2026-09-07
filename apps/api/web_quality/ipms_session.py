@@ -17,7 +17,7 @@ from web_quality.job_progress import (
     update_job,
 )
 from web_quality.presets.ipms_online import IPMS_DEFAULT_BASE
-from web_quality.runtime_common import has_auth_cookies, is_portal_like_url, looks_like_login_form, page_login_blocked
+from web_quality.runtime_common import has_auth_cookies, has_portal_auth_cookie, is_portal_like_url, looks_like_login_form, page_login_blocked
 
 SessionDetect = Literal["ipms", "generic"]
 
@@ -43,9 +43,7 @@ def _has_visible_password(page) -> bool:
 
 def _has_portal_session_cookie(context) -> bool:
     try:
-        for c in context.cookies():
-            if c.get("name") == "mp_portal" and c.get("value"):
-                return True
+        return has_portal_auth_cookie(context.cookies())
     except Exception:
         pass
     return False
@@ -176,9 +174,20 @@ def _reject_headed_session_unavailable(
         )
 
 
+def _fail_portal_headless_session(job_id: str, *, error: str, message: str) -> None:
+    update_job(job_id, status="error", error=error, message=message, pct=0)
+
+
 def _try_headless_portal_session(job_id: str, url: str, password: str) -> bool:
     """Render 등 headless API — PORTAL_PASSWORD로 /login 자동 로그인 (포털 URL만)."""
     if not is_portal_like_url(url):
+        return False
+    if not (password or "").strip():
+        _fail_portal_headless_session(
+            job_id,
+            error="PORTAL_PASSWORD 미설정",
+            message="Render API에 PORTAL_PASSWORD 환경 변수를 Vercel과 동일하게 설정하세요.",
+        )
         return False
     from playwright.sync_api import sync_playwright
 
@@ -205,25 +214,49 @@ def _try_headless_portal_session(job_id: str, url: str, password: str) -> bool:
             blocked, reason = page_login_blocked(page)
             if blocked:
                 browser.close()
+                _fail_portal_headless_session(
+                    job_id,
+                    error=reason or "로그인 화면",
+                    message=(
+                        "포털 자동 로그인 실패 — Render API의 PORTAL_PASSWORD가 "
+                        "Vercel Portal과 동일한지 확인하세요."
+                    ),
+                )
                 return False
             if not _has_portal_session_cookie(context):
-                host = (urlparse(url).hostname or "").lower()
-                if host in ("localhost", "127.0.0.1", "::1"):
-                    browser.close()
-                    return False
+                browser.close()
+                _fail_portal_headless_session(
+                    job_id,
+                    error="포털 인증 쿠키 없음",
+                    message=(
+                        "포털 자동 로그인 실패 — PORTAL_PASSWORD 불일치 또는 "
+                        "체험/코드 암호만 사용 중이면 세션 JSON 업로드를 사용하세요."
+                    ),
+                )
+                return False
             check_cancelled(job_id)
             context.storage_state(path=str(out))
             browser.close()
-    except Exception:
+    except Exception as e:
+        _fail_portal_headless_session(
+            job_id,
+            error=str(e),
+            message="포털 자동 로그인 중 오류 — PORTAL_PASSWORD·Render Playwright 환경을 확인하세요.",
+        )
         return False
 
     if not out.is_file():
+        _fail_portal_headless_session(
+            job_id,
+            error="세션 파일 저장 실패",
+            message="포털 자동 로그인 세션 저장 실패",
+        )
         return False
     update_job(
         job_id,
         status="done",
         pct=100,
-        message="포털 로그인 세션이 생성되었습니다. 「적용」으로 시나리오를 다시 가져오세요.",
+        message="포털 로그인 세션이 생성되었습니다. 「적용」을 눌러 시나리오를 다시 가져오세요.",
         step_label="완료",
         file_path=str(out),
     )
@@ -266,7 +299,16 @@ def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms
 
         ensure_portal_password_env()
         pw = __import__("os").environ.get("PORTAL_PASSWORD", "").strip()
-        if portal_target and pw and _try_headless_portal_session(job_id, raw, pw):
+        if portal_target:
+            if not pw:
+                _fail_portal_headless_session(
+                    job_id,
+                    error="PORTAL_PASSWORD 미설정",
+                    message="Render API에 PORTAL_PASSWORD 환경 변수를 Vercel과 동일하게 설정하세요.",
+                )
+                return
+            if _try_headless_portal_session(job_id, raw, pw):
+                return
             return
 
     if not _headed_browser_available():

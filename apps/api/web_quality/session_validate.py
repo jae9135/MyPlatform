@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
-from web_quality.runtime_common import is_portal_like_url
+from web_quality.runtime_common import has_portal_auth_cookie, is_portal_like_url
 
 
 def is_ipms_deploy_url(url: str) -> bool:
@@ -37,16 +37,25 @@ def validate_storage_session_for_url(
         return (True, "") if ok else (False, msg)
 
     if is_portal_like_url(url):
-        for c in storage_state.get("cookies") or []:
-            if (
-                isinstance(c, dict)
-                and c.get("name") == "mp_portal"
-                and str(c.get("value") or "").strip()
-            ):
-                return True, ""
+        cookies = storage_state.get("cookies") or []
+        if has_portal_auth_cookie(cookies):
+            return True, ""
+        if not cookies:
+            return (
+                False,
+                "포털 인증 쿠키가 없습니다. Render API의 PORTAL_PASSWORD가 Vercel Portal과 "
+                "동일한지 확인하거나 세션 JSON 업로드를 사용하세요.",
+            )
         from web_quality.external_scenario_extract import validate_external_storage_session
 
-        return validate_external_storage_session(url, storage_state)
+        ok, msg = validate_external_storage_session(url, storage_state)
+        if not ok and is_portal_like_url(url):
+            hint = (
+                "포털 자동 로그인 검증 실패 — Render API PORTAL_PASSWORD를 Vercel과 "
+                "동일하게 설정했는지 확인하세요."
+            )
+            return False, msg or hint
+        return ok, msg
 
     from web_quality.external_scenario_extract import validate_external_storage_session
 

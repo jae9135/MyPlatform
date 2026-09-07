@@ -59,27 +59,37 @@ function sessionOk(res: Response, j: SessionValidateResponse): boolean {
 
 /** 브라우저 job 세션 검증 — IPMS / 포털 / 외부 URL 자동 분기 */
 export async function validateWqSessionJob(jobId: string, baseUrl: string): Promise<boolean> {
+  const result = await validateWqSessionJobDetailed(jobId, baseUrl);
+  return result.ok;
+}
+
+/** validateWqSessionJob + API message (배포 포털 자동 로그인 실패 안내용) */
+export async function validateWqSessionJobDetailed(
+  jobId: string,
+  baseUrl: string,
+): Promise<{ ok: boolean; message: string }> {
   const id = jobId.trim();
   const url = baseUrl.trim();
-  if (!id || !url) return false;
+  if (!id || !url) return { ok: false, message: "세션 job_id와 URL이 필요합니다." };
   try {
     const q = new URLSearchParams({ base_url: url });
+    let res: Response;
     if (isIpmsDeployUrl(url)) {
-      const res = await fetchScanApi(`v1/web-quality/ipms/session/${id}/validate?${q}`);
-      const j = (await readJsonResponse(res)) as SessionValidateResponse;
-      return sessionOk(res, j);
-    }
-    if (isPortalLocalBaseUrl(url)) {
+      res = await fetchScanApi(`v1/web-quality/ipms/session/${id}/validate?${q}`);
+    } else if (isPortalLocalBaseUrl(url)) {
       q.set("job_id", id);
-      const res = await fetchScanApi(`v1/perf-test/session/validate?${q}`);
-      const j = (await readJsonResponse(res)) as SessionValidateResponse;
-      return sessionOk(res, j);
+      res = await fetchScanApi(`v1/perf-test/session/validate?${q}`);
+    } else {
+      res = await fetchScanApi(`v1/web-quality/session/${id}/validate?${q}`);
     }
-    const res = await fetchScanApi(`v1/web-quality/session/${id}/validate?${q}`);
     const j = (await readJsonResponse(res)) as SessionValidateResponse;
-    return sessionOk(res, j);
-  } catch {
-    return false;
+    const ok = sessionOk(res, j);
+    return {
+      ok,
+      message: String(j.message || (ok ? "로그인 완료" : "로그인 실패")),
+    };
+  } catch (e) {
+    return { ok: false, message: String((e as Error).message || "로그인 실패") };
   }
 }
 
