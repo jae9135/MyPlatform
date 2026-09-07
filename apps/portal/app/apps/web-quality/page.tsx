@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PortalNav } from "@/lib/PortalNav";
-import { API_BASE } from "@/lib/apiBase";
 import {
   clientSideZipValidate,
   readJsonResponse,
@@ -10,6 +9,7 @@ import {
 } from "@/lib/formUpload";
 import {
   fetchScanApi,
+  fetchScanJobApi,
   isLocalPortalHost,
   postScanMultipart,
   wrapScanFetchError,
@@ -24,7 +24,13 @@ import {
 import { formatUtcIsoToKst } from "@/lib/formatDateTime";
 import { PERF_TEST_PORTAL_URLS } from "@/lib/perfTestPortalUrls";
 import { registeredTargetUrlError, REGISTERED_TARGET_SITE_MESSAGE } from "@/lib/registeredTargetSites";
-import { validateWqSessionJob, validateWqSessionUpload } from "@/lib/wqSessionValidate";
+import {
+  DEPLOY_PORTAL_AUTO_LOGIN_HINT,
+  DEPLOY_SESSION_UPLOAD_HINT,
+  isHeadedBrowserSessionAvailable,
+  validateWqSessionJob,
+  validateWqSessionUpload,
+} from "@/lib/wqSessionValidate";
 import { buildWqPrefs, loadWqPrefs, saveWqPrefs } from "@/lib/wqPrefs";
 import {
   diffScenarioLists,
@@ -1453,6 +1459,20 @@ export default function WebQualityPage() {
   }, [ipmsEnabled, mode, switchMode]);
 
   useEffect(() => {
+    const url =
+      mode === "external"
+        ? pageUrl.trim()
+        : mode === "java-upload"
+          ? javaBaseUrl.trim()
+          : isIpmsMode(mode)
+            ? (ipmsUrl.trim() || IPMS_DEFAULT_URL).trim()
+            : "";
+    if (url && !isHeadedBrowserSessionAvailable(url)) {
+      setLoginSessionMode("upload");
+    }
+  }, [mode, pageUrl, javaBaseUrl, ipmsUrl]);
+
+  useEffect(() => {
     const prefs = loadWqPrefs();
     setIpmsUrl(prefs.ipmsUrl || IPMS_DEFAULT_URL);
     const savedPageUrl = prefs.pageUrl || "";
@@ -1626,8 +1646,8 @@ export default function WebQualityPage() {
 
   async function pollDiscoverJob(jobId: string): Promise<Record<string, unknown>> {
     for (let i = 0; i < 900; i++) {
-      const res = await fetch(`${API_BASE}/v1/web-quality/jobs/${jobId}`);
-      const j = (await res.json()) as WqJobProgress & {
+      const res = await fetchScanJobApi(`v1/web-quality/jobs/${jobId}`);
+      const j = (await readJsonResponse(res)) as WqJobProgress & {
         ok?: boolean;
         result?: Record<string, unknown>;
       };
@@ -1649,8 +1669,8 @@ export default function WebQualityPage() {
 
   async function pollLinkPreviewJob(jobId: string): Promise<Record<string, unknown>> {
     for (let i = 0; i < 300; i++) {
-      const res = await fetch(`${API_BASE}/v1/web-quality/jobs/${jobId}`);
-      const j = (await res.json()) as WqJobProgress & {
+      const res = await fetchScanJobApi(`v1/web-quality/jobs/${jobId}`);
+      const j = (await readJsonResponse(res)) as WqJobProgress & {
         ok?: boolean;
         result?: Record<string, unknown>;
       };
@@ -1747,11 +1767,8 @@ export default function WebQualityPage() {
           if (sessionJobId.trim()) fd.append("session_job_id", sessionJobId.trim());
         }
         if (sessionStorageFile) fd.append("session_storage", sessionStorageFile);
-        const res = await fetch(`${API_BASE}/v1/web-quality/scenarios/link-preview`, {
-          method: "POST",
-          body: fd,
-        });
-        const j = await res.json();
+        const res = await postScanMultipart("v1/web-quality/scenarios/link-preview", fd);
+        const j = await readJsonResponse(res);
         if (!res.ok || !j.ok) {
           const detail = String(j.detail || j.message || "");
           if (res.status === 404 || detail.toLowerCase().includes("not found")) {
@@ -1862,14 +1879,11 @@ export default function WebQualityPage() {
       if (SHOW_EXTERNAL_SUB_URL_PICKER && selectedLinkUrls.length > 0) {
         fd.append("include_urls", JSON.stringify(selectedLinkUrls));
       }
-      const res = await fetch(`${API_BASE}/v1/web-quality/scenarios/discover`, {
-        method: "POST",
-        body: fd,
-      });
-      const j = await res.json();
+      const res = await postScanMultipart("v1/web-quality/scenarios/discover", fd);
+      const j = await readJsonResponse(res);
       if (gen !== externalDiscoverGenRef.current) return;
       if (!res.ok || !j.ok) {
-        throw new Error(j.detail || j.message || `시나리오 탐색 실패 (HTTP ${res.status})`);
+        throw new Error(String(j.detail || j.message || `시나리오 탐색 실패 (HTTP ${res.status})`));
       }
       const payload = j.job_id
         ? await pollDiscoverJob(j.job_id as string)
@@ -1889,7 +1903,7 @@ export default function WebQualityPage() {
         setSelectedIds([]);
         setScenarioLoaded(false);
       }
-      const err = String((e as Error).message || e);
+      const err = wrapScanFetchError(e).message;
       const regErr = registeredTargetUrlError(url);
       const applyMsg =
         regErr && err.includes(regErr)
@@ -1926,22 +1940,9 @@ export default function WebQualityPage() {
     if (!externalRediscoverAfterLogin || !externalSessionReady || mode !== "external" || !needLogin) {
       return;
     }
-    const url = pageUrl.trim();
     setExternalRediscoverAfterLogin(false);
-    if (!url) {
-      setMsg("로그인 세션 생성 완료 — 「적용」으로 시나리오를 다시 가져오세요.");
-      return;
-    }
-    setMsg("로그인 완료 — 시나리오를 다시 탐색합니다.");
-    void loadExternalScenarios();
-  }, [
-    externalRediscoverAfterLogin,
-    externalSessionReady,
-    mode,
-    needLogin,
-    pageUrl,
-    loadExternalScenarios,
-  ]);
+    setMsg("로그인 세션 생성 완료 — 「적용」을 눌러 시나리오를 가져오세요.");
+  }, [externalRediscoverAfterLogin, externalSessionReady, mode, needLogin]);
 
   const clearJavaUploadArtifacts = useCallback((opts?: { keepZip?: boolean }) => {
     if (!opts?.keepZip) {
@@ -3279,22 +3280,21 @@ export default function WebQualityPage() {
     try {
       const fd = new FormData();
       fd.append("page_url", targetUrl.trim());
-      const endpoint =
-        detect === "ipms"
-          ? `${API_BASE}/v1/web-quality/ipms/session`
-          : `${API_BASE}/v1/web-quality/session`;
+      const path =
+        detect === "ipms" ? "v1/web-quality/ipms/session" : "v1/web-quality/session";
       if (detect === "generic") fd.append("detect", "generic");
-      const res = await fetch(endpoint, {
-        method: "POST",
-        body: fd,
-      });
-      const j = (await res.json()) as WqJobProgress & { ok?: boolean; job_id?: string; detail?: string };
+      const res = await postScanMultipart(path, fd);
+      const j = (await readJsonResponse(res)) as WqJobProgress & {
+        ok?: boolean;
+        job_id?: string;
+        detail?: string;
+      };
       if (!res.ok || !j.job_id) {
-        throw new Error(j.detail || j.message || `세션 생성 실패 (HTTP ${res.status})`);
+        throw new Error(String(j.detail || j.message || `세션 생성 실패 (HTTP ${res.status})`));
       }
       await pollSessionJob(j.job_id, targetUrl.trim(), detect, saveAs);
     } catch (e) {
-      const errMsg = String((e as Error).message || e);
+      const errMsg = friendlySessionError(wrapScanFetchError(e).message);
       setSessionProgress(null);
       if (isBrowserClosedSessionError(errMsg)) {
         if (saveAs === "ipms") {
@@ -3325,6 +3325,11 @@ export default function WebQualityPage() {
       setIpmsLoginStatus("fail");
       return;
     }
+    if (!isHeadedBrowserSessionAvailable(url)) {
+      setMsg(DEPLOY_SESSION_UPLOAD_HINT);
+      setIpmsLoginStatus("fail");
+      return;
+    }
     if (await tryReconnectBrowserSession(url, "ipms")) return;
     setSessionStorageFile(null);
     setSessionScope("ipms");
@@ -3348,6 +3353,11 @@ export default function WebQualityPage() {
       setMsg("");
       return;
     }
+    if (!isHeadedBrowserSessionAvailable(url)) {
+      setMsg(DEPLOY_SESSION_UPLOAD_HINT);
+      setExternalLoginStatus("fail");
+      return;
+    }
     setSessionJobId("");
     setSessionPageUrl("");
     setSessionProgress(null);
@@ -3369,6 +3379,11 @@ export default function WebQualityPage() {
     const regErr = registeredTargetUrlError(url);
     if (regErr) {
       setMsg(regErr);
+      setJavaLoginStatus("fail");
+      return;
+    }
+    if (!isHeadedBrowserSessionAvailable(url)) {
+      setMsg(DEPLOY_SESSION_UPLOAD_HINT);
       setJavaLoginStatus("fail");
       return;
     }
@@ -3740,7 +3755,12 @@ export default function WebQualityPage() {
   const hasSessionForMode = wqHasSessionForMode(mode, wqSessionBundle);
   const externalUrlInvalid = Boolean(pageUrl.trim() && !isHttpUrl(pageUrl));
   const externalTargetIsPortal = Boolean(portalOriginFromPageUrl(pageUrl.trim()));
-  const externalBrowserSessionAvailable = isLocalPortalHost() || externalTargetIsPortal;
+  const externalBrowserSessionAvailable = isHeadedBrowserSessionAvailable(pageUrl.trim());
+  const ipmsBrowserSessionAvailable = isHeadedBrowserSessionAvailable(
+    (ipmsUrl.trim() || IPMS_DEFAULT_URL).trim(),
+  );
+  const javaBrowserSessionAvailable = isHeadedBrowserSessionAvailable(javaBaseUrl.trim());
+  const javaTargetIsPortal = Boolean(portalOriginFromPageUrl(javaBaseUrl.trim()));
   const externalLinkListStale = useMemo(() => {
     const url = pageUrl.trim();
     return Boolean(
@@ -4787,6 +4807,12 @@ export default function WebQualityPage() {
                 </legend>
                 <p className="hint">
                   공동인증서(2단계)는 세션 JSON 업로드를 권장합니다.
+                  {!ipmsBrowserSessionAvailable ? (
+                    <>
+                      {" "}
+                      {DEPLOY_SESSION_UPLOAD_HINT}
+                    </>
+                  ) : null}
                 </p>
                 <div className="wq-session-methods" role="radiogroup" aria-label="로그인 세션 방식">
                   <label className="wq-ipms-source-option">
@@ -4806,6 +4832,7 @@ export default function WebQualityPage() {
                           className="btn"
                           disabled={
                             !accessAuth ||
+                            !ipmsBrowserSessionAvailable ||
                             scopedSessionProgress?.status === "running" ||
                             scopedSessionProgress?.status === "queued"
                           }
@@ -4817,6 +4844,9 @@ export default function WebQualityPage() {
                             : "로그인 창 띄움"}
                         </button>
                       </div>
+                      {!ipmsBrowserSessionAvailable ? (
+                        <p className="hint">{DEPLOY_SESSION_UPLOAD_HINT}</p>
+                      ) : null}
                       {scopedSessionProgress ? (
                         <div className="run-progress source-scan-progress">
                           <div
@@ -4834,8 +4864,9 @@ export default function WebQualityPage() {
                           <p className="hint">
                             {Math.round(scopedSessionProgress.pct)}% · {scopedSessionProgress.message}
                           </p>
-                          {scopedSessionProgress.status === "running" ||
-                          scopedSessionProgress.status === "queued" ? (
+                          {ipmsBrowserSessionAvailable &&
+                          (scopedSessionProgress.status === "running" ||
+                            scopedSessionProgress.status === "queued") ? (
                             <p className="hint">
                               창이 뒤에 가려지면 작업 표시줄 또는 Alt+Tab으로 창을 선택하세요.
                             </p>
@@ -5155,13 +5186,11 @@ export default function WebQualityPage() {
                   {externalTargetIsPortal && !isLocalPortalHost() ? (
                     <>
                       {" "}
-                      Vercel 등 배포 포털 URL은 API가 포털 암호(<code>PORTAL_PASSWORD</code>)로
-                      자동 로그인합니다. 이 PC에 Chromium 창은 뜨지 않습니다.
+                      {DEPLOY_PORTAL_AUTO_LOGIN_HINT}
                     </>
                   ) : !externalTargetIsPortal ? (
                     <>
                       {" "}
-                      네이버 등 <strong>외부 사이트</strong>는 포털 자동 로그인을 사용하지 않습니다.
                       로컬 API에서는 로그인 창을 띄울 수 있고, 배포 API에서는 「세션 JSON 업로드」를
                       사용하세요.
                     </>
@@ -5202,10 +5231,7 @@ export default function WebQualityPage() {
                         </button>
                       </div>
                       {!externalBrowserSessionAvailable ? (
-                        <p className="hint">
-                          배포 API에서는 외부 사이트 로그인 창을 띄울 수 없습니다. 「세션 JSON 업로드」를
-                          선택하세요.
-                        </p>
+                        <p className="hint">{DEPLOY_SESSION_UPLOAD_HINT}</p>
                       ) : null}
                       {scopedSessionProgress ? (
                         <div className="run-progress source-scan-progress">
@@ -5321,6 +5347,17 @@ export default function WebQualityPage() {
                 </legend>
                 <p className="hint">
                   공동인증서(2단계)는 세션 JSON 업로드를 권장합니다.
+                  {javaTargetIsPortal && !isLocalPortalHost() ? (
+                    <>
+                      {" "}
+                      {DEPLOY_PORTAL_AUTO_LOGIN_HINT}
+                    </>
+                  ) : !javaBrowserSessionAvailable ? (
+                    <>
+                      {" "}
+                      {DEPLOY_SESSION_UPLOAD_HINT}
+                    </>
+                  ) : null}
                 </p>
                 <div className="wq-session-methods" role="radiogroup" aria-label="로그인 세션 방식">
                   <label className="wq-ipms-source-option">
@@ -5340,6 +5377,7 @@ export default function WebQualityPage() {
                           className="btn"
                           disabled={
                             !isValidDeployUrl(javaBaseUrl) ||
+                            !javaBrowserSessionAvailable ||
                             scopedSessionProgress?.status === "running" ||
                             scopedSessionProgress?.status === "queued"
                           }
@@ -5347,10 +5385,17 @@ export default function WebQualityPage() {
                         >
                           {scopedSessionProgress?.status === "running" ||
                           scopedSessionProgress?.status === "queued"
-                            ? "로그인 창 대기 중…"
-                            : "로그인 창 띄움"}
+                            ? javaTargetIsPortal && !isLocalPortalHost()
+                              ? "포털 자동 로그인 중…"
+                              : "로그인 창 대기 중…"
+                            : javaTargetIsPortal && !isLocalPortalHost()
+                              ? "포털 자동 로그인"
+                              : "로그인 창 띄움"}
                         </button>
                       </div>
+                      {!javaBrowserSessionAvailable ? (
+                        <p className="hint">{DEPLOY_SESSION_UPLOAD_HINT}</p>
+                      ) : null}
                       {scopedSessionProgress ? (
                         <div className="run-progress source-scan-progress">
                           <div
@@ -5368,8 +5413,10 @@ export default function WebQualityPage() {
                           <p className="hint">
                             {Math.round(scopedSessionProgress.pct)}% · {scopedSessionProgress.message}
                           </p>
-                          {scopedSessionProgress.status === "running" ||
-                          scopedSessionProgress.status === "queued" ? (
+                          {javaBrowserSessionAvailable &&
+                          isLocalPortalHost() &&
+                          (scopedSessionProgress.status === "running" ||
+                            scopedSessionProgress.status === "queued") ? (
                             <p className="hint">
                               창이 뒤에 가려지면 작업 표시줄 또는 Alt+Tab으로 창을 선택하세요.
                             </p>

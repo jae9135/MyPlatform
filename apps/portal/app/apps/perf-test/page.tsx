@@ -6,6 +6,7 @@ import {
   fetchScanApi,
   fetchScanEnvWithRetry,
   fetchScanJobApi,
+  isLocalPortalHost,
   postScanMultipart,
   wrapScanFetchError,
 } from "@/lib/localScanApi";
@@ -23,7 +24,14 @@ import {
   type PerfPortalUrlItem,
 } from "@/lib/perfTestPortalUrls";
 import { registeredTargetUrlError } from "@/lib/registeredTargetSites";
-import { validateWqSessionJob, validateWqSessionUpload } from "@/lib/wqSessionValidate";
+import {
+  DEPLOY_PORTAL_AUTO_LOGIN_HINT,
+  DEPLOY_SESSION_UPLOAD_HINT,
+  isHeadedBrowserSessionAvailable,
+  isPortalLikeBaseUrl,
+  validateWqSessionJob,
+  validateWqSessionUpload,
+} from "@/lib/wqSessionValidate";
 import { formatUtcIsoToKst } from "@/lib/formatDateTime";
 import {
   aggregateByScenarioLabel,
@@ -55,7 +63,14 @@ function isBrowserClosedSessionError(msg: string): boolean {
 
 function friendlySessionError(msg: string): string {
   if (isBrowserClosedSessionError(msg)) {
-    return "브라우저 창이 닫혔습니다. 「로그인 창 띄움」을 다시 시도하세요.";
+    if (isLocalPortalHost()) {
+      return "브라우저 창이 닫혔습니다. 「로그인 창 띄움」을 다시 시도하세요.";
+    }
+    return (
+      "배포 API에서는 로그인용 브라우저 창이 이 PC에 표시되지 않습니다. " +
+      "「포털 자동 로그인」을 다시 시도하거나 「세션 JSON 업로드」를 사용하세요. " +
+      "(Render API에 PORTAL_PASSWORD가 Vercel과 동일하게 설정되어 있어야 합니다.)"
+    );
   }
   return msg;
 }
@@ -573,6 +588,15 @@ export default function PerfTestPage() {
   const sessionActive = sessionActiveForPerf(needLogin, sessionReady);
   const sessionActiveRef = useRef(sessionActive);
   sessionActiveRef.current = sessionActive;
+  const perfTargetIsPortal = isPortalLikeBaseUrl(appliedBaseUrl.trim());
+  const browserSessionAvailable = isHeadedBrowserSessionAvailable(appliedBaseUrl.trim());
+
+  useEffect(() => {
+    const url = appliedBaseUrl.trim();
+    if (url && !isHeadedBrowserSessionAvailable(url)) {
+      setLoginSessionMode("upload");
+    }
+  }, [appliedBaseUrl]);
 
   function cacheBrowserSession(jobId: string, pageUrl: string) {
     const url = pageUrl.trim();
@@ -1239,6 +1263,11 @@ export default function PerfTestPage() {
     const targetUrl = appliedBaseUrl.trim();
     if (!targetUrl) {
       setError("Base URL을 적용한 뒤 세션을 생성하세요.");
+      return;
+    }
+    if (!browserSessionAvailable) {
+      setError(DEPLOY_SESSION_UPLOAD_HINT);
+      setSessionProgress(null);
       return;
     }
     const regErr = registeredTargetUrlError(targetUrl);
@@ -1920,7 +1949,20 @@ export default function PerfTestPage() {
           <strong>로그인 세션 (HAR · Locust)</strong>
           {sessionLegendChip}
         </legend>
-        <p className="hint">공동인증서(2단계)는 세션 JSON 업로드를 권장합니다.</p>
+        <p className="hint">
+          공동인증서(2단계)는 세션 JSON 업로드를 권장합니다.
+          {perfTargetIsPortal && !isLocalPortalHost() ? (
+            <>
+              {" "}
+              {DEPLOY_PORTAL_AUTO_LOGIN_HINT}
+            </>
+          ) : !browserSessionAvailable ? (
+            <>
+              {" "}
+              {DEPLOY_SESSION_UPLOAD_HINT}
+            </>
+          ) : null}
+        </p>
         <label className="check-row">
           <input
             type="checkbox"
@@ -1954,14 +1996,19 @@ export default function PerfTestPage() {
                     disabled={
                       !appliedBaseUrl.trim() ||
                       baseUrlDirty ||
+                      !browserSessionAvailable ||
                       sessionProgress?.status === "running" ||
                       sessionProgress?.status === "queued"
                     }
                     onClick={() => void startBrowserSession()}
                   >
                     {sessionProgress?.status === "running" || sessionProgress?.status === "queued"
-                      ? "로그인 창 대기 중…"
-                      : "로그인 창 띄움"}
+                      ? perfTargetIsPortal && !isLocalPortalHost()
+                        ? "포털 자동 로그인 중…"
+                        : "로그인 창 대기 중…"
+                      : perfTargetIsPortal && !isLocalPortalHost()
+                        ? "포털 자동 로그인"
+                        : "로그인 창 띄움"}
                   </button>
                   {sessionProgress?.status === "running" || sessionProgress?.status === "queued" ? (
                     <button type="button" className="btn ghost" onClick={() => void cancelSession()}>
@@ -1969,6 +2016,9 @@ export default function PerfTestPage() {
                     </button>
                   ) : null}
                 </div>
+                {!browserSessionAvailable ? (
+                  <p className="hint">{DEPLOY_SESSION_UPLOAD_HINT}</p>
+                ) : null}
                 {sessionProgress &&
                 (sessionProgress.status === "checking" ||
                   sessionProgress.status === "running" ||
@@ -1992,7 +2042,9 @@ export default function PerfTestPage() {
                         ? sessionProgress.message
                         : `${Math.round(sessionProgress.pct)}% · ${sessionProgress.message}`}
                     </p>
-                    {sessionProgress.status === "running" || sessionProgress.status === "queued" ? (
+                    {browserSessionAvailable &&
+                    isLocalPortalHost() &&
+                    (sessionProgress.status === "running" || sessionProgress.status === "queued") ? (
                       <p className="hint">
                         창이 뒤에 가려지면 작업 표시줄 또는 Alt+Tab으로 창을 선택하세요.
                       </p>

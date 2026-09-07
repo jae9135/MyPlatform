@@ -1,5 +1,13 @@
 import { readJsonResponse } from "@/lib/formUpload";
-import { fetchScanApi, postScanMultipart } from "@/lib/localScanApi";
+import { fetchScanApi, isLocalPortalHost, postScanMultipart } from "@/lib/localScanApi";
+
+/** 배포 API — headed 로그인 창 불가 시 안내 (IPMS · 외부 · Java 배포 URL) */
+export const DEPLOY_SESSION_UPLOAD_HINT =
+  "배포 API에서는 로그인 창을 띄울 수 없습니다. PC에서 세션 JSON을 생성한 뒤 「세션 JSON 업로드」를 사용하세요.";
+
+/** 배포 API — Vercel 포털 URL headless 자동 로그인 안내 */
+export const DEPLOY_PORTAL_AUTO_LOGIN_HINT =
+  "Vercel 등 배포 포털 URL은 API가 포털 암호(PORTAL_PASSWORD)로 자동 로그인합니다. 이 PC에 Chromium 창은 뜨지 않습니다.";
 
 export function isIpmsDeployUrl(url: string): boolean {
   return url.trim().toLowerCase().includes("ipms.online");
@@ -31,6 +39,15 @@ export function isPortalLikeBaseUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * 로컬 Portal+API 또는 배포 포털 URL(Vercel) — 「로그인 창 띄움」/포털 자동 로그인 가능.
+ * IPMS·외부 사이트·배포 API에서는 false → 세션 JSON 업로드만.
+ */
+export function isHeadedBrowserSessionAvailable(targetUrl: string): boolean {
+  if (isLocalPortalHost()) return true;
+  return isPortalLikeBaseUrl(targetUrl.trim());
 }
 
 type SessionValidateResponse = { ok?: boolean; valid?: boolean; message?: string };

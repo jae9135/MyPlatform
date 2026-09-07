@@ -135,6 +135,47 @@ def _headed_browser_available() -> bool:
     return bool(os.environ.get("DISPLAY", "").strip())
 
 
+def _reject_headed_session_unavailable(
+    job_id: str,
+    *,
+    detect: SessionDetect,
+    portal_target: bool,
+) -> None:
+    if portal_target:
+        update_job(
+            job_id,
+            status="error",
+            error=(
+                "배포 API에서는 브라우저 창을 띄울 수 없습니다. "
+                "API에 PORTAL_PASSWORD를 설정했는지 확인하거나 세션 JSON 업로드를 사용하세요."
+            ),
+            message="포털 자동 로그인 실패 — 세션 JSON 업로드를 이용하세요.",
+            pct=0,
+        )
+    elif detect == "ipms":
+        update_job(
+            job_id,
+            status="error",
+            error=(
+                "배포 API에서는 IPMS 로그인 창을 띄울 수 없습니다. "
+                "「세션 JSON 업로드」로 Playwright storage_state를 등록하세요."
+            ),
+            message="IPMS — 세션 JSON 업로드를 이용하세요.",
+            pct=0,
+        )
+    else:
+        update_job(
+            job_id,
+            status="error",
+            error=(
+                "배포 API에서는 외부 사이트용 로그인 창을 띄울 수 없습니다. "
+                "「세션 JSON 업로드」로 Playwright storage_state를 등록하세요."
+            ),
+            message="외부 URL — 세션 JSON 업로드를 이용하세요.",
+            pct=0,
+        )
+
+
 def _try_headless_portal_session(job_id: str, url: str, password: str) -> bool:
     """Render 등 headless API — PORTAL_PASSWORD로 /login 자동 로그인 (포털 URL만)."""
     if not is_portal_like_url(url):
@@ -227,30 +268,10 @@ def _run_session_capture(job_id: str, url: str, *, detect: SessionDetect = "ipms
         pw = __import__("os").environ.get("PORTAL_PASSWORD", "").strip()
         if portal_target and pw and _try_headless_portal_session(job_id, raw, pw):
             return
-        if not _headed_browser_available():
-            if portal_target:
-                update_job(
-                    job_id,
-                    status="error",
-                    error=(
-                        "배포 API에서는 브라우저 창을 띄울 수 없습니다. "
-                        "API에 PORTAL_PASSWORD를 설정했는지 확인하거나 세션 JSON 업로드를 사용하세요."
-                    ),
-                    message="포털 자동 로그인 실패 — 세션 JSON 업로드를 이용하세요.",
-                    pct=0,
-                )
-            else:
-                update_job(
-                    job_id,
-                    status="error",
-                    error=(
-                        "배포 API에서는 외부 사이트용 로그인 창을 띄울 수 없습니다. "
-                        "「세션 JSON 업로드」로 Playwright storage_state를 등록하세요."
-                    ),
-                    message="외부 URL — 세션 JSON 업로드를 이용하세요.",
-                    pct=0,
-                )
-            return
+
+    if not _headed_browser_available():
+        _reject_headed_session_unavailable(job_id, detect=detect, portal_target=portal_target)
+        return
 
     try:
         with sync_playwright() as p:
