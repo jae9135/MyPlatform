@@ -29,6 +29,7 @@ import {
   DEPLOY_SESSION_UPLOAD_HINT,
   isHeadedBrowserSessionAvailable,
   isPortalLikeBaseUrl,
+  loginSessionModeForTargetUrl,
   validateWqSessionJob,
   validateWqSessionJobDetailed,
   validateWqSessionUpload,
@@ -1469,10 +1470,15 @@ export default function WebQualityPage() {
           : isIpmsMode(mode)
             ? (ipmsUrl.trim() || IPMS_DEFAULT_URL).trim()
             : "";
-    if (url && !isHeadedBrowserSessionAvailable(url)) {
-      setLoginSessionMode("upload");
-    }
+    if (!url) return;
+    setLoginSessionMode(loginSessionModeForTargetUrl(url));
   }, [mode, pageUrl, javaBaseUrl, ipmsUrl]);
+
+  useEffect(() => {
+    if (!needLogin || mode !== "external") return;
+    const url = pageUrl.trim();
+    setLoginSessionMode(url ? loginSessionModeForTargetUrl(url) : "browser");
+  }, [needLogin, mode, pageUrl]);
 
   useEffect(() => {
     const prefs = loadWqPrefs();
@@ -3916,6 +3922,8 @@ export default function WebQualityPage() {
       }
       if (mode === "external" && (loginFailed || isLoginPreviewError(topErrors))) {
         setNeedLogin(true);
+        const url = pageUrl.trim();
+        setLoginSessionMode(url ? loginSessionModeForTargetUrl(url) : "browser");
       }
       const formatted =
         mode === "java-upload"
@@ -5165,7 +5173,14 @@ export default function WebQualityPage() {
               <input
                 type="checkbox"
                 checked={needLogin}
-                onChange={(e) => setNeedLogin(e.target.checked)}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setNeedLogin(checked);
+                  if (checked) {
+                    const url = pageUrl.trim();
+                    setLoginSessionMode(url ? loginSessionModeForTargetUrl(url) : "browser");
+                  }
+                }}
               />
               로그인 필요
             </label>
@@ -5330,7 +5345,14 @@ export default function WebQualityPage() {
               <input
                 type="checkbox"
                 checked={javaNeedLogin}
-                onChange={(e) => setJavaNeedLogin(e.target.checked)}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setJavaNeedLogin(checked);
+                  if (checked) {
+                    const url = javaBaseUrl.trim();
+                    setLoginSessionMode(url ? loginSessionModeForTargetUrl(url) : "browser");
+                  }
+                }}
               />
               로그인 필요
             </label>

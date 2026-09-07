@@ -29,6 +29,7 @@ import {
   DEPLOY_SESSION_UPLOAD_HINT,
   isHeadedBrowserSessionAvailable,
   isPortalLikeBaseUrl,
+  loginSessionModeForTargetUrl,
   validateWqSessionJob,
   validateWqSessionUpload,
 } from "@/lib/wqSessionValidate";
@@ -593,10 +594,15 @@ export default function PerfTestPage() {
 
   useEffect(() => {
     const url = appliedBaseUrl.trim();
-    if (url && !isHeadedBrowserSessionAvailable(url)) {
-      setLoginSessionMode("upload");
-    }
+    if (!url) return;
+    setLoginSessionMode(loginSessionModeForTargetUrl(url));
   }, [appliedBaseUrl]);
+
+  useEffect(() => {
+    if (!needLogin) return;
+    const url = appliedBaseUrl.trim();
+    setLoginSessionMode(url ? loginSessionModeForTargetUrl(url) : "browser");
+  }, [needLogin, appliedBaseUrl]);
 
   function cacheBrowserSession(jobId: string, pageUrl: string) {
     const url = pageUrl.trim();
@@ -1187,6 +1193,9 @@ export default function PerfTestPage() {
   async function handleNeedLoginChange(checked: boolean) {
     setNeedLogin(checked);
     if (!checked) return;
+
+    const url = appliedBaseUrl.trim();
+    setLoginSessionMode(url ? loginSessionModeForTargetUrl(url) : "browser");
 
     setSessionProgress({
       job_id: "",

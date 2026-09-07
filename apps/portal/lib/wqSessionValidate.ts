@@ -57,6 +57,10 @@ function sessionOk(res: Response, j: SessionValidateResponse): boolean {
   return Boolean(res.ok && j.ok);
 }
 
+export function loginSessionModeForTargetUrl(targetUrl: string): "browser" | "upload" {
+  return isHeadedBrowserSessionAvailable(targetUrl.trim()) ? "browser" : "upload";
+}
+
 /** 브라우저 job 세션 검증 — IPMS / 포털 / 외부 URL 자동 분기 */
 export async function validateWqSessionJob(jobId: string, baseUrl: string): Promise<boolean> {
   const result = await validateWqSessionJobDetailed(jobId, baseUrl);
