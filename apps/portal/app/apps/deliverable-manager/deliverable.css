@@ -61,7 +61,32 @@
 .dm-error {
   color: var(--muted);
   font-size: 13px;
-  margin: 0 0 10px;
+  margin: 0;
+}
+
+.dm-table-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+}
+
+.dm-mo-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.dm-mo-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 .dm-error {
@@ -92,6 +117,7 @@
   color: var(--muted);
   font-weight: 600;
   white-space: nowrap;
+  text-align: center;
 }
 
 .dm-actions {
@@ -134,22 +160,26 @@
 
 .dm-mo {
   display: inline-flex;
-  min-width: 1.4rem;
+  align-items: center;
   justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
   font-size: 11px;
   font-weight: 700;
-  border-radius: 999px;
-  padding: 2px 6px;
+  border-radius: 50%;
+  line-height: 1;
 }
 
 .dm-mo.mandatory {
-  background: rgba(61, 139, 253, 0.2);
-  color: #8ec0ff;
+  background: rgba(61, 139, 253, 0.22);
+  color: #3d8bfd;
+  border: 1px solid rgba(61, 139, 253, 0.35);
 }
 
 .dm-mo.optional {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--muted);
+  background: rgba(62, 207, 142, 0.18);
+  color: #2ea86a;
+  border: 1px solid rgba(62, 207, 142, 0.35);
 }
 
 .dm-mo.empty {

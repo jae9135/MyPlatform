@@ -6,11 +6,23 @@ import {
   EdgeLabelRenderer,
   useInternalNode,
   useReactFlow,
+  useUpdateNodeInternals,
   type EdgeProps,
 } from "@xyflow/react";
 
 import { orthogonalPoints } from "./edgeRouting";
 import {
+  ATTACH_SIDES,
+  anchorOnSide,
+  getNodeBox,
+  nearestSideOrKeep,
+  slideRange,
+  snapAttachment,
+  type FlowNodeBox,
+} from "./edgeAttachment";
+import {
+  EDGE_COLUMN,
+  columnHandleId,
   type EdgePathLayout,
   type HandleSide,
   displayCardinality,
@@ -22,6 +34,7 @@ export type ErRelationEdgeData = {
   relationId?: string;
   cardinality?: RelationCardinality | string;
   pathOffset?: number;
+  pathOffsetV?: number;
   fromYOffset?: number;
   toYOffset?: number;
   fromXOffset?: number;
@@ -100,72 +113,214 @@ function isLR(side?: HandleSide) {
   return side === "L" || side === "R" || !side;
 }
 
-function snapToNodeBorder(
-  node:
-    | {
-        internals?: { positionAbsolute?: { x: number; y: number } };
-        measured?: { width?: number; height?: number };
-        width?: number;
-        height?: number;
+/** 그립 드래그: 연결점만 가장자리를 따라 슬라이드 (경로 오프셋은 중간 세그먼트 드래그 전용) */
+function slideEndpointOnSide(
+  side: HandleSide,
+  origin: EdgePathLayout,
+  dx: number,
+  dy: number,
+  role: "from" | "to"
+): Partial<EdgePathLayout> {
+  if (side === "L" || side === "R") {
+    if (role === "from") {
+      return { fromYOffset: origin.fromYOffset + dy };
+    }
+    return { toYOffset: origin.toYOffset + dy };
+  }
+  if (role === "from") {
+    return { fromXOffset: origin.fromXOffset + dx };
+  }
+  return { toXOffset: origin.toXOffset + dx };
+}
+
+/** T/B–T/B 구형 데이터는 pathOffset 하나만 쓰던 경우 → pathOffsetV로 이전 (렌더 시 변환 금지) */
+function resolvePathOffsets(
+  layout: EdgePathLayout
+): { pathOffset: number; pathOffsetV: number } {
+  return { pathOffset: layout.pathOffset, pathOffsetV: layout.pathOffsetV };
+}
+
+/** 경로 몸통 드래그 — 연결 유형·세그먼트에 맞는 축만 조정 */
+function applyBodySegmentDrag(
+  next: EdgePathLayout,
+  origin: EdgePathLayout,
+  fromSide: HandleSide,
+  toSide: HandleSide,
+  seg: number,
+  segCount: number,
+  horiz: boolean,
+  dx: number,
+  dy: number
+): void {
+  const fromLR = isLR(fromSide);
+  const toLR = isLR(toSide);
+  const bothTB = !fromLR && !toLR;
+  const bothLR = fromLR && toLR;
+  const lastSeg = segCount - 1;
+
+  if (bothTB) {
+    if (horiz) {
+      next.pathOffsetV = origin.pathOffsetV + dy;
+    } else if (seg === 0) {
+      next.fromXOffset = origin.fromXOffset + dx;
+    } else {
+      next.toXOffset = origin.toXOffset + dx;
+    }
+    return;
+  }
+
+  if (bothLR) {
+    if (!horiz) {
+      next.pathOffset = origin.pathOffset + dx;
+    } else if (seg === 0) {
+      next.fromYOffset = origin.fromYOffset + dy;
+    } else if (seg === lastSeg - 1) {
+      next.toYOffset = origin.toYOffset + dy;
+    } else {
+      next.pathOffset = origin.pathOffset + dx;
+    }
+    return;
+  }
+
+  if (fromLR && !toLR) {
+    if (!horiz) {
+      next.pathOffset = origin.pathOffset + dx;
+    } else if (seg === 0) {
+      next.fromYOffset = origin.fromYOffset + dy;
+    } else if (seg >= lastSeg - 1) {
+      next.toXOffset = origin.toXOffset + dx;
+      next.pathOffsetV = origin.pathOffsetV + dy;
+    } else {
+      next.pathOffsetV = origin.pathOffsetV + dy;
+    }
+    return;
+  }
+
+  if (!fromLR && toLR) {
+    if (horiz) {
+      if (seg >= lastSeg - 1) {
+        next.toYOffset = origin.toYOffset + dy;
+      } else {
+        next.pathOffsetV = origin.pathOffsetV + dy;
       }
-    | undefined,
-  side: HandleSide | undefined,
-  x: number,
-  y: number
-): Point {
-  if (!node) return { x, y };
-  const top = node.internals?.positionAbsolute?.y ?? 0;
-  const left = node.internals?.positionAbsolute?.x ?? 0;
-  const w = node.width ?? node.measured?.width ?? 240;
-  const h = node.height ?? node.measured?.height ?? 80;
-  const pad = 8;
-  const s = side || "R";
-  if (s === "L" || s === "R") {
-    return {
-      x,
-      y: Math.max(top + pad, Math.min(top + h - pad, y)),
-    };
+    } else if (seg === 0) {
+      next.fromXOffset = origin.fromXOffset + dx;
+      next.pathOffsetV = origin.pathOffsetV + dy;
+    } else if (seg >= lastSeg - 1) {
+      next.toYOffset = origin.toYOffset + dy;
+      next.pathOffset = origin.pathOffset + dx;
+    } else {
+      next.pathOffset = origin.pathOffset + dx;
+    }
+    return;
   }
-  if (s === "T") {
-    return { x: Math.max(left + pad, Math.min(left + w - pad, x)), y };
+
+  if (horiz) {
+    next.pathOffsetV = origin.pathOffsetV + dy;
+  } else {
+    next.pathOffset = origin.pathOffset + dx;
   }
-  return { x: Math.max(left + pad, Math.min(left + w - pad, x)), y };
+}
+
+function segmentDragCursor(
+  fromSide: HandleSide,
+  toSide: HandleSide,
+  horiz: boolean
+): string {
+  const fromLR = isLR(fromSide);
+  const toLR = isLR(toSide);
+  const bothTB = !fromLR && !toLR;
+  const bothLR = fromLR && toLR;
+  if (bothTB) return horiz ? "ns-resize" : "ew-resize";
+  if (bothLR) return horiz ? "ns-resize" : "ew-resize";
+  return horiz ? "ns-resize" : "ew-resize";
+}
+
+function TableAttachmentGuides({
+  node,
+  nodeId,
+  activeSide,
+  accent,
+}: {
+  node: FlowNodeBox | undefined;
+  nodeId?: string;
+  activeSide?: HandleSide;
+  accent: string;
+}) {
+  const box = getNodeBox(node, nodeId);
+  if (!box.w || !box.h) return null;
+  return (
+    <g className="er-edge-attach-guides">
+      {ATTACH_SIDES.map((side) => {
+        const { a, b } = slideRange(box, side);
+        const active = side === activeSide;
+        return (
+          <g key={side} className={active ? "is-active" : ""}>
+            <line
+              x1={a.x}
+              y1={a.y}
+              x2={b.x}
+              y2={b.y}
+              stroke={accent}
+              strokeWidth={active ? 3 : 1.5}
+              strokeLinecap="round"
+              strokeDasharray={active ? undefined : "4 4"}
+              opacity={active ? 0.95 : 0.45}
+            />
+            <circle cx={a.x} cy={a.y} r={4} fill="#0f1419" stroke={accent} strokeWidth={1.5} opacity={active ? 1 : 0.6} />
+            <circle cx={b.x} cy={b.y} r={4} fill="#0f1419" stroke={accent} strokeWidth={1.5} opacity={active ? 1 : 0.6} />
+            {active ? (
+              <circle cx={(a.x + b.x) / 2} cy={(a.y + b.y) / 2} r={5} fill={accent} opacity={0.35} />
+            ) : null}
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+function EndpointGrip({
+  cx,
+  cy,
+  color,
+  onPointerDown,
+}: {
+  cx: number;
+  cy: number;
+  color: string;
+  onPointerDown: (e: React.PointerEvent) => void;
+}) {
+  return (
+    <g
+      className="er-edge-endpoint-grip nopan nodrag"
+      style={{ cursor: "grab", touchAction: "none" }}
+      onPointerDown={onPointerDown}
+    >
+      <circle cx={cx} cy={cy} r={14} fill="transparent" />
+      <circle cx={cx} cy={cy} r={7} fill="#0f1419" stroke={color} strokeWidth={2.2} />
+      <line x1={cx - 3} y1={cy} x2={cx + 3} y2={cy} stroke={color} strokeWidth={1.6} strokeLinecap="round" />
+      <line x1={cx} y1={cy - 3} x2={cx} y2={cy + 3} stroke={color} strokeWidth={1.6} strokeLinecap="round" />
+    </g>
+  );
 }
 
 function buildPoints(
   fromSide: HandleSide | undefined,
   toSide: HandleSide | undefined,
-  sx: number,
-  sy: number,
-  tx: number,
-  ty: number,
   layout: EdgePathLayout,
-  sourceNode: ReturnType<typeof useInternalNode>,
-  targetNode: ReturnType<typeof useInternalNode>
+  sourceNode: FlowNodeBox | undefined,
+  targetNode: FlowNodeBox | undefined,
+  sourceId?: string,
+  targetId?: string
 ): Point[] {
-  const fromLR = isLR(fromSide);
-  const toLR = isLR(toSide);
-  const from = snapToNodeBorder(
-    sourceNode,
-    fromSide,
-    sx + (fromLR ? 0 : layout.fromXOffset),
-    sy + (fromLR ? layout.fromYOffset : 0)
-  );
-  const to = snapToNodeBorder(
-    targetNode,
-    toSide,
-    tx + (toLR ? 0 : layout.toXOffset),
-    ty + (toLR ? layout.toYOffset : 0)
-  );
-  return orthogonalPoints(
-    fromSide,
-    toSide,
-    from.x,
-    from.y,
-    to.x,
-    to.y,
-    layout.pathOffset
-  );
+  const fs = layout.fromSide ?? fromSide ?? "R";
+  const ts = layout.toSide ?? toSide ?? "L";
+  const fromBox = getNodeBox(sourceNode, sourceId);
+  const toBox = getNodeBox(targetNode, targetId);
+  const from = anchorOnSide(fromBox, fs, layout.fromYOffset, layout.fromXOffset);
+  const to = anchorOnSide(toBox, ts, layout.toYOffset, layout.toXOffset);
+  const { pathOffset, pathOffsetV } = resolvePathOffsets(layout);
+  return orthogonalPoints(fs, ts, from.x, from.y, to.x, to.y, pathOffset, pathOffsetV);
 }
 
 type MarkKind = "one" | "many" | "opt" | "optMany";
@@ -315,10 +470,6 @@ export function ErRelationEdge({
   id,
   source,
   target,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
   data,
   selected,
   style,
@@ -326,23 +477,24 @@ export function ErRelationEdge({
   const d = (data || {}) as ErRelationEdgeData;
   const layout: EdgePathLayout = {
     pathOffset: d.pathOffset ?? 0,
+    pathOffsetV: d.pathOffsetV ?? 0,
     fromYOffset: d.fromYOffset ?? 0,
     toYOffset: d.toYOffset ?? 0,
     fromXOffset: d.fromXOffset ?? 0,
     toXOffset: d.toXOffset ?? 0,
+    fromSide: d.fromSide,
+    toSide: d.toSide,
   };
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
   const pts = buildPoints(
     d.fromSide,
     d.toSide,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
     layout,
     sourceNode,
-    targetNode
+    targetNode,
+    source,
+    target
   );
   const path = pathFromPoints(pts);
   const color = selected ? "#c5dcff" : "#6b9bd1";
@@ -361,19 +513,30 @@ export function ErRelationEdge({
 
   const { setEdges, getZoom, screenToFlowPosition, getViewport, setViewport } =
     useReactFlow();
+  const updateNodeInternals = useUpdateNodeInternals();
 
   const commitLayout = useCallback(
     (next: EdgePathLayout, persist: boolean) => {
+      const fromSide = next.fromSide ?? d.fromSide ?? "R";
+      const toSide = next.toSide ?? d.toSide ?? "L";
+      const merged: EdgePathLayout = { ...next, fromSide, toSide };
       setEdges((eds) =>
         eds.map((e) =>
           e.id === id
-            ? { ...e, selected: true, data: { ...(e.data as object), ...next } }
+            ? {
+                ...e,
+                selected: true,
+                sourceHandle: columnHandleId(String(e.source), EDGE_COLUMN, fromSide),
+                targetHandle: columnHandleId(String(e.target), EDGE_COLUMN, toSide),
+                data: { ...(e.data as object), ...merged, fromSide, toSide },
+              }
             : { ...e, selected: false }
         )
       );
-      if (persist) d.onPathChange?.(id, next);
+      updateNodeInternals([source, target]);
+      if (persist) d.onPathChange?.(id, merged);
     },
-    [d, id, setEdges]
+    [d, id, setEdges, source, target, updateNodeInternals]
   );
 
   const pickSeg = useCallback(
@@ -400,7 +563,7 @@ export function ErRelationEdge({
   );
 
   const startDrag = useCallback(
-    (event: React.PointerEvent, forcedSeg?: number) => {
+    (event: React.PointerEvent, forcedSeg?: number, endpoint?: "from" | "to") => {
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
@@ -443,20 +606,63 @@ export function ErRelationEdge({
         const zoom = getZoom() || 1;
         const dx = (ev.clientX - event.clientX) / zoom;
         const dy = (ev.clientY - event.clientY) / zoom;
-        const next = { ...origin };
-        const last = pts.length - 2;
-        if (horiz) {
-          if (seg === 0) next.fromYOffset = origin.fromYOffset + dy;
-          else if (seg === last) next.toYOffset = origin.toYOffset + dy;
-          else next.pathOffset = origin.pathOffset + dy;
-        } else if (seg === 0) {
-          next.fromXOffset = origin.fromXOffset + dx;
-          if (isLR(d.fromSide)) next.pathOffset = origin.pathOffset + dx;
-        } else if (seg === last) {
-          next.toXOffset = origin.toXOffset + dx;
-          if (isLR(d.toSide) && isLR(d.fromSide)) next.pathOffset = origin.pathOffset + dx;
+        const flowPos = screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+        const next: EdgePathLayout = { ...origin };
+        const edgeLock = 24 / zoom;
+
+        const fromSide0 = origin.fromSide ?? d.fromSide ?? "R";
+        const toSide0 = origin.toSide ?? d.toSide ?? "L";
+        const fromBox = getNodeBox(sourceNode, source);
+        const toBox = getNodeBox(targetNode, target);
+
+        if (endpoint === "from") {
+          const newSide = nearestSideOrKeep(
+            fromBox,
+            flowPos.x,
+            flowPos.y,
+            fromSide0,
+            edgeLock
+          );
+          next.fromSide = newSide;
+          if (newSide === fromSide0) {
+            Object.assign(next, slideEndpointOnSide(fromSide0, origin, dx, dy, "from"));
+          } else {
+            const snap = snapAttachment(fromBox, flowPos.x, flowPos.y, newSide, edgeLock);
+            next.fromYOffset = snap.yOffset;
+            next.fromXOffset = snap.xOffset;
+            next.pathOffset = 0;
+            next.pathOffsetV = 0;
+          }
+        } else if (endpoint === "to") {
+          const newSide = nearestSideOrKeep(
+            toBox,
+            flowPos.x,
+            flowPos.y,
+            toSide0,
+            edgeLock
+          );
+          next.toSide = newSide;
+          if (newSide === toSide0) {
+            Object.assign(next, slideEndpointOnSide(toSide0, origin, dx, dy, "to"));
+          } else {
+            const snap = snapAttachment(toBox, flowPos.x, flowPos.y, newSide, edgeLock);
+            next.toYOffset = snap.yOffset;
+            next.toXOffset = snap.xOffset;
+            next.pathOffset = 0;
+            next.pathOffsetV = 0;
+          }
         } else {
-          next.pathOffset = origin.pathOffset + dx;
+          applyBodySegmentDrag(
+            next,
+            origin,
+            fromSide0,
+            toSide0,
+            seg,
+            pts.length - 1,
+            horiz,
+            dx,
+            dy
+          );
         }
         commitLayout(next, persist);
       };
@@ -509,6 +715,10 @@ export function ErRelationEdge({
       screenToFlowPosition,
       selected,
       setEdges,
+      source,
+      target,
+      sourceNode,
+      targetNode,
     ]
   );
 
@@ -518,7 +728,9 @@ export function ErRelationEdge({
     const seg = pickSeg(p);
     const a = pts[seg];
     const b = pts[seg + 1] || pts[seg];
-    setCursor(isHoriz(a, b) ? "ns-resize" : "ew-resize");
+    const fs = layout.fromSide ?? d.fromSide ?? "R";
+    const ts = layout.toSide ?? d.toSide ?? "L";
+    setCursor(segmentDragCursor(fs, ts, isHoriz(a, b)));
   };
 
   return (
@@ -563,6 +775,34 @@ export function ErRelationEdge({
             prev={pts[pts.length - 2]}
             kind={marks.to}
             color={color}
+          />
+        </>
+      ) : null}
+      {selected ? (
+        <>
+          <TableAttachmentGuides
+            node={sourceNode}
+            nodeId={source}
+            activeSide={layout.fromSide ?? d.fromSide ?? "R"}
+            accent="#7eb6ff"
+          />
+          <TableAttachmentGuides
+            node={targetNode}
+            nodeId={target}
+            activeSide={layout.toSide ?? d.toSide ?? "L"}
+            accent="#ffb86b"
+          />
+          <EndpointGrip
+            cx={pts[0]?.x ?? 0}
+            cy={pts[0]?.y ?? 0}
+            color="#7eb6ff"
+            onPointerDown={(e) => startDrag(e, 0, "from")}
+          />
+          <EndpointGrip
+            cx={pts[pts.length - 1]?.x ?? 0}
+            cy={pts[pts.length - 1]?.y ?? 0}
+            color="#ffb86b"
+            onPointerDown={(e) => startDrag(e, pts.length - 2, "to")}
           />
         </>
       ) : null}

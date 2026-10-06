@@ -29,6 +29,8 @@ import {
   DEPLOY_SESSION_UPLOAD_HINT,
   isHeadedBrowserSessionAvailable,
   isPortalLikeBaseUrl,
+  LOGIN_SESSION_AUTO_CONNECTED_MSG,
+  LOGIN_SESSION_REAPPLY_MSG,
   loginSessionModeForTargetUrl,
   validateWqSessionJob,
   validateWqSessionJobDetailed,
@@ -610,6 +612,26 @@ function friendlySessionError(msg: string): string {
       "(Render API에 PORTAL_PASSWORD가 Vercel과 동일하게 설정되어 있어야 합니다.)"
     );
   }
+  const upper = msg.toUpperCase();
+  if (
+    upper.includes("ERR_CONNECTION_TIMED_OUT") ||
+    upper.includes("ERR_TIMED_OUT") ||
+    (upper.includes("TIMEOUT") && (upper.includes("GOTO") || upper.includes("NAVIGAT") || msg.includes("연결 시간")))
+  ) {
+    return (
+      "접속 URL에 연결할 수 없습니다 (연결 시간 초과). " +
+      "대상 서버·VPN·방화벽을 확인하거나 「세션 JSON 업로드」를 사용하세요."
+    );
+  }
+  if (upper.includes("ERR_CONNECTION_REFUSED") || upper.includes("ECONNREFUSED")) {
+    return (
+      "접속 URL에 연결할 수 없습니다 (연결 거부). " +
+      "대상 서버가 실행 중인지 확인하거나 「세션 JSON 업로드」를 사용하세요."
+    );
+  }
+  if (upper.includes("ERR_NAME_NOT_RESOLVED") || upper.includes("ENOTFOUND")) {
+    return "접속 URL 호스트를 찾을 수 없습니다. URL을 확인하세요.";
+  }
   return msg;
 }
 
@@ -1103,6 +1125,7 @@ export default function WebQualityPage() {
   const modeRef = useRef<ScanMode>(mode);
   const [pageUrl, setPageUrl] = useState("");
   const [needLogin, setNeedLogin] = useState(false);
+  const [ipmsNeedLogin, setIpmsNeedLogin] = useState(false);
   const [ipmsUrl, setIpmsUrl] = useState(IPMS_DEFAULT_URL);
   const [accessPublic, setAccessPublic] = useState(true);
   const [accessAuth, setAccessAuth] = useState(true);
@@ -1116,6 +1139,8 @@ export default function WebQualityPage() {
   const activeSessionKeyRef = useRef("");
   const externalDiscoverGenRef = useRef(0);
   const [sessionProgress, setSessionProgress] = useState<WqJobProgress | null>(null);
+  const [sessionPanelMsg, setSessionPanelMsg] = useState("");
+  const [sessionPanelTone, setSessionPanelTone] = useState<"ok" | "warn" | "err">("err");
   const [discoverProgress, setDiscoverProgress] = useState<WqJobProgress | null>(null);
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [javaZipExtractCount, setJavaZipExtractCount] = useState<number | null>(null);
@@ -1136,7 +1161,6 @@ export default function WebQualityPage() {
   const [externalSourceApplyMsg, setExternalSourceApplyMsg] = useState("");
   const [externalSourceApplyTone, setExternalSourceApplyTone] = useState<"ok" | "warn" | "err">("ok");
   const [appliedPageUrl, setAppliedPageUrl] = useState("");
-  const [externalRediscoverAfterLogin, setExternalRediscoverAfterLogin] = useState(false);
   const [externalLinkItems, setExternalLinkItems] = useState<ExternalLinkItem[]>([]);
   const [selectedLinkUrls, setSelectedLinkUrls] = useState<string[]>([]);
   const [linkListBaseUrl, setLinkListBaseUrl] = useState("");
@@ -1251,6 +1275,7 @@ export default function WebQualityPage() {
     setMode(next);
     if (opts?.includeRuntime !== undefined) setIncludeRuntime(opts.includeRuntime);
     setMsg("");
+    clearSessionPanelMsg();
     if (!anyScanBusy) {
       setDesignCheck(IDLE_CHECK);
       setSessionProgress(null);
@@ -1269,6 +1294,7 @@ export default function WebQualityPage() {
         setSessionJobId(persisted.jobId);
         setSessionPageUrl(persisted.pageUrl);
         setIpmsLoginStatus("ok");
+        setIpmsNeedLogin(true);
       } else {
         setSessionJobId("");
         setSessionPageUrl("");
@@ -1698,29 +1724,77 @@ export default function WebQualityPage() {
     throw new Error("하위 URL 목록 시간 초과");
   }
 
-  const resetExternalScenarioResultsForApply = useCallback((urlNorm: string) => {
-    const appliedNorm = appliedPageUrl ? normalizeWqPageUrl(appliedPageUrl) : "";
-    if (appliedNorm && appliedNorm === urlNorm && scenarioLoaded && scenarios.length > 0) {
-      return false;
-    }
-    externalCacheRef.current = null;
-    setScenarios([]);
-    setSelectedIds([]);
-    setScenarioLoaded(false);
-    setLastScenarioPayload(null);
-    setScenarioWarnings([]);
-    setJavaStaticHint("");
-    setPreviewItems([]);
-    setPreviewMsg("");
-    setPreviewMsgTone("ok");
-    setExtractable(false);
+  const clearDiagnosisResultsForMode = useCallback((scanMode: ScanMode) => {
     setResultsByMode((prev) => {
-      if (!prev.external) return prev;
-      const { external: _removed, ...rest } = prev;
-      return rest;
+      if (!prev[scanMode]) return prev;
+      const next = { ...prev };
+      delete next[scanMode];
+      return next;
     });
-    return true;
-  }, [appliedPageUrl, scenarioLoaded, scenarios.length]);
+    setJobIdsByMode((prev) => {
+      if (!prev[scanMode]) return prev;
+      const next = { ...prev };
+      delete next[scanMode];
+      return next;
+    });
+    if (modeRef.current === scanMode) {
+      setTab("all");
+      setQuery("");
+      setCaptureFocusId(null);
+    }
+  }, []);
+
+  const resetExternalScenarioResultsForApply = useCallback(
+    (urlNorm: string) => {
+      clearDiagnosisResultsForMode("external");
+      const appliedNorm = appliedPageUrl ? normalizeWqPageUrl(appliedPageUrl) : "";
+      if (appliedNorm && appliedNorm === urlNorm && scenarioLoaded && scenarios.length > 0) {
+        return false;
+      }
+      externalCacheRef.current = null;
+      setScenarios([]);
+      setSelectedIds([]);
+      setScenarioLoaded(false);
+      setLastScenarioPayload(null);
+      setScenarioWarnings([]);
+      setJavaStaticHint("");
+      setPreviewItems([]);
+      setPreviewMsg("");
+      setPreviewMsgTone("ok");
+      setExtractable(false);
+      return true;
+    },
+    [appliedPageUrl, scenarioLoaded, scenarios.length, clearDiagnosisResultsForMode],
+  );
+
+  const notifyLoginSessionReapply = useCallback(
+    (opts?: { jobId?: string; autoConnected?: boolean }) => {
+      const id = opts?.jobId?.trim() || "upload";
+      setSessionProgress({
+        job_id: id,
+        status: "done",
+        pct: 100,
+        message: opts?.autoConnected ? LOGIN_SESSION_AUTO_CONNECTED_MSG : LOGIN_SESSION_REAPPLY_MSG,
+      });
+      setSessionPanelMsg("");
+      setMsg("");
+    },
+    [],
+  );
+
+  function showSessionPanelMsg(text: string, tone: "ok" | "warn" | "err" = "err") {
+    setSessionPanelMsg(text);
+    setSessionPanelTone(tone);
+    setMsg("");
+  }
+
+  function clearSessionPanelMsg() {
+    setSessionPanelMsg("");
+  }
+
+  const sessionPanelInlineMsg = sessionPanelMsg ? (
+    <p className={`msg wq-session-panel-msg ${sessionPanelTone}`}>{sessionPanelMsg}</p>
+  ) : null;
 
   const loadExternalLinkList = useCallback(async () => {
     const url = pageUrl.trim();
@@ -1943,14 +2017,6 @@ export default function WebQualityPage() {
     linkListBaseUrl,
     resetExternalScenarioResultsForApply,
   ]);
-
-  useEffect(() => {
-    if (!externalRediscoverAfterLogin || !externalSessionReady || mode !== "external" || !needLogin) {
-      return;
-    }
-    setExternalRediscoverAfterLogin(false);
-    setMsg("로그인 세션 생성 완료 — 「적용」을 눌러 시나리오를 가져오세요.");
-  }, [externalRediscoverAfterLogin, externalSessionReady, mode, needLogin]);
 
   const clearJavaUploadArtifacts = useCallback((opts?: { keepZip?: boolean }) => {
     if (!opts?.keepZip) {
@@ -2183,9 +2249,11 @@ export default function WebQualityPage() {
     }
     const key = javaZipKey(file);
     if (!force && key === javaZipResolvedKeyRef.current) {
+      clearDiagnosisResultsForMode("java-upload");
       setJavaZipBusy(false);
       return;
     }
+    clearDiagnosisResultsForMode("java-upload");
     setJavaZipBusy(true);
     setScenarioLoaded(false);
     setJavaNeedLogin(false);
@@ -2228,7 +2296,7 @@ export default function WebQualityPage() {
     } finally {
       setJavaZipBusy(false);
     }
-  }, [applyScenarioPayload, zipFile]);
+  }, [applyScenarioPayload, zipFile, clearDiagnosisResultsForMode]);
 
   const handleJavaZipChange = useCallback(
     (file: File) => {
@@ -2433,28 +2501,28 @@ export default function WebQualityPage() {
           setIpmsLoginStatus("fail");
           setSessionStorageFile(null);
           activeSessionKeyRef.current = "";
-          setMsg(result.message || "로그인 실패");
+          showSessionPanelMsg(friendlySessionError(result.message || "로그인 실패"));
           return;
         }
         activeSessionKeyRef.current = fileKey;
         setSessionPageUrl(baseUrl);
         setIpmsLoginStatus("ok");
-        setMsg("");
+        notifyLoginSessionReapply();
       } catch (e) {
         setIpmsLoginStatus("fail");
         setSessionStorageFile(null);
         activeSessionKeyRef.current = "";
-        setMsg(String((e as Error).message || "로그인 실패"));
+        showSessionPanelMsg(friendlySessionError(String((e as Error).message || "로그인 실패")));
       }
     },
-    [ipmsUrl],
+    [ipmsUrl, notifyLoginSessionReapply],
   );
 
   const validateExternalSessionUpload = useCallback(
     async (file: File) => {
       const url = pageUrl.trim();
       if (!url) {
-        setMsg("진단 URL을 입력하세요.");
+        showSessionPanelMsg("진단 URL을 입력하세요.");
         return;
       }
       const regErr = registeredTargetUrlError(url);
@@ -2480,34 +2548,33 @@ export default function WebQualityPage() {
           setExternalLoginStatus("fail");
           setSessionStorageFile(null);
           activeSessionKeyRef.current = "";
-          setMsg(result.message || "로그인 실패");
+          showSessionPanelMsg(friendlySessionError(result.message || "로그인 실패"));
           return;
         }
         activeSessionKeyRef.current = fileKey;
         setExternalLoginStatus("ok");
-        setSessionProgress(null);
-        setMsg("");
+        notifyLoginSessionReapply();
       } catch (e) {
         setExternalLoginStatus("fail");
         setSessionStorageFile(null);
         activeSessionKeyRef.current = "";
-        setMsg(String((e as Error).message || "로그인 실패"));
+        showSessionPanelMsg(friendlySessionError(String((e as Error).message || "로그인 실패")));
       }
     },
-    [pageUrl],
+    [pageUrl, notifyLoginSessionReapply],
   );
 
   const validateJavaSessionUpload = useCallback(
     async (file: File) => {
       const url = javaBaseUrl.trim();
       if (!isValidDeployUrl(url)) {
-        setMsg("배포 URL(http:// 또는 https://)을 입력하세요.");
+        showSessionPanelMsg("배포 URL(http:// 또는 https://)을 입력하세요.");
         return;
       }
       const regErr = registeredTargetUrlError(url);
       if (regErr) {
         setJavaLoginStatus("fail");
-        setMsg(regErr);
+        showSessionPanelMsg(regErr);
         return;
       }
       const fileKey = `${file.name}:${file.size}:${file.lastModified}`;
@@ -2527,22 +2594,21 @@ export default function WebQualityPage() {
           setJavaLoginStatus("fail");
           setSessionStorageFile(null);
           activeSessionKeyRef.current = "";
-          setMsg(result.message || "로그인 실패");
+          showSessionPanelMsg(friendlySessionError(result.message || "로그인 실패"));
           return;
         }
         activeSessionKeyRef.current = fileKey;
         setJavaLoginStatus("ok");
         if (isStoredIpmsUrl(url)) setIpmsLoginStatus("ok");
-        setSessionProgress(null);
-        setMsg("");
+        notifyLoginSessionReapply();
       } catch (e) {
         setJavaLoginStatus("fail");
         setSessionStorageFile(null);
         activeSessionKeyRef.current = "";
-        setMsg(String((e as Error).message || "로그인 실패"));
+        showSessionPanelMsg(friendlySessionError(String((e as Error).message || "로그인 실패")));
       }
     },
-    [javaBaseUrl],
+    [javaBaseUrl, notifyLoginSessionReapply],
   );
 
   const fetchIpmsScenarioResolve = useCallback(
@@ -2576,6 +2642,7 @@ export default function WebQualityPage() {
         setMsg("공개·로그인 시나리오 중 하나 이상 체크하세요.");
         return;
       }
+      clearDiagnosisResultsForMode("ipms-online");
       setScenarioBusy(true);
       try {
         const [urlJ, zipJ] = await Promise.all([
@@ -2604,7 +2671,7 @@ export default function WebQualityPage() {
         setScenarioBusy(false);
       }
     },
-    [accessPublic, accessAuth, fetchIpmsScenarioResolve],
+    [accessPublic, accessAuth, fetchIpmsScenarioResolve, clearDiagnosisResultsForMode],
   );
 
   const loadIpmsScenarios = useCallback(
@@ -2635,6 +2702,7 @@ export default function WebQualityPage() {
         return;
       }
 
+      clearDiagnosisResultsForMode("ipms-online");
       setScenarioBusy(true);
       setScenarioLoaded(false);
       setIpmsUrlApplyMsg("");
@@ -2703,11 +2771,13 @@ export default function WebQualityPage() {
       sessionJobId,
       sessionStorageFile,
       ipmsLoginStatus,
+      clearDiagnosisResultsForMode,
     ],
   );
 
   const applyPendingIpmsScenarioRefresh = useCallback(() => {
     if (!pendingZipPayload) return;
+    clearDiagnosisResultsForMode("ipms-online");
     if (lastScenarioPayload && scenarios.length) {
       saveScenarioBackup({
         savedAt: new Date().toISOString(),
@@ -2746,6 +2816,7 @@ export default function WebQualityPage() {
     accessPublic,
     accessAuth,
     ipmsLoginStatus,
+    clearDiagnosisResultsForMode,
   ]);
 
   const cancelPendingIpmsScenarioRefresh = useCallback(() => {
@@ -2842,7 +2913,7 @@ export default function WebQualityPage() {
   }, [pageUrl, mode, sessionPageUrl]);
 
   useEffect(() => {
-    if (!isIpmsMode(mode) || !accessAuth || !ipmsEnabled || !ipmsUnlocked) return;
+    if (!isIpmsMode(mode) || !ipmsNeedLogin || !ipmsEnabled || !ipmsUnlocked) return;
     const url = (ipmsUrl.trim() || IPMS_DEFAULT_URL).trim();
     if (sessionStorageFile) return;
     const persisted = loadWqIpmsBrowserSession();
@@ -2890,12 +2961,7 @@ export default function WebQualityPage() {
         setSessionScope("ipms");
         setIpmsLoginStatus("ok");
         setExternalLoginStatus("none");
-        setSessionProgress({
-          job_id: persisted.jobId,
-          status: "done",
-          pct: 100,
-          message: "기존 로그인 세션 자동 연결",
-        });
+        notifyLoginSessionReapply({ jobId: persisted.jobId, autoConnected: true });
       } catch {
         if (!cancelled) {
           clearWqIpmsBrowserSession();
@@ -2909,13 +2975,14 @@ export default function WebQualityPage() {
     };
   }, [
     mode,
-    accessAuth,
+    ipmsNeedLogin,
     ipmsEnabled,
     ipmsUnlocked,
     ipmsUrl,
     sessionJobId,
     sessionStorageFile,
     ipmsLoginStatus,
+    notifyLoginSessionReapply,
   ]);
 
   useEffect(() => {
@@ -2955,12 +3022,7 @@ export default function WebQualityPage() {
         setSessionPageUrl(persisted.pageUrl);
         setIpmsLoginStatus("none");
         setExternalLoginStatus("ok");
-        setSessionProgress({
-          job_id: persisted.jobId,
-          status: "done",
-          pct: 100,
-          message: "기존 로그인 세션 자동 연결",
-        });
+        notifyLoginSessionReapply({ jobId: persisted.jobId, autoConnected: true });
       } catch {
         if (!cancelled) {
           clearWqExternalBrowserSession();
@@ -2972,7 +3034,7 @@ export default function WebQualityPage() {
     return () => {
       cancelled = true;
     };
-  }, [mode, needLogin, pageUrl, sessionJobId, sessionStorageFile]);
+  }, [mode, needLogin, pageUrl, sessionJobId, sessionStorageFile, notifyLoginSessionReapply]);
 
   useEffect(() => {
     if (mode !== "java-upload") return;
@@ -3022,12 +3084,7 @@ export default function WebQualityPage() {
         } else {
           setIpmsLoginStatus("none");
         }
-        setSessionProgress({
-          job_id: persisted.jobId,
-          status: "done",
-          pct: 100,
-          message: "기존 로그인 세션 자동 연결",
-        });
+        notifyLoginSessionReapply({ jobId: persisted.jobId, autoConnected: true });
       } catch {
         if (!cancelled) {
           clearWqJavaBrowserSession();
@@ -3048,6 +3105,7 @@ export default function WebQualityPage() {
     sessionPageUrl,
     sessionStorageFile,
     javaLoginStatus,
+    notifyLoginSessionReapply,
   ]);
 
   async function tryReconnectBrowserSession(
@@ -3122,13 +3180,7 @@ export default function WebQualityPage() {
         setIpmsLoginStatus("none");
         setJavaLoginStatus("none");
       }
-      setSessionProgress({
-        job_id: persisted.jobId,
-        status: "done",
-        pct: 100,
-        message: "기존 로그인 세션 자동 연결",
-      });
-      setMsg("");
+      notifyLoginSessionReapply({ jobId: persisted.jobId, autoConnected: true });
       return true;
     } catch {
       setSessionProgress(null);
@@ -3181,7 +3233,7 @@ export default function WebQualityPage() {
               ? validateMsg ||
                 "포털 자동 로그인 검증 실패 — Render API PORTAL_PASSWORD를 Vercel과 동일하게 설정하세요."
               : "";
-          setMsg(
+          showSessionPanelMsg(
             portalHint ||
               (saveAs === "external"
                 ? validateMsg ||
@@ -3198,7 +3250,7 @@ export default function WebQualityPage() {
           setIpmsLoginStatus("ok");
           activeSessionKeyRef.current = `job:${jobId}`;
           saveWqIpmsBrowserSession(jobId, targetUrl.trim());
-          setMsg("");
+          notifyLoginSessionReapply({ jobId });
           return;
         }
         if (saveAs === "java") {
@@ -3208,14 +3260,13 @@ export default function WebQualityPage() {
           else setIpmsLoginStatus("none");
           setExternalLoginStatus("none");
           saveWqJavaBrowserSession(jobId, targetUrl.trim());
-          setMsg("");
+          notifyLoginSessionReapply({ jobId });
           return;
         }
         saveWqExternalBrowserSession(jobId, targetUrl.trim());
         setExternalLoginStatus("ok");
         setIpmsLoginStatus("none");
-        setExternalRediscoverAfterLogin(true);
-        setMsg("");
+        notifyLoginSessionReapply({ jobId });
         return;
       }
       if (j.status === "error") {
@@ -3244,7 +3295,7 @@ export default function WebQualityPage() {
           setExternalLoginStatus("fail");
           clearWqExternalBrowserSession();
         }
-        setMsg(friendlySessionError(errMsg));
+        showSessionPanelMsg(friendlySessionError(errMsg));
         return;
       }
       if (j.status === "cancelled") {
@@ -3257,7 +3308,7 @@ export default function WebQualityPage() {
         } else {
           setExternalLoginStatus("none");
         }
-        setMsg("로그인 세션이 취소되었습니다.");
+        showSessionPanelMsg("로그인 세션이 취소되었습니다.", "warn");
         return;
       }
       await new Promise((r) => setTimeout(r, 800));
@@ -3296,6 +3347,7 @@ export default function WebQualityPage() {
       message: "브라우저 실행 요청 중…",
     });
     setMsg("");
+    clearSessionPanelMsg();
     try {
       const fd = new FormData();
       fd.append("page_url", targetUrl.trim());
@@ -3332,7 +3384,7 @@ export default function WebQualityPage() {
       } else {
         setExternalLoginStatus("fail");
       }
-      setMsg(friendlySessionError(errMsg));
+      showSessionPanelMsg(friendlySessionError(errMsg));
     }
   }
 
@@ -3340,12 +3392,12 @@ export default function WebQualityPage() {
     const url = (ipmsUrl.trim() || IPMS_DEFAULT_URL).trim();
     const regErr = registeredTargetUrlError(url);
     if (regErr) {
-      setMsg(regErr);
+      showSessionPanelMsg(regErr);
       setIpmsLoginStatus("fail");
       return;
     }
     if (!isHeadedBrowserSessionAvailable(url)) {
-      setMsg(DEPLOY_SESSION_UPLOAD_HINT);
+      showSessionPanelMsg(DEPLOY_SESSION_UPLOAD_HINT, "warn");
       setIpmsLoginStatus("fail");
       return;
     }
@@ -3361,7 +3413,7 @@ export default function WebQualityPage() {
   async function startExternalSession() {
     const url = pageUrl.trim();
     if (!url) {
-      setMsg("진단 URL을 입력하세요.");
+      showSessionPanelMsg("진단 URL을 입력하세요.");
       return;
     }
     const regErr = registeredTargetUrlError(url);
@@ -3373,7 +3425,7 @@ export default function WebQualityPage() {
       return;
     }
     if (!isHeadedBrowserSessionAvailable(url)) {
-      setMsg(DEPLOY_SESSION_UPLOAD_HINT);
+      showSessionPanelMsg(DEPLOY_SESSION_UPLOAD_HINT, "warn");
       setExternalLoginStatus("fail");
       return;
     }
@@ -3392,17 +3444,17 @@ export default function WebQualityPage() {
   async function startJavaSession() {
     const url = javaBaseUrl.trim();
     if (!isValidDeployUrl(url)) {
-      setMsg("배포 URL(http:// 또는 https://)을 입력하세요.");
+      showSessionPanelMsg("배포 URL(http:// 또는 https://)을 입력하세요.");
       return;
     }
     const regErr = registeredTargetUrlError(url);
     if (regErr) {
-      setMsg(regErr);
+      showSessionPanelMsg(regErr);
       setJavaLoginStatus("fail");
       return;
     }
     if (!isHeadedBrowserSessionAvailable(url)) {
-      setMsg(DEPLOY_SESSION_UPLOAD_HINT);
+      showSessionPanelMsg(DEPLOY_SESSION_UPLOAD_HINT, "warn");
       setJavaLoginStatus("fail");
       return;
     }
@@ -4800,11 +4852,26 @@ export default function WebQualityPage() {
                 로그인 (민원·내정보)
               </label>
             </div>
-            {accessAuth ? (
+            <label className="check-row" style={{ marginTop: "0.75rem" }}>
+              <input
+                type="checkbox"
+                checked={ipmsNeedLogin}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setIpmsNeedLogin(checked);
+                  if (checked) {
+                    const url = (ipmsUrl.trim() || IPMS_DEFAULT_URL).trim();
+                    setLoginSessionMode(url ? loginSessionModeForTargetUrl(url) : "browser");
+                  }
+                }}
+              />
+              로그인 필요
+            </label>
+            {ipmsNeedLogin ? (
+              <>
               <fieldset
                 className={`wq-runtime-block wq-session-fieldset${hasIpmsSession ? " is-ready" : " is-pending"}`}
                 style={{ marginTop: "0.75rem" }}
-                disabled={!accessAuth}
               >
                 <legend className="hint" style={{ marginBottom: "0.5rem" }}>
                   <strong>로그인 세션</strong>
@@ -4852,7 +4919,6 @@ export default function WebQualityPage() {
                           type="button"
                           className="btn"
                           disabled={
-                            !accessAuth ||
                             !ipmsBrowserSessionAvailable ||
                             scopedSessionProgress?.status === "running" ||
                             scopedSessionProgress?.status === "queued"
@@ -4911,7 +4977,6 @@ export default function WebQualityPage() {
                         <input
                           type="file"
                           accept=".json,application/json"
-                          disabled={!accessAuth}
                           onChange={(e) => {
                             const file = e.target.files?.[0] ?? null;
                             if (!file) {
@@ -4935,6 +5000,8 @@ export default function WebQualityPage() {
                   ) : null}
                 </div>
               </fieldset>
+              {sessionPanelInlineMsg}
+              </>
             ) : null}
           </div>
         ) : mode === "java-upload" ? (
@@ -5334,6 +5401,7 @@ export default function WebQualityPage() {
                 </div>
               </fieldset>
             ) : null}
+            {needLogin ? sessionPanelInlineMsg : null}
           </div>
         )}
 
@@ -5500,6 +5568,7 @@ export default function WebQualityPage() {
               </fieldset>
           </div>
         ) : null}
+        {javaLoginPanelVisible ? sessionPanelInlineMsg : null}
 
         <label
           className="check-row"
@@ -5672,10 +5741,15 @@ export default function WebQualityPage() {
         !(mode === "java-upload" && javaNeedLogin && javaSessionReady && msg === "로그인 완료") &&
         !(
           isIpmsMode(mode) &&
-          accessAuth &&
+          ipmsNeedLogin &&
           ipmsLoginStatus === "ok" &&
-          msg === "로그인 완료"
-        ) ? (
+          (msg === "로그인 완료" ||
+            msg === LOGIN_SESSION_REAPPLY_MSG ||
+            msg === LOGIN_SESSION_AUTO_CONNECTED_MSG)
+        ) &&
+        msg !== LOGIN_SESSION_REAPPLY_MSG &&
+        msg !== LOGIN_SESSION_AUTO_CONNECTED_MSG &&
+        !sessionPanelMsg ? (
           <p className={`msg ${msg.includes("완료") || msg.includes("시나리오") ? "ok" : "err"}`}>
             {msg}
           </p>

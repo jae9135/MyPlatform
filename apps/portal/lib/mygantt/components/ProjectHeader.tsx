@@ -253,7 +253,7 @@ export function ProjectHeader({
         </button>
         <a
           className="btn"
-          href={encodeURI("/samples/my-gantt/일정계획_템플릿.xlsx")}
+          href={encodeURI("/samples/my-gantt/Gantt_샘플.xlsx")}
           download
         >
           템플릿

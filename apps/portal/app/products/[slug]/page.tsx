@@ -44,13 +44,12 @@ export default function ProductPage({ params }: Props) {
 
   return (
     <MarketingPageShell>
-      {isReceipt ? (
-        <p className="mkt-eyebrow">STANDALONE · MOBILE</p>
-      ) : tool ? (
-        <p className="mkt-eyebrow">{tool.categoryLabel.toUpperCase()}</p>
-      ) : null}
-
       <div className="mkt-product-hero">
+        {isReceipt ? (
+          <p className="mkt-eyebrow">STANDALONE · MOBILE</p>
+        ) : tool ? (
+          <p className="mkt-eyebrow">{tool.categoryLabel.toUpperCase()}</p>
+        ) : null}
         <h1>{product.tagline}</h1>
         <p className="mkt-product-tagline">{product.name}</p>
         <p className="mkt-product-desc">{product.description}</p>

@@ -934,7 +934,7 @@ export default function ChkDbStdPage() {
       <section className="panel">
         <h3>점검 실행</h3>
         <p className="hint">
-          API: <code>{API_BASE}</code> · 표준단어·표준용어·표준도메인은{" "}
+          표준단어·표준용어·표준도메인은{" "}
           <strong>동일한 테이블정의서</strong>를 사용합니다. 표준코드는{" "}
           <strong>코드정의서 Excel</strong>을 별도로 선택하세요. 종류를 바꾸면
           형식을 자동 확인하고, 이미 실행한 점검 결과가 있으면 다시 실행하지

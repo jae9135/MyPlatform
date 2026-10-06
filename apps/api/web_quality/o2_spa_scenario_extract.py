@@ -23,7 +23,7 @@ ImportMap = dict[str, str]
 GroupConfig = tuple[str, str]  # (ul_id, import_alias)
 
 
-def _fetch_text(url: str, *, timeout: int = 25) -> str:
+def _fetch_text(url: str, *, timeout: int = 8) -> str:
     req = Request(url.strip(), headers={"User-Agent": "MyPlatform-WQ/1.0"})
     with urlopen(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8", "replace")
@@ -339,6 +339,22 @@ def extract_o2_spa_from_base_url(base_url: str) -> tuple[list[ScenarioCandidate]
             text = _fetch_text(menutree_url)
         except Exception as e:
             errors.append(f"{menutree_url}: {e}")
+            # 호스트 연결 실패 시 동일 origin 추가 경로 재시도로 시간만 소모 — 즉시 fallback
+            err_l = str(e).lower()
+            if any(
+                x in err_l
+                for x in (
+                    "timed out",
+                    "timeout",
+                    "connection refused",
+                    "connection reset",
+                    "name or service not known",
+                    "nodename nor servname",
+                    "getaddrinfo",
+                    "unreachable",
+                )
+            ):
+                break
             continue
 
         import_map = parse_import_map(text)
@@ -351,7 +367,7 @@ def extract_o2_spa_from_base_url(base_url: str) -> tuple[list[ScenarioCandidate]
         def loader(_ul_id: str, rel_import: str) -> str | None:
             config_url = urljoin(menutree_base, rel_import)
             try:
-                return _fetch_text(config_url)
+                return _fetch_text(config_url, timeout=5)
             except Exception:
                 return None
 

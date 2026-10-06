@@ -9,6 +9,14 @@ export const DEPLOY_SESSION_UPLOAD_HINT =
 export const DEPLOY_PORTAL_AUTO_LOGIN_HINT =
   "Vercel 등 배포 포털 URL은 API가 포털 암호(PORTAL_PASSWORD)로 자동 로그인합니다. 이 PC에 Chromium 창은 뜨지 않습니다.";
 
+/** 로그인 세션 준비 후 — 로그인 화면 시나리오 재탐색 안내 (웹 품질 · 성능 진단 공통) */
+export const LOGIN_SESSION_REAPPLY_MSG =
+  "로그인 완료 — 「적용」을 눌러 로그인 화면 시나리오를 다시 가져오세요.";
+
+/** 저장된 세션 자동 연결 시 progress bar 안내 */
+export const LOGIN_SESSION_AUTO_CONNECTED_MSG =
+  "기존 로그인 세션 자동 연결 — 「적용」을 눌러 로그인 화면 시나리오를 가져오세요.";
+
 export function isIpmsDeployUrl(url: string): boolean {
   return url.trim().toLowerCase().includes("ipms.online");
 }

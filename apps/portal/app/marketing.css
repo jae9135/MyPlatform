@@ -1,21 +1,23 @@
+@import "./platform-light.css";
+
 .mkt {
-  --mkt-bg: #f4f7fb;
+  --mkt-bg: var(--pl-bg);
   --mkt-panel: #ffffff;
   --mkt-panel-2: #f8fafc;
-  --mkt-line: #e2e8f0;
-  --mkt-line-strong: #cbd5e1;
-  --mkt-text: #0f172a;
-  --mkt-text-dim: #64748b;
+  --mkt-line: var(--pl-line);
+  --mkt-line-strong: var(--pl-line-strong);
+  --mkt-text: var(--pl-text);
+  --mkt-text-dim: var(--pl-muted);
   --mkt-text-dimmer: #94a3b8;
-  --mkt-accent: #2563eb;
-  --mkt-accent-dark: #1e40af;
-  --mkt-accent-dim: #eff6ff;
-  --mkt-accent-soft: #edf2ff;
-  --mkt-cyan: var(--mkt-accent);
-  --mkt-cyan-dim: rgba(37, 99, 235, 0.12);
-  --mkt-amber: #d97706;
-  --mkt-green: #059669;
-  --mkt-red: #dc2626;
+  --mkt-accent: var(--pl-accent);
+  --mkt-accent-dark: var(--pl-accent-hover);
+  --mkt-accent-dim: var(--pl-accent-soft);
+  --mkt-accent-soft: var(--pl-accent-soft);
+  --mkt-cyan: var(--pl-accent);
+  --mkt-cyan-dim: rgba(59, 130, 246, 0.12);
+  --mkt-amber: var(--pl-warn);
+  --mkt-green: var(--pl-ok);
+  --mkt-red: var(--pl-err);
   --mkt-teal: #047857;
   --mkt-font-mono: "IBM Plex Mono", "Consolas", monospace;
   background: var(--mkt-bg);
@@ -50,9 +52,8 @@
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--mkt-line);
+  background: var(--pl-header);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .mkt-navbar {
@@ -70,7 +71,7 @@
   font-weight: 800;
   font-size: 18px;
   text-decoration: none;
-  color: var(--mkt-accent-dark);
+  color: #fff;
   white-space: nowrap;
 }
 
@@ -84,19 +85,19 @@
 .mkt-brand-tag {
   font-family: var(--mkt-font-mono);
   font-size: 11px;
-  color: var(--mkt-accent-dark);
+  color: #93c5fd;
   font-weight: 600;
-  border: 1px solid #bfdbfe;
+  border: 1px solid rgba(147, 197, 253, 0.35);
   padding: 2px 8px;
   border-radius: 4px;
-  background: var(--mkt-accent-dim);
+  background: rgba(59, 130, 246, 0.15);
 }
 
 .mkt-links {
   display: flex;
   gap: 22px;
   font-size: 15px;
-  color: var(--mkt-text-dim);
+  color: #cbd5e1;
 }
 
 .mkt-links a {
@@ -105,7 +106,28 @@
 }
 
 .mkt-links a:hover {
-  color: var(--mkt-accent);
+  color: #fff;
+}
+
+.mkt-header .mkt-btn-ghost {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+.mkt-header .mkt-btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #fff;
+}
+
+.mkt-header .mkt-nav-toggle {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: transparent;
+}
+
+.mkt-header .mkt-nav-toggle span {
+  background: #fff;
 }
 
 .mkt-nav-actions {
@@ -140,7 +162,7 @@
   background: var(--mkt-accent);
   color: #fff;
   border-color: var(--mkt-accent);
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.28);
 }
 
 .mkt-btn-primary:hover {
@@ -1428,9 +1450,10 @@
 .mkt-panel {
   background: #fff;
   border: 1px solid var(--mkt-line);
-  border-radius: 12px;
+  border-radius: var(--pl-radius);
   padding: 22px;
   margin-bottom: 16px;
+  box-shadow: var(--pl-card-shadow);
 }
 
 .mkt-panel h2 {
@@ -1439,21 +1462,37 @@
 }
 
 .mkt-product-hero {
-  margin-bottom: 22px;
+  margin-bottom: 24px;
+  background: var(--pl-header);
+  color: #fff;
+  border-radius: var(--pl-radius-lg);
+  padding: 32px 28px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.mkt-product-hero .mkt-eyebrow {
+  color: #93c5fd;
+  margin-bottom: 12px;
+}
+
+.mkt-product-hero h1 {
+  color: #fff;
+  margin: 0 0 10px;
 }
 
 .mkt-product-tagline {
-  color: var(--mkt-accent);
+  color: #bfdbfe;
   font-size: 18px;
   font-weight: 600;
   margin: 0 0 10px;
 }
 
 .mkt-product-desc {
-  color: var(--mkt-text-dim);
+  color: #cbd5e1;
   max-width: 720px;
   margin: 0;
   font-size: 16px;
+  line-height: 1.55;
 }
 
 .mkt-product-layout {
@@ -1672,9 +1711,10 @@
 
 .mkt-feature-screen-item {
   border: 1px solid var(--mkt-line);
-  border-radius: 14px;
+  border-radius: var(--pl-radius);
   padding: 20px;
   background: #fff;
+  box-shadow: var(--pl-card-shadow);
 }
 
 .mkt-feature-screen-text {

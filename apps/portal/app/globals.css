@@ -1900,6 +1900,10 @@ button.wq-chip {
   margin: 0 0 0.75rem;
 }
 
+.wq-session-panel-msg {
+  margin: 0.5rem 0 0;
+}
+
 .wq-ipms-source-row:last-child {
   margin-bottom: 0;
 }
@@ -2641,12 +2645,6 @@ main.perf-page {
 
 .perf-scenario-summary-block h3 {
   margin-top: 0;
-}
-
-.perf-session-block {
-  margin-top: 0.75rem;
-  padding: 0.75rem 0;
-  border-top: 1px solid var(--line);
 }
 
 .perf-session-ready p {

@@ -1,0 +1,468 @@
+@import "../platform-light.css";
+
+/* /apps/* 프로그램 실행 화면 — 플랫폼 허브와 동일한 라이트 · 네이비 헤더 */
+.app-shell {
+  min-height: 100vh;
+  background: var(--pl-bg);
+  color: var(--pl-text);
+  font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+
+  --bg: var(--pl-bg);
+  --panel: var(--pl-surface);
+  --text: var(--pl-text);
+  --muted: var(--pl-muted);
+  --line: var(--pl-line);
+  --accent: var(--pl-accent);
+  --ok: var(--pl-ok);
+  --warn: var(--pl-warn);
+}
+
+.app-shell > .er-modeler-shell,
+.app-shell > .gantt-shell {
+  flex: 1;
+  min-height: 100vh;
+}
+
+/* --- 상단 네비 (전폭 네이비) --- */
+.app-shell .portal-nav-shell,
+.app-shell main > .portal-nav:first-child,
+.app-shell .er-modeler-shell-bar,
+.app-shell .gantt-shell-bar {
+  width: 100vw;
+  max-width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  background: var(--pl-header);
+  color: var(--pl-header-text);
+  box-sizing: border-box;
+}
+
+.app-shell .portal-nav-shell {
+  margin-bottom: 0;
+  padding: 0 max(24px, calc((100vw - min(1320px, 100vw - 48px)) / 2));
+}
+
+.app-shell main > .portal-nav:first-child {
+  margin-bottom: 0;
+  padding: 14px max(24px, calc((100vw - min(1320px, 100vw - 48px)) / 2));
+}
+
+.app-shell .er-modeler-shell-bar,
+.app-shell .gantt-shell-bar {
+  margin-top: 0;
+  padding: 12px max(24px, calc((100vw - min(1320px, 100vw - 48px)) / 2)) 8px;
+}
+
+.app-shell .portal-nav-shell .portal-nav,
+.app-shell .portal-nav {
+  margin-bottom: 0;
+  min-height: 48px;
+}
+
+.app-shell .portal-nav .back {
+  color: #cbd5e1;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.app-shell .portal-nav .back:hover {
+  color: #fff;
+}
+
+.app-shell .portal-nav .btn.ghost {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: transparent;
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
+.app-shell .portal-nav .btn.ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* --- 본문 레이아웃 --- */
+.app-shell main,
+.app-shell main.wq-page,
+.app-shell main.perf-page {
+  width: min(1320px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 0 0 64px;
+}
+
+.app-shell main > .portal-nav:first-child + .hero {
+  margin-top: 0;
+}
+
+.app-shell main.perf-page > .portal-nav:first-child {
+  margin-bottom: 0;
+}
+
+/* --- 히어로 (네이비 밴드) --- */
+.app-shell .hero {
+  width: 100vw;
+  max-width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  margin-bottom: 28px;
+  padding: 28px max(24px, calc((100vw - min(1320px, 100vw - 48px)) / 2)) 36px;
+  background: var(--pl-header);
+  color: var(--pl-header-text);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-sizing: border-box;
+}
+
+.app-shell .hero h1 {
+  margin: 0 0 10px;
+  font-size: clamp(26px, 4vw, 36px);
+  line-height: 1.25;
+  color: #fff;
+  letter-spacing: -0.02em;
+}
+
+.app-shell .hero p,
+.app-shell .perf-page .hero-lead {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 17px;
+  line-height: 1.55;
+  max-width: 720px;
+}
+
+.app-shell .badge-row,
+.app-shell .perf-badge-row {
+  margin-top: 16px;
+}
+
+.app-shell .badge,
+.app-shell .perf-badge {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+}
+
+.app-shell .perf-badge {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.35);
+  color: #bfdbfe;
+}
+
+/* --- 패널 · 카드 --- */
+.app-shell .panel {
+  margin-top: 18px;
+  background: var(--pl-surface);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--pl-radius-lg);
+  padding: 20px;
+  box-shadow: var(--pl-card-shadow);
+}
+
+.app-shell .panel h2,
+.app-shell .panel h3,
+.app-shell .wq-page .panel h2 {
+  color: var(--pl-text);
+}
+
+.app-shell .panel .hint,
+.app-shell .subhead {
+  color: var(--pl-muted);
+}
+
+.app-shell .card {
+  background: var(--pl-surface);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--pl-radius-lg);
+  box-shadow: var(--pl-card-shadow);
+}
+
+.app-shell .card:hover {
+  border-color: var(--pl-accent-border);
+  transform: translateY(-1px);
+}
+
+.app-shell .card p {
+  color: var(--pl-muted);
+}
+
+.app-shell .badge-link:hover {
+  color: var(--pl-text);
+  border-color: var(--pl-line-strong);
+  background: var(--pl-accent-soft);
+}
+
+.app-shell .status.beta {
+  color: var(--pl-warn);
+}
+
+.app-shell .status.live {
+  color: var(--pl-ok);
+}
+
+/* --- 버튼 · 탭 --- */
+.app-shell .btn {
+  background: var(--pl-accent);
+  color: #fff;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.app-shell .btn:hover:not(:disabled) {
+  background: var(--pl-accent-hover);
+}
+
+.app-shell .btn.ghost {
+  background: #fff;
+  border: 1px solid var(--pl-line-strong);
+  color: var(--pl-text);
+}
+
+.app-shell .portal-nav .btn.ghost {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+.app-shell .tab {
+  background: #fff;
+  border: 1px solid var(--pl-line);
+  color: var(--pl-text);
+}
+
+.app-shell .tab.active {
+  background: var(--pl-accent);
+  border-color: var(--pl-accent);
+  color: #fff;
+}
+
+.app-shell .tabs .tab:not(.active):hover,
+.app-shell .page-tabs .tab:not(.active):hover {
+  border-color: var(--pl-accent-border);
+  background: var(--pl-accent-soft);
+}
+
+/* --- 입력 --- */
+.app-shell input[type="text"],
+.app-shell input[type="password"],
+.app-shell input[type="url"],
+.app-shell input[type="number"],
+.app-shell input[type="search"],
+.app-shell select,
+.app-shell textarea {
+  background: #fff;
+  color: var(--pl-text);
+  border: 1px solid var(--pl-line-strong);
+  border-radius: 8px;
+}
+
+.app-shell input:focus,
+.app-shell select:focus,
+.app-shell textarea:focus {
+  outline: none;
+  border-color: var(--pl-accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.app-shell .login-label {
+  color: var(--pl-muted);
+}
+
+/* --- 테이블 --- */
+.app-shell .table-wrap {
+  border: 1px solid var(--pl-line);
+  border-radius: var(--pl-radius);
+  background: #fff;
+}
+
+.app-shell .result-table th {
+  background: #f8fafc;
+  color: var(--pl-muted);
+  border-bottom: 1px solid var(--pl-line);
+}
+
+.app-shell .result-table tr:hover td {
+  background: var(--pl-accent-soft);
+}
+
+.app-shell .wq-page {
+  --line-ui: var(--pl-line-strong);
+}
+
+.app-shell .wq-page .tabs .tab:not(.active),
+.app-shell .wq-page .btn.ghost,
+.app-shell .wq-page .table-wrap {
+  border-color: var(--pl-line);
+}
+
+/* --- 칩 · 메시지 · 통계 --- */
+.app-shell .wq-chip:not(.ok):not(.warn):not(.err) {
+  background: #f8fafc;
+  border-color: var(--pl-line);
+  color: var(--pl-text);
+}
+
+.app-shell .wq-chip.ok {
+  background: rgba(5, 150, 105, 0.1);
+  border-color: rgba(5, 150, 105, 0.25);
+  color: var(--pl-ok);
+}
+
+.app-shell .wq-chip.warn {
+  background: rgba(217, 119, 6, 0.1);
+  border-color: rgba(217, 119, 6, 0.25);
+  color: var(--pl-warn);
+}
+
+.app-shell .wq-chip.err {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.22);
+  color: var(--pl-err);
+}
+
+.app-shell .msg.ok {
+  color: var(--pl-ok);
+}
+
+.app-shell .msg.err {
+  color: var(--pl-err);
+}
+
+.app-shell .msg.warn {
+  color: var(--pl-warn);
+}
+
+.app-shell .stat-card,
+.app-shell .sample-list li,
+.app-shell .wq-scenario-block,
+.app-shell .wq-scenario-list li,
+.app-shell .perf-env-card,
+.app-shell .perf-scenario-panel {
+  background: #f8fafc;
+  border-color: var(--pl-line);
+}
+
+.app-shell .perf-env-card.ok {
+  background: rgba(5, 150, 105, 0.06);
+  border-color: rgba(5, 150, 105, 0.25);
+}
+
+.app-shell .perf-env-card.warn {
+  background: rgba(217, 119, 6, 0.06);
+  border-color: rgba(217, 119, 6, 0.25);
+}
+
+.app-shell .perf-setup-guide {
+  background: rgba(217, 119, 6, 0.06);
+  border-color: rgba(217, 119, 6, 0.25);
+}
+
+.app-shell .perf-setup-guide.ready {
+  background: rgba(5, 150, 105, 0.06);
+  border-color: rgba(5, 150, 105, 0.25);
+}
+
+.app-shell .wq-scenario-list li {
+  background: #fff;
+}
+
+.app-shell .wq-session-fieldset {
+  background: #fff;
+  border-color: var(--pl-line);
+}
+
+.app-shell .wq-status-pass {
+  color: var(--pl-ok);
+}
+
+.app-shell .wq-status-review {
+  color: var(--pl-warn);
+}
+
+.app-shell .wq-status-fail {
+  color: var(--pl-err);
+}
+
+.app-shell .pager-btn {
+  background: #fff;
+  border: 1px solid var(--pl-line);
+  color: var(--pl-text);
+}
+
+.app-shell .pager-btn.active {
+  background: var(--pl-accent);
+  border-color: var(--pl-accent);
+  color: #fff;
+}
+
+/* --- Deliverable Manager --- */
+.app-shell .dm-tab {
+  background: #fff;
+}
+
+.app-shell .dm-tab.active {
+  background: var(--pl-accent);
+  color: #fff;
+}
+
+.app-shell .dm-select,
+.app-shell .dm-search {
+  background: #fff;
+}
+
+.app-shell .dm-banner {
+  color: var(--pl-warn);
+  background: rgba(217, 119, 6, 0.08);
+  border-color: rgba(217, 119, 6, 0.28);
+}
+
+/* --- 팝아웃 이력 창 --- */
+.app-shell .source-scan-popout {
+  width: min(900px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 24px 0;
+}
+
+.app-shell .source-scan-popout-panel {
+  box-shadow: var(--pl-card-shadow);
+}
+
+/* --- ER Modeler · Gantt (주변 크롬만) --- */
+.app-shell .er-modeler-shell {
+  background: var(--pl-bg);
+}
+
+.app-shell .gantt-shell {
+  background: var(--pl-bg);
+}
+
+.app-shell .gantt-shell-bar .portal-nav .back {
+  color: #cbd5e1;
+}
+
+.app-shell .gantt-shell-bar .portal-nav .back:hover {
+  color: #fff;
+}
+
+.app-shell .er-boot-loading,
+.app-shell .mygantt .boot-loading {
+  color: var(--pl-muted);
+}
+
+@media (max-width: 720px) {
+  .app-shell main,
+  .app-shell main.wq-page,
+  .app-shell main.perf-page {
+    width: min(1320px, calc(100% - 24px));
+  }
+
+  .app-shell .portal-nav-shell,
+  .app-shell main > .portal-nav:first-child,
+  .app-shell .er-modeler-shell-bar,
+  .app-shell .gantt-shell-bar,
+  .app-shell .hero {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}

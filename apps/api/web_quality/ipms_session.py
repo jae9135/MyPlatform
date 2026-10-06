@@ -106,10 +106,29 @@ def _is_target_closed(exc: BaseException) -> bool:
 def _session_error_message(exc: BaseException) -> str:
     if _is_target_closed(exc):
         return BROWSER_CLOSED_MSG
-    return str(exc)
+    text = str(exc)
+    upper = text.upper()
+    if "ERR_CONNECTION_TIMED_OUT" in upper or "ERR_TIMED_OUT" in upper:
+        return (
+            "접속 URL에 연결할 수 없습니다 (연결 시간 초과). "
+            "대상 서버·VPN·방화벽을 확인하거나 「세션 JSON 업로드」를 사용하세요."
+        )
+    if "TIMEOUT" in upper and ("GOTO" in upper or "NAVIGAT" in upper or "PAGE.GOTO" in upper):
+        return (
+            "접속 URL에 연결할 수 없습니다 (연결 시간 초과). "
+            "대상 서버·VPN·방화벽을 확인하거나 「세션 JSON 업로드」를 사용하세요."
+        )
+    if "ERR_CONNECTION_REFUSED" in upper or "ECONNREFUSED" in upper:
+        return (
+            "접속 URL에 연결할 수 없습니다 (연결 거부). "
+            "대상 서버가 실행 중인지 확인하거나 「세션 JSON 업로드」를 사용하세요."
+        )
+    if "ERR_NAME_NOT_RESOLVED" in upper or "ENOTFOUND" in upper:
+        return "접속 URL 호스트를 찾을 수 없습니다. URL을 확인하세요."
+    return text
 
 
-def _goto_or_fail(page, url: str, *, timeout: int = 60000) -> None:
+def _goto_or_fail(page, url: str, *, timeout: int = 45000) -> None:
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
     except Exception as e:

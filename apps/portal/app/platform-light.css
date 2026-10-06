@@ -1,0 +1,27 @@
+/**
+ * 플랫폼 허브 · 세부프로그램 · 관리자 — 공통 라이트 테마 (WEB QUALITY CHECKER 계열)
+ */
+.platform-light,
+.beta-hub,
+.admin-shell,
+.mkt,
+.app-shell {
+  --pl-bg: #ffffff;
+  --pl-surface: #ffffff;
+  --pl-header: #1e293b;
+  --pl-header-text: #f8fafc;
+  --pl-text: #1e293b;
+  --pl-muted: #64748b;
+  --pl-line: #e2e8f0;
+  --pl-line-strong: #cbd5e1;
+  --pl-accent: #3b82f6;
+  --pl-accent-hover: #2563eb;
+  --pl-accent-soft: #eff6ff;
+  --pl-accent-border: #bfdbfe;
+  --pl-ok: #059669;
+  --pl-warn: #d97706;
+  --pl-err: #dc2626;
+  --pl-card-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+  --pl-radius: 12px;
+  --pl-radius-lg: 16px;
+}

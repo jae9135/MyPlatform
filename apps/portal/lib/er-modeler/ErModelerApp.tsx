@@ -40,6 +40,7 @@ import {
   importResponseToProject,
   mergeImportedProject,
   optimizeRelationSides,
+  rerouteRelationsForTables,
   projectToFlow,
   removeRelation,
   tableSideFromClientPoint,
@@ -119,6 +120,7 @@ const NAME_DISPLAY_LABEL: Record<NameDisplayMode, string> = {
 };
 
 const POPOVER_WIDTH = 240;
+const AUTO_LAYOUT_MSG = "자동 배치를 적용했습니다.";
 
 function estimateImportMs(file: File): number {
   const mb = file.size / (1024 * 1024);
@@ -221,9 +223,14 @@ function ErModelerInner() {
   );
   const [nameDisplay, setNameDisplay] = useState<NameDisplayMode>("both");
   const [showRelLabels, setShowRelLabels] = useState(true);
+  const [tableDragActive, setTableDragActive] = useState(false);
   const [nodesInteractive, setNodesInteractive] = useState(true);
   const [leftW, setLeftW] = useState(168);
   const [msg, setMsg] = useState("");
+
+  const dismissAutoLayoutMsg = useCallback(() => {
+    setMsg((prev) => (prev === AUTO_LAYOUT_MSG ? "" : prev));
+  }, []);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(
@@ -500,6 +507,7 @@ function ErModelerInner() {
   }, []);
 
   pathLayoutRef.current = (relationId: string, layout: EdgePathLayout) => {
+    dismissAutoLayoutMsg();
     const cur = projectRef.current;
     const next = {
       ...cur,
@@ -513,7 +521,11 @@ function ErModelerInner() {
   };
 
   const commitProject = useCallback(
-    (next: ErProject, options?: { layout?: boolean; skipFlow?: boolean }) => {
+    (
+      next: ErProject,
+      options?: { layout?: boolean; skipFlow?: boolean; keepAutoLayoutMsg?: boolean }
+    ) => {
+      if (!options?.keepAutoLayoutMsg) dismissAutoLayoutMsg();
       const synced = syncColumnsToRelations(next);
       setProject(synced);
       if (!options?.skipFlow) {
@@ -523,7 +535,7 @@ function ErModelerInner() {
         scheduleSave(synced);
       }
     },
-    [refreshFlow, scheduleSave]
+    [dismissAutoLayoutMsg, refreshFlow, scheduleSave]
   );
 
   const pushUndo = useCallback(() => {
@@ -533,7 +545,10 @@ function ErModelerInner() {
   }, []);
 
   const commitWithUndo = useCallback(
-    (next: ErProject, options?: { layout?: boolean; skipFlow?: boolean }) => {
+    (
+      next: ErProject,
+      options?: { layout?: boolean; skipFlow?: boolean; keepAutoLayoutMsg?: boolean }
+    ) => {
       pushUndo();
       commitProject(next, options);
     },
@@ -577,6 +592,13 @@ function ErModelerInner() {
       const posChanges = changes.filter((c) => c.type === "position");
       if (!posChanges.length) return;
 
+      const dragging = posChanges.some((c) => c.type === "position" && c.dragging);
+      const finished = posChanges.some((c) => c.type === "position" && !c.dragging);
+      if (dragging) {
+        setTableDragActive(true);
+        dismissAutoLayoutMsg();
+      }
+
       setNodes((current) => {
         const nextNodes = posChanges.reduce(
           (acc, ch) => {
@@ -588,29 +610,36 @@ function ErModelerInner() {
           current
         );
 
-        let nextProject = applyNodePositions(projectRef.current, nextNodes);
-        nextProject = optimizeRelationSides(nextProject);
-        projectRef.current = nextProject;
+        if (dragging && !finished) {
+          return nextNodes;
+        }
 
-        const { edges: routedEdges } = projectToFlow(nextProject, nameDisplay);
-        const sel = selectedRelationIdRef.current;
-        setEdges(
-          enrichEdges(routedEdges).map((edge) => ({
-            ...edge,
-            selected: edge.id === sel,
-          }))
-        );
-
-        const finished = posChanges.some((c) => c.type === "position" && !c.dragging);
         if (finished) {
+          setTableDragActive(false);
+          const movedIds = posChanges
+            .filter((c): c is Extract<typeof c, { type: "position" }> => c.type === "position")
+            .map((c) => c.id);
+
+          let nextProject = applyNodePositions(projectRef.current, nextNodes);
+          nextProject = rerouteRelationsForTables(nextProject, movedIds);
+          projectRef.current = nextProject;
           setProject(nextProject);
+
+          const { edges: routedEdges } = projectToFlow(nextProject, nameDisplay);
+          const sel = selectedRelationIdRef.current;
+          setEdges(
+            enrichEdges(routedEdges).map((edge) => ({
+              ...edge,
+              selected: edge.id === sel,
+            }))
+          );
           scheduleSave(nextProject);
         }
 
         return nextNodes;
       });
     },
-    [enrichEdges, nameDisplay, onNodesChange, scheduleSave, setEdges, setNodes]
+    [dismissAutoLayoutMsg, enrichEdges, nameDisplay, onNodesChange, scheduleSave, setEdges, setNodes]
   );
 
   const onEdgesChangeWrapped: OnEdgesChange = useCallback(
@@ -1431,11 +1460,11 @@ function ErModelerInner() {
     n = layoutGraph(n, e);
     let next = applyNodePositions(cur, n);
     next = optimizeRelationSides(next);
-    commitWithUndo(next, { layout: false });
+    commitWithUndo(next, { layout: false, keepAutoLayoutMsg: true });
     requestAnimationFrame(() => {
       fitView({ padding: 0.12, duration: 280 });
     });
-    setMsg("자동 배치를 적용했습니다.");
+    setMsg(AUTO_LAYOUT_MSG);
   }
 
   async function handleDiagramExport(format: "png" | "svg" | "pdf") {
@@ -2409,105 +2438,117 @@ function ErModelerInner() {
             panOnDrag
             fitView
             deleteKeyCode={null}
+            proOptions={{ hideAttribution: true }}
             className={`er-flow${connecting || connectDraft ? " er-connecting" : ""}${
               canvasTool === "table" ? " er-tool-table" : ""
-            }${canvasTool === "connect" ? " er-tool-connect" : ""}`}
+            }${canvasTool === "connect" ? " er-tool-connect" : ""}${
+              tableDragActive ? " er-table-dragging" : ""
+            }`}
           >
-            <Background gap={16} color="#2a3544" />
-            <Controls
-              showInteractive
-              onInteractiveChange={(active) => setNodesInteractive(active)}
-            />
-            <Panel position="bottom-left" className="er-canvas-extra-tools">
-              <button
-                type="button"
-                className={`er-canvas-tool${canvasTool === "table" ? " active" : ""}`}
-                title="새 테이블 — 캔버스 클릭 위치에 untitled 생성"
-                data-wq-target="add_table"
-                onClick={handleAddTable}
-              >
-                <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden>
-                  <rect x="2" y="3" width="12" height="10" rx="1" fill="none" stroke="currentColor" strokeWidth="1.3" />
-                  <path d="M2 6.5h12M8 6.5V13" fill="none" stroke="currentColor" strokeWidth="1.3" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="er-canvas-tool er-canvas-tool-wide"
-                title="이름 표시"
-                onClick={() => {
-                  const idx = NAME_DISPLAY_CYCLE.indexOf(nameDisplay);
-                  setNameDisplay(
-                    NAME_DISPLAY_CYCLE[(idx + 1) % NAME_DISPLAY_CYCLE.length]
-                  );
-                }}
-              >
-                {NAME_DISPLAY_LABEL[nameDisplay]}
-              </button>
-              <button
-                type="button"
-                className={`er-canvas-tool${canvasTool === "connect" ? " active" : ""}`}
-                title="연결선 — 가장자리에서 드래그 (한 번 그리면 종료)"
-                onClick={() => {
-                  setCanvasTool((cur) => {
-                    const next = cur === "connect" ? "select" : "connect";
-                    if (next !== "connect") {
-                      setConnectDraft(null);
-                      setConnectCursor(null);
-                    }
-                    setMsg(
-                      next === "connect"
-                        ? "연결선: 관계 유형을 고른 뒤 테이블을 연결하세요."
-                        : ""
-                    );
-                    return next;
-                  });
-                }}
-              >
-                <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden>
-                  <circle
-                    cx="3.2"
-                    cy="8"
-                    r="2.1"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.3"
-                  />
-                  <circle
-                    cx="12.8"
-                    cy="8"
-                    r="2.1"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.3"
-                  />
-                  <path
-                    d="M5.3 8h5.4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.3"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className={`er-canvas-tool er-canvas-tool-wide${showRelLabels ? " active" : ""}`}
-                title="관계명(1:N) 표시"
-                onClick={() => setShowRelLabels((v) => !v)}
-              >
-                관계명
-              </button>
-            </Panel>
-            {canvasTool === "connect" ? (
-              <Panel position="bottom-left" className="er-connect-card-panel">
-                <CardinalityPicker
-                  compact
-                  value={connectCardinality}
-                  onChange={setConnectCardinality}
+            <Background gap={16} color="#475569" />
+            <Panel position="bottom-left" className="er-canvas-bottom-dock">
+              <div className="er-canvas-bottom-row">
+                <Controls
+                  showInteractive
+                  onInteractiveChange={(active) => setNodesInteractive(active)}
                 />
-              </Panel>
-            ) : null}
+                <div className="er-canvas-bottom-tools">
+              {canvasTool === "connect" ? (
+                <div className="er-connect-card-panel">
+                  <CardinalityPicker
+                    compact
+                    value={connectCardinality}
+                    onChange={setConnectCardinality}
+                  />
+                </div>
+              ) : null}
+              <div className="er-canvas-extra-tools" role="toolbar" aria-label="캔버스 도구">
+                <button
+                  type="button"
+                  className={`er-canvas-tool${canvasTool === "table" ? " active" : ""}`}
+                  title="새 테이블 — 캔버스 클릭 위치에 untitled 생성"
+                  data-wq-target="add_table"
+                  onClick={handleAddTable}
+                >
+                  <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden>
+                    <rect x="2" y="3" width="12" height="10" rx="1" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                    <path d="M2 6.5h12M8 6.5V13" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                  </svg>
+                </button>
+                <span className="er-canvas-tool-divider" aria-hidden="true" />
+                <button
+                  type="button"
+                  className="er-canvas-tool er-canvas-tool-wide"
+                  title="이름 표시"
+                  onClick={() => {
+                    const idx = NAME_DISPLAY_CYCLE.indexOf(nameDisplay);
+                    setNameDisplay(
+                      NAME_DISPLAY_CYCLE[(idx + 1) % NAME_DISPLAY_CYCLE.length]
+                    );
+                  }}
+                >
+                  {NAME_DISPLAY_LABEL[nameDisplay]}
+                </button>
+                <span className="er-canvas-tool-divider" aria-hidden="true" />
+                <button
+                  type="button"
+                  className={`er-canvas-tool${canvasTool === "connect" ? " active" : ""}`}
+                  title="연결선 — 가장자리에서 드래그 (한 번 그리면 종료)"
+                  onClick={() => {
+                    setCanvasTool((cur) => {
+                      const next = cur === "connect" ? "select" : "connect";
+                      if (next !== "connect") {
+                        setConnectDraft(null);
+                        setConnectCursor(null);
+                      }
+                      setMsg(
+                        next === "connect"
+                          ? "연결선: 관계 유형을 고른 뒤 테이블을 연결하세요."
+                          : ""
+                      );
+                      return next;
+                    });
+                  }}
+                >
+                  <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden>
+                    <circle
+                      cx="3.2"
+                      cy="8"
+                      r="2.1"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.3"
+                    />
+                    <circle
+                      cx="12.8"
+                      cy="8"
+                      r="2.1"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.3"
+                    />
+                    <path
+                      d="M5.3 8h5.4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.3"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+                <span className="er-canvas-tool-divider" aria-hidden="true" />
+                <button
+                  type="button"
+                  className={`er-canvas-tool er-canvas-tool-wide${showRelLabels ? " active" : ""}`}
+                  title="관계명(1:N) 표시"
+                  onClick={() => setShowRelLabels((v) => !v)}
+                >
+                  관계명
+                </button>
+              </div>
+                </div>
+              </div>
+            </Panel>
             <MiniMap
               nodeColor="#3d8bfd"
               maskColor="rgba(8, 12, 18, 0.75)"

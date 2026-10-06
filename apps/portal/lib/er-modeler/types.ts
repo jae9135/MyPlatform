@@ -134,8 +134,10 @@ export type ErRelation = {
   cardinality: RelationCardinality;
   /** FK 컬럼이 자식 PK에 포함되면 식별관계(실선) */
   isIdentifying?: boolean;
-  /** 직교 관계선의 세로 구간을 좌우로 옮긴 거리(px) */
+  /** 직교 관계선의 세로 구간을 좌우로 옮긴 거리(px) — L/R 연결·가로 경로 */
   pathOffset?: number;
+  /** 직교 관계선의 가로 구간을 위아래로 옮긴 거리(px) — T/B 연결·세로 경로 */
+  pathOffsetV?: number;
   /** 시작 쪽 가로선(연결점)을 컬럼 기본 위치에서 위아래로 옮긴 거리(px) */
   fromYOffset?: number;
   toYOffset?: number;
@@ -150,10 +152,13 @@ export type ErRelation = {
 
 export type EdgePathLayout = {
   pathOffset: number;
+  pathOffsetV: number;
   fromYOffset: number;
   toYOffset: number;
   fromXOffset: number;
   toXOffset: number;
+  fromSide?: HandleSide;
+  toSide?: HandleSide;
 };
 
 export type ErProject = {
@@ -337,6 +342,19 @@ export function normalizeRelation(
   const card = normalizeCardinality(raw.cardinality);
   const side = (v: unknown, fallback: HandleSide): HandleSide =>
     v === "L" || v === "R" || v === "T" || v === "B" ? v : fallback;
+  const fromSide = side(raw.fromSide, "R");
+  const toSide = side(raw.toSide, "L");
+  let pathOffset = typeof raw.pathOffset === "number" ? raw.pathOffset : 0;
+  let pathOffsetV = typeof raw.pathOffsetV === "number" ? raw.pathOffsetV : 0;
+  const bothTB =
+    fromSide !== "L" &&
+    fromSide !== "R" &&
+    toSide !== "L" &&
+    toSide !== "R";
+  if (bothTB && pathOffsetV === 0 && pathOffset !== 0) {
+    pathOffsetV = pathOffset;
+    pathOffset = 0;
+  }
   return {
     id: raw.id,
     fromTable: raw.fromTable,
@@ -345,13 +363,14 @@ export function normalizeRelation(
     toColumn: raw.toColumn,
     cardinality: card,
     isIdentifying: Boolean(raw.isIdentifying),
-    pathOffset: typeof raw.pathOffset === "number" ? raw.pathOffset : 0,
+    pathOffset,
+    pathOffsetV,
     fromYOffset: typeof raw.fromYOffset === "number" ? raw.fromYOffset : 0,
     toYOffset: typeof raw.toYOffset === "number" ? raw.toYOffset : 0,
     fromXOffset: typeof raw.fromXOffset === "number" ? raw.fromXOffset : 0,
     toXOffset: typeof raw.toXOffset === "number" ? raw.toXOffset : 0,
-    fromSide: side(raw.fromSide, "R"),
-    toSide: side(raw.toSide, "L"),
+    fromSide,
+    toSide,
   };
 }
 

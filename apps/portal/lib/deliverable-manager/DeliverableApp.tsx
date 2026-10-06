@@ -35,7 +35,7 @@ function MoBadge({ value }: { value: string | null }) {
   if (!value) return <span className="dm-mo empty">-</span>;
   const mark = value.toUpperCase() === "M" ? "M" : value.toUpperCase() === "O" ? "O" : value;
   return (
-    <span className={`dm-mo ${mark === "M" ? "mandatory" : "optional"}`} title={mark === "M" ? "필수" : "선택"}>
+    <span className={`dm-mo ${mark === "M" ? "mandatory" : "optional"}`} title={mark === "M" ? "Mandatory" : "Optional"}>
       {mark}
     </span>
   );
@@ -254,13 +254,23 @@ export default function DeliverableApp() {
           </ol>
         </div>
       ) : null}
-      <p className="dm-count">
-        {filtered.length}건
-        {query || phaseFilter !== "all" || statusFilter !== "all"
-          ? ` (전체 ${items.length}건 중)`
-          : ""}
-        {previewBusy ? " · 파일 여는 중…" : ""}
-      </p>
+      <div className="dm-table-meta">
+        <p className="dm-count">
+          {filtered.length}건
+          {query || phaseFilter !== "all" || statusFilter !== "all"
+            ? ` (전체 ${items.length}건 중)`
+            : ""}
+          {previewBusy ? " · 파일 여는 중…" : ""}
+        </p>
+        <div className="dm-mo-legend" aria-label="규모 구분">
+          <span className="dm-mo-legend-item">
+            <MoBadge value="M" /> : Mandatory
+          </span>
+          <span className="dm-mo-legend-item">
+            <MoBadge value="O" /> : Optional
+          </span>
+        </div>
+      </div>
       <div className="dm-table-wrap dm-desktop">
         <table className="dm-table">
           <thead>

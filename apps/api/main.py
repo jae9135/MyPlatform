@@ -31,7 +31,7 @@ SAMPLE_CATALOG = [
     {
         "id": "design",
         "title": "샘플 테이블정의서",
-        "filename": "design.sample.xlsx",
+        "filename": "테이블정의서_샘플.xlsx",
         "kinds": ["word", "term", "domain"],
         "description": "표준단어·용어·도메인 점검용 설계서 샘플",
     },

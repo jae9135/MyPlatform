@@ -29,6 +29,8 @@ import {
   DEPLOY_SESSION_UPLOAD_HINT,
   isHeadedBrowserSessionAvailable,
   isPortalLikeBaseUrl,
+  LOGIN_SESSION_AUTO_CONNECTED_MSG,
+  LOGIN_SESSION_REAPPLY_MSG,
   loginSessionModeForTargetUrl,
   validateWqSessionJob,
   validateWqSessionUpload,
@@ -50,8 +52,8 @@ const SESSION_STATUS = {
   checking: "로컬 세션 점검 중…",
   launching: "로그인 창 실행 중…",
   loginRequired: "로그인하세요 — API 서버 Chromium 창에서 로그인을 완료하세요.",
-  done: "로그인 완료",
-  autoConnected: "기존 로그인 세션 자동 연결",
+  done: LOGIN_SESSION_REAPPLY_MSG,
+  autoConnected: LOGIN_SESSION_AUTO_CONNECTED_MSG,
 } as const;
 
 const LOGIN_SESSION_NOT_READY = "미로그인시 로그인 시나리오는 선택·진단 불가";
@@ -72,6 +74,26 @@ function friendlySessionError(msg: string): string {
       "「포털 자동 로그인」을 다시 시도하거나 「세션 JSON 업로드」를 사용하세요. " +
       "(Render API에 PORTAL_PASSWORD가 Vercel과 동일하게 설정되어 있어야 합니다.)"
     );
+  }
+  const upper = msg.toUpperCase();
+  if (
+    upper.includes("ERR_CONNECTION_TIMED_OUT") ||
+    upper.includes("ERR_TIMED_OUT") ||
+    (upper.includes("TIMEOUT") && (upper.includes("GOTO") || upper.includes("NAVIGAT") || msg.includes("연결 시간")))
+  ) {
+    return (
+      "접속 URL에 연결할 수 없습니다 (연결 시간 초과). " +
+      "대상 서버·VPN·방화벽을 확인하거나 「세션 JSON 업로드」를 사용하세요."
+    );
+  }
+  if (upper.includes("ERR_CONNECTION_REFUSED") || upper.includes("ECONNREFUSED")) {
+    return (
+      "접속 URL에 연결할 수 없습니다 (연결 거부). " +
+      "대상 서버가 실행 중인지 확인하거나 「세션 JSON 업로드」를 사용하세요."
+    );
+  }
+  if (upper.includes("ERR_NAME_NOT_RESOLVED") || upper.includes("ENOTFOUND")) {
+    return "접속 URL 호스트를 찾을 수 없습니다. URL을 확인하세요.";
   }
   return msg;
 }
@@ -105,6 +127,22 @@ function isIpmsLikeUrl(url: string): boolean {
   } catch {
     return raw.toLowerCase().includes("ipms.online");
   }
+}
+
+function buildIpmsApplyMessage(
+  j: { method?: string },
+  count: number,
+): { text: string; tone: "ok" | "warn" | "err" } {
+  if (j.method === "legacy_fallback") {
+    return {
+      text: `접속 URL에서 시나리오 추출 실패 — 사전 정의한 시나리오 ${count}건을 표시합니다.`,
+      tone: "warn",
+    };
+  }
+  return {
+    text: count ? `시나리오 ${count}건 추출 성공` : "시나리오 없음",
+    tone: "ok",
+  };
 }
 
 /** 로컬 MyPlatform 포털(127.0.0.1:3000 등) — 체크리스트 URL 사용 가능 */
@@ -275,14 +313,14 @@ type CachedBrowserSession = {
 };
 
 const TARGET_OPTIONS = [
-  { id: "manual", label: "URL 직접 입력" },
+  { id: "ipms-online", label: "IPMS" },
   { id: "portal", label: "Portal" },
   { id: "my-gantt", label: "MyGantt" },
   { id: "er-modeler", label: "ER Modeler" },
   { id: "db-manager", label: "DBManager" },
   { id: "chk-db-std", label: "DB 표준 점검" },
   { id: "deliverable-manager", label: "DeliverableManager" },
-  { id: "ipms-online", label: "IPMS Online" },
+  { id: "manual", label: "외부 URL" },
 ];
 
 type ScenarioCandidate = {
@@ -530,10 +568,10 @@ export default function PerfTestPage() {
   const [env, setEnv] = useState<Record<string, unknown> | null>(null);
   const [envLoading, setEnvLoading] = useState(true);
   const [envErr, setEnvErr] = useState("");
-  const [target, setTarget] = useState("portal");
+  const [target, setTarget] = useState("ipms-online");
   const targetRef = useRef(target);
-  const [baseUrlInput, setBaseUrlInput] = useState("http://127.0.0.1:3000");
-  const [appliedBaseUrl, setAppliedBaseUrl] = useState("http://127.0.0.1:3000");
+  const [baseUrlInput, setBaseUrlInput] = useState(IPMS_DEFAULT_URL);
+  const [appliedBaseUrl, setAppliedBaseUrl] = useState(IPMS_DEFAULT_URL);
   const [accessPublic, setAccessPublic] = useState(true);
   const [accessAuth, setAccessAuth] = useState(true);
   const [users, setUsers] = useState(5);
@@ -553,6 +591,7 @@ export default function PerfTestPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [scenarioMsg, setScenarioMsg] = useState("");
   const [scenarioApplyMsg, setScenarioApplyMsg] = useState("");
+  const [scenarioApplyTone, setScenarioApplyTone] = useState<"ok" | "warn" | "err">("ok");
   const [scenarioLoading, setScenarioLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewResult, setPreviewResult] = useState<ScenarioPreviewResult | null>(null);
@@ -572,6 +611,8 @@ export default function PerfTestPage() {
   const [sessionPageUrl, setSessionPageUrl] = useState("");
   const [sessionStorageFile, setSessionStorageFile] = useState<File | null>(null);
   const [sessionProgress, setSessionProgress] = useState<SessionProgress | null>(null);
+  const [sessionPanelMsg, setSessionPanelMsg] = useState("");
+  const [sessionPanelTone, setSessionPanelTone] = useState<"ok" | "warn" | "err">("err");
   const [sessionValidated, setSessionValidated] = useState(false);
 
   const accessParam = buildAccessParam(accessPublic, accessAuth);
@@ -590,7 +631,15 @@ export default function PerfTestPage() {
   const sessionActiveRef = useRef(sessionActive);
   sessionActiveRef.current = sessionActive;
   const perfTargetIsPortal = isPortalLikeBaseUrl(appliedBaseUrl.trim());
-  const browserSessionAvailable = isHeadedBrowserSessionAvailable(appliedBaseUrl.trim());
+  /** SSR과 첫 클라이언트 렌더는 window를 쓰지 않음 — localhost hydration 불일치 방지 */
+  const [hostReady, setHostReady] = useState(false);
+  useEffect(() => {
+    setHostReady(true);
+  }, []);
+  const browserSessionAvailable = hostReady
+    ? isHeadedBrowserSessionAvailable(appliedBaseUrl.trim())
+    : isPortalLikeBaseUrl(appliedBaseUrl.trim());
+  const localPortalHost = hostReady && isLocalPortalHost();
 
   useEffect(() => {
     const url = appliedBaseUrl.trim();
@@ -615,6 +664,28 @@ export default function PerfTestPage() {
     const url = pageUrl.trim();
     if (!url) return;
     uploadSessionByUrlRef.current[url] = file;
+  }
+
+  function showSessionPanelMsg(text: string, tone: "ok" | "warn" | "err" = "err") {
+    setSessionPanelMsg(text);
+    setSessionPanelTone(tone);
+  }
+
+  function clearSessionPanelMsg() {
+    setSessionPanelMsg("");
+  }
+
+  function notifyPerfLoginReapply(opts?: { jobId?: string; autoConnected?: boolean }) {
+    const id = opts?.jobId?.trim() || "upload";
+    setSessionProgress({
+      job_id: id,
+      status: "done",
+      pct: 100,
+      message: opts?.autoConnected ? LOGIN_SESSION_AUTO_CONNECTED_MSG : LOGIN_SESSION_REAPPLY_MSG,
+    });
+    setScenarioMsg(LOGIN_SESSION_REAPPLY_MSG);
+    clearSessionPanelMsg();
+    setError("");
   }
 
   function restoreSessionForUrl(pageUrl: string) {
@@ -646,12 +717,7 @@ export default function PerfTestPage() {
       });
       const ok = await validateUploadSession(uploadFile, url);
       if (ok) {
-        setSessionProgress({
-          job_id: "upload",
-          status: "done",
-          pct: 100,
-          message: SESSION_STATUS.done,
-        });
+        notifyPerfLoginReapply();
       } else {
         setSessionStorageFile(null);
         delete uploadSessionByUrlRef.current[url];
@@ -677,12 +743,7 @@ export default function PerfTestPage() {
       const ok = await validateBrowserSession(jobId, url);
       if (ok) {
         cacheBrowserSession(jobId, url);
-        setSessionProgress({
-          job_id: jobId,
-          status: "done",
-          pct: 100,
-          message: SESSION_STATUS.autoConnected,
-        });
+        notifyPerfLoginReapply({ jobId, autoConnected: true });
       }
       return;
     }
@@ -880,12 +941,7 @@ export default function PerfTestPage() {
         const ok = await validateBrowserSession(persisted.jobId, persisted.pageUrl);
         if (cancelled || !ok) return;
         cacheBrowserSession(persisted.jobId, persisted.pageUrl);
-        setSessionProgress({
-          job_id: persisted.jobId,
-          status: "done",
-          pct: 100,
-          message: SESSION_STATUS.autoConnected,
-        });
+        notifyPerfLoginReapply({ jobId: persisted.jobId, autoConnected: true });
       } catch {
         if (!cancelled) clearPersistedLoginSession();
       }
@@ -913,9 +969,11 @@ export default function PerfTestPage() {
     setSelectedIds(defaults);
   }
 
-  const loadScenarios = useCallback(async (opts?: { clearList?: boolean }) => {
+  const loadScenarios = useCallback(async (opts?: { clearList?: boolean; baseUrl?: string }) => {
+    const pageUrl = opts?.baseUrl ?? appliedBaseUrl;
+    const ipmsControls = target === "ipms-online" && isIpmsLikeUrl(pageUrl);
     if (target === "manual" || target === "portal") return;
-    if (target === "ipms-online" && showIpmsControls && !accessPublic && !accessAuth) {
+    if (target === "ipms-online" && ipmsControls && !accessPublic && !accessAuth) {
       setCandidates([]);
       setSelectedIds([]);
       setScenarioMsg("공개·로그인 시나리오 중 하나 이상 체크하세요.");
@@ -930,32 +988,77 @@ export default function PerfTestPage() {
     }
     try {
       const q = new URLSearchParams({ target });
-      if (appliedBaseUrl) q.set("page_url", appliedBaseUrl);
-      if (target === "ipms-online" && showIpmsControls) q.set("access", IPMS_FULL_ACCESS);
-      const res = await fetchScanApi(`v1/perf-test/scenarios?${q}`);
+      if (pageUrl) q.set("page_url", pageUrl);
+      if (target === "ipms-online" && ipmsControls) q.set("access", IPMS_FULL_ACCESS);
+      const res = await fetchScanApi(`v1/perf-test/scenarios?${q}`, undefined, 45000);
       const j = await readJsonResponse(res);
       const fullList = Array.isArray(j.candidates) ? (j.candidates as ScenarioCandidate[]) : [];
       fullCandidatesRef.current = fullList;
       const list =
-        target === "ipms-online" && showIpmsControls
+        target === "ipms-online" && ipmsControls
           ? filterCandidatesByAccess(fullList, accessPublic, accessAuth)
           : fullList;
       const defaultsSelected = Array.isArray(j.defaults_selected)
         ? (j.defaults_selected as string[])
         : undefined;
       applyScenarioCandidates(list, defaultsSelected);
-      setScenarioApplyMsg(fullList.length ? `시나리오 ${fullList.length}건 추출 성공` : "시나리오 없음");
+      if (target === "ipms-online" && ipmsControls) {
+        const applyResult = buildIpmsApplyMessage(j, fullList.length);
+        setScenarioApplyMsg(applyResult.text);
+        setScenarioApplyTone(applyResult.tone);
+        targetPrefsRef.current[target] = {
+          ...(targetPrefsRef.current[target] || {
+            baseUrlInput: pageUrl,
+            appliedBaseUrl: pageUrl,
+            needLogin,
+            error: "",
+            baseUrlApplyError: "",
+          }),
+          appliedBaseUrl: pageUrl,
+          baseUrlApplyError: "",
+          scenarioApplyMsg: applyResult.text,
+          scenarioApplyTone: applyResult.tone,
+        };
+      } else {
+        const msg = fullList.length ? `시나리오 ${fullList.length}건 추출 성공` : "시나리오 없음";
+        setScenarioApplyMsg(msg);
+        setScenarioApplyTone("ok");
+        targetPrefsRef.current[target] = {
+          ...(targetPrefsRef.current[target] || {
+            baseUrlInput: pageUrl,
+            appliedBaseUrl: pageUrl,
+            needLogin,
+            error: "",
+            baseUrlApplyError: "",
+          }),
+          scenarioApplyMsg: msg,
+          scenarioApplyTone: "ok",
+        };
+      }
       setScenarioMsg("");
       setPreviewResult(null);
       setPreviewMsg("");
     } catch (e) {
       fullCandidatesRef.current = [];
-      setScenarioApplyMsg("");
-      setScenarioMsg(wrapScanFetchError(e).message);
+      const errMsg = wrapScanFetchError(e).message;
+      setScenarioApplyMsg(errMsg);
+      setScenarioApplyTone("err");
+      setScenarioMsg(errMsg);
+      targetPrefsRef.current[target] = {
+        ...(targetPrefsRef.current[target] || {
+          baseUrlInput: pageUrl,
+          appliedBaseUrl: pageUrl,
+          needLogin,
+          error: "",
+          baseUrlApplyError: "",
+        }),
+        scenarioApplyMsg: errMsg,
+        scenarioApplyTone: "err",
+      };
     } finally {
       setScenarioLoading(false);
     }
-  }, [target, appliedBaseUrl, showIpmsControls, accessPublic, accessAuth]);
+  }, [target, appliedBaseUrl, accessPublic, accessAuth]);
 
   function applyBaseUrl() {
     const trimmed = baseUrlInput.trim();
@@ -971,15 +1074,56 @@ export default function PerfTestPage() {
     const regErr = registeredTargetUrlError(trimmed);
     if (regErr) {
       setBaseUrlApplyError(regErr);
+      setScenarioApplyMsg("");
+      setScenarioApplyTone("err");
+      targetPrefsRef.current[target] = {
+        ...(targetPrefsRef.current[target] || {
+          baseUrlInput: trimmed,
+          appliedBaseUrl: appliedBaseUrl,
+          needLogin,
+          error: "",
+          scenarioApplyMsg: "",
+          scenarioApplyTone: "ok" as const,
+        }),
+        baseUrlInput: trimmed,
+        baseUrlApplyError: regErr,
+        scenarioApplyMsg: "",
+        scenarioApplyTone: "err",
+      };
       return;
     }
     setError("");
-    scenarioFetchKeyRef.current = "";
+    setResult(null);
+    setLastJobId("");
+    setPreviewResult(null);
+    setPreviewMsg("");
     fullCandidatesRef.current = [];
-    setScenarioApplyMsg("");
     setAppliedBaseUrl(trimmed);
+    const fetchKey = `${target}|${trimmed}`;
+    scenarioFetchKeyRef.current = fetchKey;
+    targetPrefsRef.current[target] = {
+      ...(targetPrefsRef.current[target] || {
+        baseUrlInput: trimmed,
+        appliedBaseUrl: trimmed,
+        needLogin,
+        error: "",
+        baseUrlApplyError: "",
+        scenarioApplyMsg: "",
+        scenarioApplyTone: "ok" as const,
+      }),
+      baseUrlInput: trimmed,
+      appliedBaseUrl: trimmed,
+      result: null,
+      lastJobId: "",
+      error: "",
+      baseUrlApplyError: "",
+    };
     restoreSessionForUrl(trimmed);
-    if (target === "portal") {
+    if (target === "ipms-online" && isIpmsLikeUrl(trimmed)) {
+      setScenarioApplyMsg("");
+      setScenarioApplyTone("ok");
+      void loadScenarios({ clearList: true, baseUrl: trimmed });
+    } else if (target === "portal") {
       if (isPortalLocalBaseUrl(trimmed)) {
         void loadPortalUrls();
         setUrlListMsg("포털 페이지 체크리스트 — 로그인 필요 항목은 세션 준비 후 선택 가능");
@@ -992,9 +1136,18 @@ export default function PerfTestPage() {
           setCustomUrls("/");
         }
         setUrlListMsg("외부 Base URL — 아래 경로를 직접 입력하세요 (Base URL path 기준 상대 경로).");
+        setScenarioApplyMsg("Base URL 적용 완료");
+        setScenarioApplyTone("ok");
       } else {
         setUrlListMsg("로컬 포털 체크리스트는 「Portal」 탭을 사용하세요. 여기는 경로 직접 입력만 합니다.");
+        setScenarioApplyMsg("Base URL 적용 완료");
+        setScenarioApplyTone("ok");
       }
+      targetPrefsRef.current[target] = {
+        ...targetPrefsRef.current[target],
+        scenarioApplyMsg: "Base URL 적용 완료",
+        scenarioApplyTone: "ok",
+      };
     }
   }
 
@@ -1027,18 +1180,33 @@ export default function PerfTestPage() {
       setScenarioApplyMsg("");
       return;
     }
+
+    // IPMS: 탭 전환으로 자동 로드하지 않음 — 「적용」에서만 불러옴
+    if (target === "ipms-online") {
+      if (scenarioTargetRef.current !== target) {
+        scenarioTargetRef.current = target;
+        setCandidates([]);
+        setSelectedIds([]);
+        fullCandidatesRef.current = [];
+        setScenarioMsg("");
+        setScenarioApplyMsg("");
+        setScenarioApplyTone("ok");
+        setScenarioLoading(false);
+      }
+      if (!isIpmsLikeUrl(appliedBaseUrl)) {
+        setCandidates([]);
+        setSelectedIds([]);
+        setScenarioMsg("IPMS URL이 아닙니다. IPMS 주소를 적용하거나 「외부 URL」 탭을 사용하세요.");
+      }
+      return;
+    }
+
     if (scenarioTargetRef.current !== target) {
       setCandidates([]);
       setSelectedIds([]);
       scenarioTargetRef.current = target;
       scenarioFetchKeyRef.current = "";
       setScenarioMsg("시나리오 불러오는 중…");
-    }
-    if (target === "ipms-online" && !isIpmsLikeUrl(appliedBaseUrl)) {
-      setCandidates([]);
-      setSelectedIds([]);
-      setScenarioMsg("IPMS URL이 아닙니다. IPMS 주소를 적용하거나 「URL 직접 입력」 탭을 사용하세요.");
-      return;
     }
     const fetchKey = `${target}|${appliedBaseUrl}`;
     if (scenarioFetchKeyRef.current === fetchKey) {
@@ -1071,12 +1239,7 @@ export default function PerfTestPage() {
         setSessionJobId(jobId);
         setSessionPageUrl(targetUrl.trim());
         cacheBrowserSession(jobId, targetUrl.trim());
-        setSessionProgress({
-          job_id: jobId,
-          status: "done",
-          pct: 100,
-          message: SESSION_STATUS.done,
-        });
+        notifyPerfLoginReapply({ jobId });
         return;
       }
       if (j.status === "error") {
@@ -1086,7 +1249,7 @@ export default function PerfTestPage() {
         setSessionValidated(false);
         setSessionJobId("");
         setSessionPageUrl("");
-        setError(errMsg);
+        showSessionPanelMsg(errMsg);
         return;
       }
       if (j.status === "cancelled") {
@@ -1094,28 +1257,12 @@ export default function PerfTestPage() {
         setSessionValidated(false);
         setSessionJobId("");
         setSessionPageUrl("");
-        setError("로그인 세션이 취소되었습니다.");
+        showSessionPanelMsg("로그인 세션이 취소되었습니다.", "warn");
         return;
       }
       await new Promise((r) => setTimeout(r, 800));
     }
     throw new Error("세션 생성 시간 초과");
-  }
-
-  async function cancelSession() {
-    const jobId = sessionProgress?.job_id?.trim();
-    if (!jobId) return;
-    try {
-      const res = await fetchScanApi(`v1/web-quality/jobs/${jobId}/cancel`, { method: "POST" });
-      if (!res.ok) {
-        const j = await readJsonResponse(res);
-        throw new Error(String(j.detail || `취소 실패 (HTTP ${res.status})`));
-      }
-      setSessionProgress(null);
-      setError("세션 생성이 취소되었습니다.");
-    } catch (e) {
-      setError(wrapScanFetchError(e).message);
-    }
   }
 
   async function cancelRun() {
@@ -1148,12 +1295,7 @@ export default function PerfTestPage() {
       if (sessionValidated) return true;
       const ok = await validateBrowserSession(sessionJobId, appliedBaseUrl);
       if (ok) {
-        setSessionProgress({
-          job_id: sessionJobId,
-          status: "done",
-          pct: 100,
-          message: SESSION_STATUS.done,
-        });
+        notifyPerfLoginReapply({ jobId: sessionJobId, autoConnected: true });
       }
       return ok;
     }
@@ -1177,12 +1319,7 @@ export default function PerfTestPage() {
         jobId: persisted.jobId,
         pageUrl: persisted.pageUrl,
       };
-      setSessionProgress({
-        job_id: persisted.jobId,
-        status: "done",
-        pct: 100,
-        message: SESSION_STATUS.done,
-      });
+      notifyPerfLoginReapply({ jobId: persisted.jobId, autoConnected: true });
       return true;
     } catch {
       clearPersistedLoginSession();
@@ -1196,15 +1333,9 @@ export default function PerfTestPage() {
 
     const url = appliedBaseUrl.trim();
     setLoginSessionMode(url ? loginSessionModeForTargetUrl(url) : "browser");
-
-    setSessionProgress({
-      job_id: "",
-      status: "checking",
-      pct: 10,
-      message: SESSION_STATUS.checking,
-    });
     setError("");
 
+    // 기존 세션만 재연결 — 로그인 창은 「로그인 창 띄움」 클릭 시에만 연다 (웹품질과 동일)
     if (sessionStorageFile) {
       setSessionValidated(false);
       setSessionProgress({
@@ -1215,12 +1346,7 @@ export default function PerfTestPage() {
       });
       const ok = await validateUploadSession(sessionStorageFile, appliedBaseUrl);
       if (ok) {
-        setSessionProgress({
-          job_id: "upload",
-          status: "done",
-          pct: 100,
-          message: SESSION_STATUS.done,
-        });
+        notifyPerfLoginReapply();
       }
       return;
     }
@@ -1235,57 +1361,33 @@ export default function PerfTestPage() {
       });
       const ok = await validateBrowserSession(sessionJobId, appliedBaseUrl);
       if (ok) {
-        setSessionProgress({
-          job_id: sessionJobId,
-          status: "done",
-          pct: 100,
-          message: SESSION_STATUS.done,
-        });
+        notifyPerfLoginReapply({ jobId: sessionJobId, autoConnected: true });
       }
       return;
     }
 
-    const connected = await tryConnectExistingSession();
-    if (connected) return;
-
-    if (baseUrlDirty) {
-      setSessionProgress(null);
-      setError("Base URL 변경 후 「Base URL 적용」을 누른 뒤 로그인 세션을 연결하세요.");
-      return;
-    }
-    if (!appliedBaseUrl.trim()) {
-      setSessionProgress(null);
-      setError("Base URL을 입력·적용한 뒤 로그인 세션을 연결하세요.");
-      return;
-    }
-
-    setSessionProgress({
-      job_id: "",
-      status: "running",
-      pct: 15,
-      message: SESSION_STATUS.loginRequired,
-    });
-    void startBrowserSession();
+    await tryConnectExistingSession();
   }
 
   async function startBrowserSession() {
     const targetUrl = appliedBaseUrl.trim();
     if (!targetUrl) {
-      setError("Base URL을 적용한 뒤 세션을 생성하세요.");
+      showSessionPanelMsg("Base URL을 적용한 뒤 세션을 생성하세요.");
       return;
     }
     if (!browserSessionAvailable) {
-      setError(DEPLOY_SESSION_UPLOAD_HINT);
+      showSessionPanelMsg(DEPLOY_SESSION_UPLOAD_HINT, "warn");
       setSessionProgress(null);
       return;
     }
     const regErr = registeredTargetUrlError(targetUrl);
     if (regErr) {
-      setError(regErr);
+      showSessionPanelMsg(regErr);
       return;
     }
     if (await tryConnectExistingSession()) {
       setSessionValidated(true);
+      clearSessionPanelMsg();
       setError("");
       return;
     }
@@ -1293,6 +1395,7 @@ export default function PerfTestPage() {
     setSessionPageUrl("");
     setSessionStorageFile(null);
     setSessionValidated(false);
+    clearSessionPanelMsg();
     setSessionProgress({
       job_id: "",
       status: "running",
@@ -1321,7 +1424,7 @@ export default function PerfTestPage() {
       });
       await pollSessionJob(jobId, targetUrl);
     } catch (e) {
-      setError(friendlySessionError(wrapScanFetchError(e).message));
+      showSessionPanelMsg(friendlySessionError(wrapScanFetchError(e).message));
       setSessionProgress(null);
     }
   }
@@ -1433,6 +1536,9 @@ export default function PerfTestPage() {
         result: PerfResult | null;
         lastJobId: string;
         error: string;
+        baseUrlApplyError: string;
+        scenarioApplyMsg: string;
+        scenarioApplyTone: "ok" | "warn" | "err";
       }
     >
   >({});
@@ -1447,6 +1553,9 @@ export default function PerfTestPage() {
       result,
       lastJobId,
       error,
+      baseUrlApplyError,
+      scenarioApplyMsg,
+      scenarioApplyTone,
     };
     scenarioFetchKeyRef.current = "";
     setPreviewResult(null);
@@ -1463,6 +1572,9 @@ export default function PerfTestPage() {
         setLastJobId(saved.lastJobId);
       }
       setError(saved.error);
+      setBaseUrlApplyError(saved.baseUrlApplyError || "");
+      setScenarioApplyMsg(saved.scenarioApplyMsg || "");
+      setScenarioApplyTone(saved.scenarioApplyTone || "ok");
       nextApplied = saved.appliedBaseUrl;
     } else {
       const next = defaultBaseUrlForTarget(nextTarget);
@@ -1473,6 +1585,9 @@ export default function PerfTestPage() {
         setLastJobId("");
       }
       setError("");
+      setBaseUrlApplyError("");
+      setScenarioApplyMsg("");
+      setScenarioApplyTone("ok");
       nextApplied = next;
       if (nextTarget === "manual") {
         setCustomUrls("");
@@ -1660,7 +1775,7 @@ export default function PerfTestPage() {
       return;
     }
     if (target === "ipms-online" && !isIpmsLikeUrl(appliedBaseUrl)) {
-      setError("IPMS 탭에서는 IPMS URL을 적용하거나 「URL 직접 입력」 탭을 사용하세요.");
+      setError("IPMS 탭에서는 IPMS URL을 적용하거나 「외부 URL」 탭을 사용하세요.");
       return;
     }
     if (target === "portal" && !isPortalLocalBaseUrl(appliedBaseUrl)) {
@@ -1821,7 +1936,7 @@ export default function PerfTestPage() {
       return "웹 품질 시나리오";
     }
     if (src === "manual") {
-      if (result?.har_fallback_reason) return "URL 직접 입력 (HAR 실패 → 대체)";
+      if (result?.har_fallback_reason) return "외부 URL (HAR 실패 → 대체)";
       return "URL 체크 목록";
     }
     return src || "—";
@@ -1880,7 +1995,7 @@ export default function PerfTestPage() {
       return "MyPlatform 포털 페이지 체크리스트. 로그인 필요 항목은 「로그인 필요」 체크 후 세션 준비 시 선택 가능합니다.";
     }
     if (target === "manual") {
-      return "임의 Base URL + 경로 직접 입력. 회색 placeholder는 예시일 뿐 — 입력 후 「Base URL 적용」";
+      return "";
     }
     if (target === "ipms-online") {
       return "IPMS 사전 정의 시나리오 — 공개·로그인 메뉴를 동시에 불러올 수 있습니다.";
@@ -1924,218 +2039,214 @@ export default function PerfTestPage() {
   }
 
   function renderSessionPanel() {
-    const sessionLegendChip = needLogin ? (
-      sessionReady ? (
-        <span className="wq-chip ok" style={{ marginLeft: "0.5rem" }}>
-          로그인 완료 — 로그인 시나리오 선택 가능
-        </span>
-      ) : sessionProgress?.status === "error" ? (
-        <span className="wq-chip err" style={{ marginLeft: "0.5rem" }}>
-          로그인 실패
-        </span>
-      ) : sessionProgress?.status === "checking" ? (
-        <span className="wq-chip warn" style={{ marginLeft: "0.5rem" }}>
-          확인 중…
-        </span>
-      ) : sessionProgress?.status === "running" || sessionProgress?.status === "queued" ? (
-        <span className="wq-chip warn" style={{ marginLeft: "0.5rem" }}>
-          로그인 대기 중…
-        </span>
-      ) : (
-        <span className="wq-chip warn" style={{ marginLeft: "0.5rem" }}>
-          {LOGIN_SESSION_NOT_READY}
-        </span>
-      )
-    ) : null;
+    const sessionLegendChip = sessionReady ? (
+      <span className="wq-chip ok" style={{ marginLeft: "0.5rem" }}>
+        로그인 완료 — 로그인 시나리오 선택 가능
+      </span>
+    ) : sessionProgress?.status === "error" ? (
+      <span className="wq-chip err" style={{ marginLeft: "0.5rem" }}>
+        로그인 실패
+      </span>
+    ) : sessionProgress?.status === "checking" ? (
+      <span className="wq-chip warn" style={{ marginLeft: "0.5rem" }}>
+        확인 중…
+      </span>
+    ) : sessionProgress?.status === "running" || sessionProgress?.status === "queued" ? (
+      <span className="wq-chip warn" style={{ marginLeft: "0.5rem" }}>
+        로그인 대기 중…
+      </span>
+    ) : (
+      <span className="wq-chip warn" style={{ marginLeft: "0.5rem" }}>
+        {LOGIN_SESSION_NOT_READY}
+      </span>
+    );
 
     return (
-      <fieldset
-        className={`wq-runtime-block wq-session-fieldset perf-session-block${
-          needLogin && sessionReady ? " is-ready" : needLogin ? " is-pending" : ""
-        }`}
-      >
-        <legend className="hint" style={{ marginBottom: "0.5rem" }}>
-          <strong>로그인 세션 (HAR · Locust)</strong>
-          {sessionLegendChip}
-        </legend>
-        <p className="hint">
-          공동인증서(2단계)는 세션 JSON 업로드를 권장합니다.
-          {perfTargetIsPortal && !isLocalPortalHost() ? (
-            <>
-              {" "}
-              {DEPLOY_PORTAL_AUTO_LOGIN_HINT}
-            </>
-          ) : !browserSessionAvailable ? (
-            <>
-              {" "}
-              {DEPLOY_SESSION_UPLOAD_HINT}
-            </>
-          ) : null}
-        </p>
-        <label className="check-row">
+      <>
+        <label className="check-row" style={{ marginTop: "0.75rem" }}>
           <input
             type="checkbox"
             checked={needLogin}
             onChange={(e) => void handleNeedLoginChange(e.target.checked)}
           />
-          로그인 필요 (세션 없으면 공개 페이지만 측정)
+          로그인 필요
         </label>
-        {!needLogin && sessionReady ? (
+        {!needLogin && (sessionJobId.trim() || sessionStorageFile) ? (
           <p className="hint perf-session-persisted">
             저장된 로그인 세션이 있습니다. 체크하면 자동 연결 · 로그인 필요 시나리오를 점검할 수 있습니다.
           </p>
         ) : null}
         {needLogin ? (
-          <div className="wq-session-methods" role="radiogroup" aria-label="로그인 세션 방식">
-            <label className="wq-ipms-source-option">
-              <input
-                type="radio"
-                name="perf-login-session"
-                checked={loginSessionMode === "browser"}
-                onChange={() => setLoginSessionMode("browser")}
-              />
-              로그인 세션 자동 생성
-            </label>
-            {loginSessionMode === "browser" ? (
-              <div className="wq-session-method-body">
-                <div className="btn-row">
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={
-                      !appliedBaseUrl.trim() ||
-                      baseUrlDirty ||
-                      !browserSessionAvailable ||
-                      sessionProgress?.status === "running" ||
-                      sessionProgress?.status === "queued"
-                    }
-                    onClick={() => void startBrowserSession()}
-                  >
-                    {sessionProgress?.status === "running" || sessionProgress?.status === "queued"
-                      ? perfTargetIsPortal && !isLocalPortalHost()
-                        ? "포털 자동 로그인 중…"
-                        : "로그인 창 대기 중…"
-                      : perfTargetIsPortal && !isLocalPortalHost()
-                        ? "포털 자동 로그인"
-                        : "로그인 창 띄움"}
-                  </button>
-                  {sessionProgress?.status === "running" || sessionProgress?.status === "queued" ? (
-                    <button type="button" className="btn ghost" onClick={() => void cancelSession()}>
-                      세션 취소
+          <>
+            <fieldset
+              className={`wq-runtime-block wq-session-fieldset${sessionReady ? " is-ready" : " is-pending"}`}
+              style={{ marginTop: "0.75rem" }}
+            >
+            <legend className="hint" style={{ marginBottom: "0.5rem" }}>
+              <strong>로그인 세션</strong>
+              {sessionLegendChip}
+            </legend>
+            <p className="hint">
+              공동인증서(2단계)는 세션 JSON 업로드를 권장합니다.
+              {hostReady && perfTargetIsPortal && !localPortalHost ? (
+                <>
+                  {" "}
+                  {DEPLOY_PORTAL_AUTO_LOGIN_HINT}
+                </>
+              ) : hostReady && !browserSessionAvailable ? (
+                <>
+                  {" "}
+                  {DEPLOY_SESSION_UPLOAD_HINT}
+                </>
+              ) : null}
+            </p>
+            <div className="wq-session-methods" role="radiogroup" aria-label="로그인 세션 방식">
+              <label className="wq-ipms-source-option">
+                <input
+                  type="radio"
+                  name="perf-login-session"
+                  checked={loginSessionMode === "browser"}
+                  onChange={() => setLoginSessionMode("browser")}
+                />
+                로그인 세션 자동 생성
+              </label>
+              {loginSessionMode === "browser" ? (
+                <div className="wq-session-method-body">
+                  <div className="btn-row">
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={
+                        !appliedBaseUrl.trim() ||
+                        baseUrlDirty ||
+                        !browserSessionAvailable ||
+                        sessionProgress?.status === "running" ||
+                        sessionProgress?.status === "queued"
+                      }
+                      onClick={() => void startBrowserSession()}
+                    >
+                      {sessionProgress?.status === "running" || sessionProgress?.status === "queued"
+                        ? perfTargetIsPortal && !localPortalHost
+                          ? "포털 자동 로그인 중…"
+                          : "로그인 창 대기 중…"
+                        : perfTargetIsPortal && !localPortalHost
+                          ? "포털 자동 로그인"
+                          : "로그인 창 띄움"}
                     </button>
+                  </div>
+                  {!browserSessionAvailable ? (
+                    <p className="hint">{DEPLOY_SESSION_UPLOAD_HINT}</p>
+                  ) : null}
+                  {sessionProgress &&
+                  (sessionProgress.status === "checking" ||
+                    sessionProgress.status === "running" ||
+                    sessionProgress.status === "queued" ||
+                    sessionProgress.status === "done" ||
+                    sessionProgress.status === "error") ? (
+                    <div className="run-progress source-scan-progress">
+                      <div
+                        className="progress-bar"
+                        role="progressbar"
+                        aria-valuenow={Math.round(sessionProgress.pct)}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                      >
+                        <div className="progress-fill" style={{ width: `${sessionProgress.pct}%` }} />
+                      </div>
+                      <p
+                        className={`hint${
+                          sessionProgress.status === "done"
+                            ? " perf-session-done-msg"
+                            : sessionProgress.status === "error"
+                              ? " err"
+                              : ""
+                        }`}
+                      >
+                        {sessionProgress.status === "error"
+                          ? sessionProgress.message
+                          : `${Math.round(sessionProgress.pct)}% · ${sessionProgress.message}`}
+                      </p>
+                      {browserSessionAvailable &&
+                      localPortalHost &&
+                      (sessionProgress.status === "running" || sessionProgress.status === "queued") ? (
+                        <p className="hint">
+                          창이 뒤에 가려지면 작업 표시줄 또는 Alt+Tab으로 창을 선택하세요.
+                        </p>
+                      ) : null}
+                      {sessionViaBrowser && sessionValidated && sessionProgress.status === "done" ? (
+                        <p className="hint perf-session-browser-done">
+                          <span className="wq-chip ok">브라우저 세션 연결됨</span>
+                          {" · "}
+                          {perfSessionNextStepHint(sessionWordingMode)}
+                        </p>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
-                {!browserSessionAvailable ? (
-                  <p className="hint">{DEPLOY_SESSION_UPLOAD_HINT}</p>
-                ) : null}
-                {sessionProgress &&
-                (sessionProgress.status === "checking" ||
-                  sessionProgress.status === "running" ||
-                  sessionProgress.status === "queued" ||
-                  sessionProgress.status === "done" ||
-                  sessionProgress.status === "error") ? (
-                  <div className="run-progress source-scan-progress">
-                    <div className="progress-bar">
-                      <div className="progress-fill" style={{ width: `${sessionProgress.pct}%` }} />
-                    </div>
-                    <p
-                      className={`hint${
-                        sessionProgress.status === "done"
-                          ? " perf-session-done-msg"
-                          : sessionProgress.status === "error"
-                            ? " err"
-                            : ""
-                      }`}
-                    >
-                      {sessionProgress.status === "error"
-                        ? sessionProgress.message
-                        : `${Math.round(sessionProgress.pct)}% · ${sessionProgress.message}`}
-                    </p>
-                    {browserSessionAvailable &&
-                    isLocalPortalHost() &&
-                    (sessionProgress.status === "running" || sessionProgress.status === "queued") ? (
-                      <p className="hint">
-                        창이 뒤에 가려지면 작업 표시줄 또는 Alt+Tab으로 창을 선택하세요.
-                      </p>
-                    ) : null}
-                    {sessionViaBrowser && sessionValidated && sessionProgress.status === "done" ? (
-                      <p className="hint perf-session-browser-done">
-                        <span className="wq-chip ok">브라우저 세션 연결됨</span>
-                        {" · "}
-                        {perfSessionNextStepHint(sessionWordingMode)}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-            <label className="wq-ipms-source-option">
-              <input
-                type="radio"
-                name="perf-login-session"
-                checked={loginSessionMode === "upload"}
-                onChange={() => setLoginSessionMode("upload")}
-              />
-              세션 JSON 업로드
-            </label>
-            {loginSessionMode === "upload" ? (
-              <div className="wq-session-method-body">
-                <label className="wq-ipms-source-file">
-                  <input
-                    type="file"
-                    accept=".json,application/json"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] ?? null;
-                      setSessionStorageFile(file);
-                      if (file) {
-                        const url = appliedBaseUrl.trim();
-                        setSessionJobId("");
-                        setSessionPageUrl(url);
-                        setSessionValidated(false);
-                        clearPersistedLoginSession();
-                        cacheUploadSession(url, file);
-                        setSessionProgress({
-                          job_id: "upload",
-                          status: "checking",
-                          pct: 50,
-                          message: SESSION_STATUS.checking,
-                        });
-                        void validateUploadSession(file, url).then((ok) => {
-                          if (ok) {
-                            setSessionProgress({
-                              job_id: "upload",
-                              status: "done",
-                              pct: 100,
-                              message: SESSION_STATUS.done,
-                            });
-                          } else {
-                            setSessionStorageFile(null);
-                            delete uploadSessionByUrlRef.current[url];
-                          }
-                        });
-                      } else {
-                        setSessionValidated(false);
-                        setSessionProgress(null);
-                      }
-                    }}
-                  />
-                </label>
-                {sessionViaUpload && sessionValidated ? (
-                  <p className="hint perf-session-upload-done">
-                    <span className="wq-chip ok">JSON 업로드됨</span>
-                    {" · "}
-                    {perfSessionNextStepHint(sessionWordingMode)}
-                  </p>
-                ) : sessionProgress?.status === "checking" ? (
-                  <p className="msg wq-session-status">로그인 세션 확인 중…</p>
-                ) : sessionProgress?.status === "error" ? (
-                  <p className="msg err wq-session-status">로그인 실패</p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
+              ) : null}
+              <label className="wq-ipms-source-option">
+                <input
+                  type="radio"
+                  name="perf-login-session"
+                  checked={loginSessionMode === "upload"}
+                  onChange={() => setLoginSessionMode("upload")}
+                />
+                세션 JSON 업로드
+              </label>
+              {loginSessionMode === "upload" ? (
+                <div className="wq-session-method-body">
+                  <label className="wq-ipms-source-file">
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        setSessionStorageFile(file);
+                        if (file) {
+                          const url = appliedBaseUrl.trim();
+                          setSessionJobId("");
+                          setSessionPageUrl(url);
+                          setSessionValidated(false);
+                          clearPersistedLoginSession();
+                          cacheUploadSession(url, file);
+                          setSessionProgress({
+                            job_id: "upload",
+                            status: "checking",
+                            pct: 50,
+                            message: SESSION_STATUS.checking,
+                          });
+                          void validateUploadSession(file, url).then((ok) => {
+                            if (ok) {
+                              notifyPerfLoginReapply();
+                            } else {
+                              setSessionStorageFile(null);
+                              delete uploadSessionByUrlRef.current[url];
+                            }
+                          });
+                        } else {
+                          setSessionValidated(false);
+                          setSessionProgress(null);
+                        }
+                      }}
+                    />
+                  </label>
+                  {sessionViaUpload && sessionValidated ? (
+                    <p className="msg ok wq-session-status">로그인 완료</p>
+                  ) : sessionProgress?.status === "checking" ? (
+                    <p className="msg wq-session-status">로그인 세션 확인 중…</p>
+                  ) : sessionProgress?.status === "error" ? (
+                    <p className="msg err wq-session-status">로그인 실패</p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </fieldset>
+          {sessionPanelMsg ? (
+            <p className={`msg wq-session-panel-msg ${sessionPanelTone}`}>{sessionPanelMsg}</p>
+          ) : null}
+          </>
         ) : null}
-      </fieldset>
+      </>
     );
   }
 
@@ -2225,7 +2336,7 @@ export default function PerfTestPage() {
           </div>
 
           <div className="wq-step-block">
-            <p className="hint">{targetHint}</p>
+            {targetHint ? <p className="hint">{targetHint}</p> : null}
             <fieldset className="wq-ipms-source">
               <legend>화면 시나리오 가져오기</legend>
               <div className="wq-ipms-source-url-block">
@@ -2241,32 +2352,30 @@ export default function PerfTestPage() {
                     onChange={(e) => {
                       setBaseUrlInput(e.target.value);
                       setBaseUrlApplyError("");
+                      setScenarioApplyMsg("");
+                      setScenarioApplyTone("ok");
                     }}
                     placeholder={baseUrlPlaceholderForTarget(target)}
                   />
                   <button
                     type="button"
                     className="btn"
-                    disabled={!baseUrlDirty || scenarioLoading}
+                    disabled={!baseUrlInput.trim() || scenarioLoading}
                     onClick={() => applyBaseUrl()}
                   >
                     {scenarioLoading ? "적용 중…" : "적용"}
                   </button>
                 </div>
                 {baseUrlApplyError ? (
-                  <p className="msg err wq-ipms-source-apply-msg-inline">{baseUrlApplyError}</p>
+                  <div className="msg err wq-ipms-source-apply-msg-inline">{baseUrlApplyError}</div>
                 ) : scenarioLoading ? (
-                  <p className="msg wq-ipms-source-apply-msg-inline">시나리오 불러오는 중…</p>
-                ) : !baseUrlDirty && appliedBaseUrl.trim() && scenarioApplyMsg.includes("추출 성공") ? (
-                  <p className="msg ok wq-ipms-source-apply-msg-inline">{scenarioApplyMsg}</p>
+                  <div className="msg wq-ipms-source-apply-msg-inline">시나리오 불러오는 중…</div>
+                ) : !baseUrlDirty && appliedBaseUrl.trim() && scenarioApplyMsg ? (
+                  <div className={`msg wq-ipms-source-apply-msg-inline ${scenarioApplyTone}`}>
+                    {scenarioApplyMsg}
+                  </div>
                 ) : null}
               </div>
-              {target === "manual" ? (
-                <p className="hint wq-ipms-source-foot perf-base-url-sample">
-                  placeholder <code>{MANUAL_BASE_URL_PLACEHOLDER}</code> 는 예시입니다 — 비워 두거나 직접
-                  입력하세요.
-                </p>
-              ) : null}
             </fieldset>
             <div className="form-grid perf-base-url-grid">
               {showIpmsControls ? (
@@ -2327,7 +2436,7 @@ export default function PerfTestPage() {
           {target === "ipms-online" && !showIpmsControls && !baseUrlDirty ? (
             <p className="msg warn">
               적용된 Base URL이 IPMS Online(<code>ipms.online</code>)이 아닙니다. IPMS 시나리오·접근 옵션은 표시하지 않습니다.
-              <code>ipms.admin</code> 등 다른 경로는 「URL 직접 입력」 탭을 사용하세요.
+              <code>ipms.admin</code> 등 다른 경로는 「외부 URL」 탭을 사용하세요.
             </p>
           ) : null}
 
@@ -2693,7 +2802,7 @@ export default function PerfTestPage() {
               ) : null}
             </div>
           ) : null}
-          {error ? <p className="msg err">{error}</p> : null}
+          {error && !sessionPanelMsg ? <p className="msg err">{error}</p> : null}
         </section>
 
         {summary && !isBusyHere ? (

@@ -71,6 +71,7 @@ export function relationToEdge(rel: ErRelation): Edge {
       cardinality: normalizeCardinality(rel.cardinality),
       isIdentifying: rel.isIdentifying ?? false,
       pathOffset: rel.pathOffset ?? 0,
+      pathOffsetV: rel.pathOffsetV ?? 0,
       fromYOffset: rel.fromYOffset ?? 0,
       toYOffset: rel.toYOffset ?? 0,
       fromXOffset: rel.fromXOffset ?? 0,
@@ -81,7 +82,7 @@ export function relationToEdge(rel: ErRelation): Edge {
   };
 }
 
-export { optimizeRelationSides } from "./edgeRouting";
+export { optimizeRelationSides, rerouteRelationsForTables } from "./edgeRouting";
 
 export function applyNodePositions(project: ErProject, nodes: Node[]): ErProject {
   const posById = Object.fromEntries(nodes.map((n) => [n.id, n.position]));
