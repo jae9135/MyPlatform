@@ -8,7 +8,7 @@ import {
 } from "@/lib/designHandoff";
 
 import { API_BASE } from "@/lib/apiBase";
-import { postScanMultipart } from "@/lib/localScanApi";
+import { fetchScanApi, postScanMultipart } from "@/lib/localScanApi";
 
 const PAGE_SIZE = 100;
 
@@ -479,7 +479,24 @@ export default function ChkDbStdPage() {
         if (sheetName) fd.append("sheet", sheetName);
         // In cloud, postScanMultipart sends the upload directly to Render so
         // validation is not cut off by the Vercel proxy function time limit.
-        const res = await postScanMultipart("v1/chk-db-std/validate", fd);
+        let res: Response;
+        try {
+          res = await postScanMultipart("v1/chk-db-std/validate", fd);
+        } catch (e) {
+          const reason = String((e as Error).message || e);
+          if (!reason.includes("Failed to fetch") && !reason.includes("NetworkError")) {
+            throw e;
+          }
+          // A direct Render response can be hidden by CORS when the API key or
+          // allowed origin is misconfigured. Retry through the same-origin proxy
+          // so the API can return its actual HTTP error details.
+          res = await fetchScanApi(
+            "v1/chk-db-std/validate",
+            { method: "POST", body: fd },
+            180_000,
+            { forceProxy: true }
+          );
+        }
         const responseText = await res.text();
         let j: Record<string, unknown> = {};
         try {

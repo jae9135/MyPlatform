@@ -23,6 +23,7 @@ build/
 **/*.xlsx
 !**/*.example.xlsx
 !**/*.sample.xlsx
+!apps/api/samples/테이블정의서_샘플.xlsx
 **/표준*매칭결과*
 **/.chkdbstd_tmp/
 # keep bundled code index for Render (apps/api/chkdbstd)
