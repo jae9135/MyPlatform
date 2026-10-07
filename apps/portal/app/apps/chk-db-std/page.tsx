@@ -141,6 +141,23 @@ function fileKey(f: File): string {
   return `${f.name}:${f.size}:${f.lastModified}`;
 }
 
+async function postChkDbStdMultipart(path: string, fd: FormData): Promise<Response> {
+  try {
+    return await postScanMultipart(path, fd);
+  } catch (e) {
+    const reason = String((e as Error).message || e);
+    if (!reason.includes("Failed to fetch") && !reason.includes("NetworkError")) {
+      throw e;
+    }
+    return fetchScanApi(
+      path,
+      { method: "POST", body: fd },
+      180_000,
+      { forceProxy: true }
+    );
+  }
+}
+
 function buildRunCacheKey(
   kind: Kind,
   file: File,
@@ -477,26 +494,7 @@ export default function ChkDbStdPage() {
         fd.append("design", target);
         fd.append("kind", checkKind);
         if (sheetName) fd.append("sheet", sheetName);
-        // In cloud, postScanMultipart sends the upload directly to Render so
-        // validation is not cut off by the Vercel proxy function time limit.
-        let res: Response;
-        try {
-          res = await postScanMultipart("v1/chk-db-std/validate", fd);
-        } catch (e) {
-          const reason = String((e as Error).message || e);
-          if (!reason.includes("Failed to fetch") && !reason.includes("NetworkError")) {
-            throw e;
-          }
-          // A direct Render response can be hidden by CORS when the API key or
-          // allowed origin is misconfigured. Retry through the same-origin proxy
-          // so the API can return its actual HTTP error details.
-          res = await fetchScanApi(
-            "v1/chk-db-std/validate",
-            { method: "POST", body: fd },
-            180_000,
-            { forceProxy: true }
-          );
-        }
+        const res = await postChkDbStdMultipart("v1/chk-db-std/validate", fd);
         const responseText = await res.text();
         let j: Record<string, unknown> = {};
         try {
@@ -703,19 +701,22 @@ export default function ChkDbStdPage() {
       fd.append("format", "json");
       appendSheet(fd);
       appendStdCsv(fd);
-      const res = await fetch(`${API_BASE}/v1/chk-db-std/run`, {
-        method: "POST",
-        body: fd,
-      });
+      const res = await postChkDbStdMultipart("v1/chk-db-std/run", fd);
       if (!res.ok) {
-        let detail = "실행 실패";
+        const responseText = await res.text();
+        let detail = "";
         try {
-          const j = await res.json();
-          detail = j.detail || j.error || detail;
+          const j = responseText ? JSON.parse(responseText) : {};
+          detail = String(j.detail || j.error || "").trim();
         } catch {
-          /* ignore */
+          // Keep a short excerpt for non-JSON proxy/runtime errors.
         }
-        throw new Error(detail);
+        const excerpt = responseText.replace(/\s+/g, " ").trim().slice(0, 180);
+        throw new Error(
+          `점검 API 오류 (HTTP ${res.status})${
+            detail ? ` — ${detail}` : excerpt ? ` — ${excerpt}` : " — 응답 본문 없음"
+          }`
+        );
       }
       const data = (await res.json()) as CheckResult;
       const cacheKey = getRunCacheKey(kind);
@@ -762,10 +763,7 @@ export default function ChkDbStdPage() {
       fd.append("format", "xlsx");
       appendSheet(fd);
       appendStdCsv(fd);
-      const res = await fetch(`${API_BASE}/v1/chk-db-std/run`, {
-        method: "POST",
-        body: fd,
-      });
+      const res = await postChkDbStdMultipart("v1/chk-db-std/run", fd);
       if (!res.ok) {
         let detail = "다운로드 실패";
         try {
@@ -814,10 +812,7 @@ export default function ChkDbStdPage() {
       fd.append("format", dictFormat);
       appendSheet(fd);
       appendStdCsv(fd);
-      const res = await fetch(`${API_BASE}/v1/chk-db-std/run`, {
-        method: "POST",
-        body: fd,
-      });
+      const res = await postChkDbStdMultipart("v1/chk-db-std/run", fd);
       if (!res.ok) {
         let detail = `${label} 다운로드 실패`;
         try {
@@ -1035,6 +1030,7 @@ export default function ChkDbStdPage() {
                 }}
               />
             </label>
+            <span>{activeFile?.name || "선택된 파일 없음"}</span>
           </div>
         ) : (
           <div className="row">
@@ -1052,6 +1048,7 @@ export default function ChkDbStdPage() {
                 }}
               />
             </label>
+            <span>{activeFile?.name || "선택된 파일 없음"}</span>
           </div>
         )}
         <p

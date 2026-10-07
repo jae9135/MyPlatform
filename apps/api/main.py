@@ -538,15 +538,10 @@ async def run_chk_db_std(
         )
 
         try:
-            check = m.validate_check_design(
-                design_path, kind=kind, sheet_name=sheet_name
-            )
-            if not check.get("can_check"):
-                raise HTTPException(
-                    status_code=400,
-                    detail=check.get("message", "설계서 형식 확인 실패"),
-                )
-            match_df, review_df, unmatched_df, payload, cols, mode = _run_check(
+            # _run_check validates the workbook while loading it. Avoid parsing
+            # the same Excel once for preflight and again for the actual check.
+            match_df, review_df, unmatched_df, payload, cols, mode = await asyncio.to_thread(
+                _run_check,
                 m,
                 design_path,
                 kind,

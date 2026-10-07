@@ -117,10 +117,15 @@ ORACLE_TO_DOMAIN_TYPE = {
 
 
 def load_design(path: Path, sheet_name: str | None = None) -> pd.DataFrame:
-    from dbmanager.excel_parser import parse_excel_with_meta, table_defs_to_dataframe_rows
+    from dbmanager.excel_parser import parse_excel_with_meta
 
     parsed = parse_excel_with_meta(path, sheet_name)
-    tables = parsed.tables
+    return _design_frame_from_tables(parsed.tables)
+
+
+def _design_frame_from_tables(tables) -> pd.DataFrame:
+    from dbmanager.excel_parser import table_defs_to_dataframe_rows
+
     if not tables:
         raise ValueError("테이블정의서에서 테이블/컬럼 정의를 찾지 못했습니다.")
     df = pd.DataFrame(table_defs_to_dataframe_rows(tables))
@@ -564,7 +569,7 @@ def validate_check_design(
         parsed = parse_excel_with_meta(path, sheet_name)
         if not parsed.tables:
             raise ValueError("Excel에서 테이블/컬럼 정의를 찾지 못했습니다.")
-        load_design(path, sheet_name)
+        _design_frame_from_tables(parsed.tables)
         total_columns = sum(len(t.columns) for t in parsed.tables)
         format_label = "목록형" if parsed.format == "flat" else "블록형"
         return {
