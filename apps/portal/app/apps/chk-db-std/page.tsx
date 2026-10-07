@@ -1027,9 +1027,12 @@ export default function ChkDbStdPage() {
                 type="file"
                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 disabled={busy}
-                onChange={(e) =>
-                  onDesignFileChange(e.target.files?.[0] || null, "table")
-                }
+                onChange={(e) => {
+                  const input = e.currentTarget;
+                  onDesignFileChange(input.files?.[0] || null, "table");
+                  // Let the user reselect the same workbook to trigger validation again.
+                  input.value = "";
+                }}
               />
             </label>
           </div>
@@ -1041,9 +1044,12 @@ export default function ChkDbStdPage() {
                 type="file"
                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 disabled={busy}
-                onChange={(e) =>
-                  onDesignFileChange(e.target.files?.[0] || null, "code")
-                }
+                onChange={(e) => {
+                  const input = e.currentTarget;
+                  onDesignFileChange(input.files?.[0] || null, "code");
+                  // Let the user reselect the same workbook to trigger validation again.
+                  input.value = "";
+                }}
               />
             </label>
           </div>
