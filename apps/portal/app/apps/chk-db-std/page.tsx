@@ -354,6 +354,7 @@ export default function ChkDbStdPage() {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [samples, setSamples] = useState<SampleItem[]>([]);
+  const [samplesError, setSamplesError] = useState("");
   const [result, setResult] = useState<CheckResult | null>(null);
   const [tab, setTab] = useState<ResultTab>("match");
   const [resultQuery, setResultQuery] = useState("");
@@ -414,11 +415,26 @@ export default function ChkDbStdPage() {
     (async () => {
       try {
         const res = await fetch(`${API_BASE}/v1/chk-db-std/samples`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          if (!cancelled) {
+            setSamplesError(
+              String(body.detail || body.message || `API 오류 (HTTP ${res.status})`)
+            );
+          }
+          return;
+        }
         const j = await res.json();
-        if (!cancelled) setSamples(j.items || []);
-      } catch {
-        /* ignore — API offline */
+        if (!cancelled) {
+          setSamples(j.items || []);
+          setSamplesError("");
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setSamplesError(
+            String((e as Error).message || "API에 연결할 수 없습니다.")
+          );
+        }
       }
     })();
     return () => {
@@ -464,9 +480,20 @@ export default function ChkDbStdPage() {
           method: "POST",
           body: fd,
         });
-        const j = await res.json().catch(() => ({}));
+        const responseText = await res.text();
+        let j: Record<string, unknown> = {};
+        try {
+          j = responseText ? JSON.parse(responseText) : {};
+        } catch {
+          // Preserve status and a short response excerpt for proxy/runtime errors.
+        }
         if (!res.ok && !j.message) {
-          throw new Error(j.detail || "형식 확인 실패");
+          const detail = String(j.detail || j.message || "").trim();
+          const excerpt = responseText.replace(/\s+/g, " ").trim().slice(0, 180);
+          throw new Error(
+            detail ||
+              `API 오류 (HTTP ${res.status})${excerpt ? ` — ${excerpt}` : " — 응답 본문 없음"}`
+          );
         }
         const canCheck = Boolean(j.can_check);
         const detectedSheet = j.sheet ? String(j.sheet) : "";
@@ -909,7 +936,11 @@ export default function ChkDbStdPage() {
           선택한 점검 종류에 맞는 샘플을 받아 바로 점검에 사용할 수 있습니다.
         </p>
         {filteredSamples.length === 0 ? (
-          <p className="hint">등록된 샘플이 없거나 API에 연결되지 않았습니다.</p>
+          <p className="hint">
+            {samplesError
+              ? `API 연결 실패: ${samplesError}`
+              : "등록된 샘플이 없습니다."}
+          </p>
         ) : (
           <ul className="sample-list">
             {filteredSamples.map((s) => (
