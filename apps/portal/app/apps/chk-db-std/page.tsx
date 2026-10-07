@@ -8,6 +8,7 @@ import {
 } from "@/lib/designHandoff";
 
 import { API_BASE } from "@/lib/apiBase";
+import { postScanMultipart } from "@/lib/localScanApi";
 
 const PAGE_SIZE = 100;
 
@@ -476,10 +477,9 @@ export default function ChkDbStdPage() {
         fd.append("design", target);
         fd.append("kind", checkKind);
         if (sheetName) fd.append("sheet", sheetName);
-        const res = await fetch(`${API_BASE}/v1/chk-db-std/validate`, {
-          method: "POST",
-          body: fd,
-        });
+        // In cloud, postScanMultipart sends the upload directly to Render so
+        // validation is not cut off by the Vercel proxy function time limit.
+        const res = await postScanMultipart("v1/chk-db-std/validate", fd);
         const responseText = await res.text();
         let j: Record<string, unknown> = {};
         try {
