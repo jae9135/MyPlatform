@@ -452,8 +452,13 @@ async def validate_chk_db_std(
         design_path = Path(tmp) / (design.filename or "design.xlsx")
         design_path.write_bytes(raw)
         try:
-            payload = m.validate_check_design(
-                design_path, kind=kind, sheet_name=sheet_name
+            # Excel parsing is synchronous; keep it off the async event loop so
+            # health checks and other requests remain responsive during validation.
+            payload = await asyncio.to_thread(
+                m.validate_check_design,
+                design_path,
+                kind=kind,
+                sheet_name=sheet_name,
             )
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
