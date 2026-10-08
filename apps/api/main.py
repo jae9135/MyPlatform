@@ -432,6 +432,22 @@ def download_sample(sample_id: str):
     )
 
 
+@app.post("/v1/chk-db-std/sheets")
+async def list_chk_db_std_sheets(design: UploadFile = File(...)) -> dict:
+    """Return workbook sheet names without inspecting the design format."""
+    raw = await design.read()
+    if not raw:
+        raise HTTPException(400, detail="empty design file")
+    _ensure_api_path()
+    from dbmanager.excel_parser import list_excel_sheets  # type: ignore
+
+    try:
+        sheets = await asyncio.to_thread(list_excel_sheets, raw)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"sheets": sheets}
+
+
 @app.post("/v1/chk-db-std/validate")
 async def validate_chk_db_std(
     design: UploadFile = File(...),
@@ -447,7 +463,30 @@ async def validate_chk_db_std(
         raise HTTPException(400, detail="empty design file")
 
     m = _load_chk_module()
+    _ensure_api_path()
+    from dbmanager.excel_parser import list_excel_sheets  # type: ignore
+
     sheet_name = sheet.strip() or None
+    try:
+        available_sheets = await asyncio.to_thread(list_excel_sheets, raw)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not sheet_name or sheet_name not in available_sheets:
+        def normalized(value: str) -> str:
+            return "".join(ch for ch in value.lower() if ch.isalnum())
+
+        preferred = next(
+            (
+                name
+                for name in available_sheets
+                if any(
+                    hint in normalized(name)
+                    for hint in ("테이블정의서", "테이블명세서", "테이블목록")
+                )
+            ),
+            None,
+        )
+        sheet_name = preferred or (available_sheets[0] if available_sheets else None)
     with tempfile.TemporaryDirectory(prefix="myplatform_chk_val_") as tmp:
         design_path = Path(tmp) / (design.filename or "design.xlsx")
         design_path.write_bytes(raw)
@@ -463,8 +502,10 @@ async def validate_chk_db_std(
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
+    payload["sheets"] = available_sheets
+    payload.setdefault("sheet", sheet_name)
     if not payload.get("can_check"):
-        raise HTTPException(status_code=400, detail=payload.get("message", "확인 실패"))
+        return JSONResponse(status_code=400, content=payload)
     return payload
 
 

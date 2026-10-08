@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import re
+import zipfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from typing import BinaryIO
@@ -108,23 +111,185 @@ class ParseMeta:
     author: str = ""
 
 
-def parse_excel(
-    source: Path | BinaryIO, sheet_name: str | None = DEFAULT_SHEET
-) -> list[TableDef]:
-    """Read table/column definitions from Excel and return grouped TableDef list."""
-    return parse_excel_with_meta(source, sheet_name).tables
+_MAX_CACHED_WORKBOOK_BYTES = 10 * 1024 * 1024
 
 
-def parse_excel_with_meta(
-    source: Path | BinaryIO, sheet_name: str | None = DEFAULT_SHEET
-) -> ParseMeta:
-    wb = openpyxl.load_workbook(source, data_only=True)
-    resolved = resolve_sheet(wb, sheet_name)
-    ws = wb[resolved]
-    tables, fmt = _parse_worksheet(ws)
-    system_name = _read_system_name(ws, fmt)
-    created_date, author = _read_doc_meta(ws, fmt)
-    wb.close()
+def _collapse_style_records(
+    xml: bytes, collection: bytes, child: bytes
+) -> tuple[bytes, int]:
+    name = rb"(?:[A-Za-z_][\w.-]*:)?" + collection
+    section_re = re.compile(
+        rb"(<" + name + rb"\b[^>]*>)(.*?)(</" + name + rb">)", re.S
+    )
+    match = section_re.search(xml)
+    if not match:
+        return xml, 0
+    count_match = re.search(rb"\bcount=[\"'](\d+)[\"']", match.group(1))
+    count = int(count_match.group(1)) if count_match else 0
+    child_name = rb"(?:[A-Za-z_][\w.-]*:)?" + child
+    child_re = re.compile(
+        rb"<" + child_name + rb"\b[^>]*/>|<" + child_name + rb"\b[^>]*>.*?</" + child_name + rb">",
+        re.S,
+    )
+    first = child_re.search(match.group(2))
+    if not first:
+        return xml, count
+    opening = re.sub(
+        rb"\bcount=[\"'][^\"']*[\"']", b'count="1"', match.group(1), count=1
+    )
+    compact = opening + first.group(0) + match.group(3)
+    return xml[: match.start()] + compact + xml[match.end() :], count
+
+
+def list_excel_sheets(raw: bytes) -> list[str]:
+    """Read workbook sheet names from the small workbook.xml part only."""
+    try:
+        with zipfile.ZipFile(BytesIO(raw)) as archive:
+            root = ET.fromstring(archive.read("xl/workbook.xml"))
+        ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        return [
+            sheet.attrib["name"]
+            for sheet in root.findall("x:sheets/x:sheet", ns)
+            if sheet.attrib.get("name")
+            and sheet.attrib.get("state", "visible") == "visible"
+        ]
+    except (KeyError, ET.ParseError, zipfile.BadZipFile):
+        raise ValueError("올바른 .xlsx 파일이 아닙니다.")
+
+
+def _trim_redundant_named_styles(raw: bytes, sheet_name: str | None = None) -> bytes:
+    """Drop pathological duplicate named styles before openpyxl reads values.
+
+    The table parser consumes values and merged ranges, not cell formatting.
+    Some Excel exports contain tens of thousands of duplicate named styles.
+    """
+    try:
+        with zipfile.ZipFile(BytesIO(raw)) as source_zip:
+            workbook_xml = source_zip.read("xl/workbook.xml")
+            selected_sheet = None
+            if sheet_name:
+                root = ET.fromstring(workbook_xml)
+                ns_uri = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                sheets = root.find(f"{{{ns_uri}}}sheets")
+                if sheets is not None:
+                    requested = normalize_label(sheet_name)
+                    matches = [s for s in sheets if s.attrib.get("name") == sheet_name]
+                    if not matches:
+                        matches = [
+                            s
+                            for s in sheets
+                            if normalize_label(s.attrib.get("name", "")) == requested
+                        ]
+                    if matches:
+                        selected_sheet = matches[0].attrib.get("name")
+                        for sheet in list(sheets):
+                            if sheet is not matches[0]:
+                                sheets.remove(sheet)
+                        views = root.find(f"{{{ns_uri}}}bookViews")
+                        if views is not None:
+                            for view in views:
+                                view.set("activeTab", "0")
+                        # Defined names can refer to original sheet indexes; the parser does not use them.
+                        defined_names = root.find(f"{{{ns_uri}}}definedNames")
+                        if defined_names is not None:
+                            root.remove(defined_names)
+                        workbook_xml = ET.tostring(
+                            root, encoding="utf-8", xml_declaration=True
+                        )
+            style_info = source_zip.getinfo("xl/styles.xml")
+            if style_info.file_size <= 1_000_000 and selected_sheet is None:
+                return raw
+            styles_xml = source_zip.read("xl/styles.xml")
+            clean_styles = style_info.file_size > 1_000_000
+            style_xfs = re.search(
+                rb"<(?:(?:[A-Za-z_][\w.-]*:)?)cellStyleXfs\b[^>]*\bcount=[\"'](\d+)[\"']",
+                styles_xml,
+            )
+            cell_styles = re.search(
+                rb"<(?:(?:[A-Za-z_][\w.-]*:)?)cellStyles\b[^>]*\bcount=[\"'](\d+)[\"']",
+                styles_xml,
+            )
+            if clean_styles and (style_xfs is None or cell_styles is None):
+                clean_styles = False
+            style_count = (
+                max(int(style_xfs.group(1)), int(cell_styles.group(1)))
+                if clean_styles
+                else 0
+            )
+            if clean_styles and style_count < 4096 and selected_sheet is None:
+                return raw
+
+            if clean_styles:
+                for collection, child in (
+                    (b"cellStyleXfs", b"xf"),
+                    (b"cellStyles", b"cellStyle"),
+                ):
+                    styles_xml, _ = _collapse_style_records(styles_xml, collection, child)
+            if clean_styles:
+                styles_xml = re.sub(
+                    rb'(<(?:[A-Za-z_][\w.-]*:)?cellStyle\b[^>]*\bname=["\'])[^"\']*(["\'])',
+                    rb"\g<1>Normal\g<2>",
+                    styles_xml,
+                    count=1,
+                )
+                styles_xml = re.sub(
+                    rb'(<(?:[A-Za-z_][\w.-]*:)?cellStyle\b[^>]*\bxfId=["\'])\d+(["\'])',
+                    rb"\g<1>0\g<2>",
+                    styles_xml,
+                    count=1,
+                )
+            cell_xfs_re = re.compile(
+                rb"(<(?:[A-Za-z_][\w.-]*:)?cellXfs\b[^>]*>)(.*?)(</(?:[A-Za-z_][\w.-]*:)?cellXfs>)",
+                re.S,
+            )
+            cell_xfs = cell_xfs_re.search(styles_xml) if clean_styles else None
+            if cell_xfs:
+                body = re.sub(
+                    rb'(\bxfId=["\'])\d+(["\'])',
+                    rb"\g<1>0\g<2>",
+                    cell_xfs.group(2),
+                )
+                styles_xml = (
+                    styles_xml[: cell_xfs.start()]
+                    + cell_xfs.group(1)
+                    + body
+                    + cell_xfs.group(3)
+                    + styles_xml[cell_xfs.end() :]
+                )
+
+            output = BytesIO()
+            with zipfile.ZipFile(
+                output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1
+            ) as cleaned_zip:
+                for item in source_zip.infolist():
+                    if clean_styles and item.filename == "xl/styles.xml":
+                        data = styles_xml
+                    elif selected_sheet is not None and item.filename == "xl/workbook.xml":
+                        data = workbook_xml
+                    else:
+                        data = source_zip.read(item)
+                    cleaned_zip.writestr(item, data)
+            return output.getvalue()
+    except (KeyError, zipfile.BadZipFile):
+        return raw
+
+
+@lru_cache(maxsize=4)
+def _parse_excel_cached(raw: bytes, sheet_name: str | None) -> ParseMeta:
+    return _parse_excel_bytes(raw, sheet_name)
+
+
+def _parse_excel_bytes(raw: bytes, sheet_name: str | None) -> ParseMeta:
+    workbook_bytes = _trim_redundant_named_styles(raw, sheet_name)
+    wb = openpyxl.load_workbook(BytesIO(workbook_bytes), data_only=True)
+    try:
+        resolved = resolve_sheet(wb, sheet_name)
+        ws = wb[resolved]
+        tables, fmt = _parse_worksheet(ws)
+        system_name = _read_system_name(ws, fmt)
+        created_date, author = _read_doc_meta(ws, fmt)
+    finally:
+        wb.close()
     if not tables:
         raise ValueError(
             f"시트 '{resolved}'에서 테이블/컬럼 정의를 찾지 못했습니다. "
@@ -138,6 +303,30 @@ def parse_excel_with_meta(
         created_date=created_date,
         author=author,
     )
+
+
+def parse_excel(
+    source: Path | BinaryIO, sheet_name: str | None = DEFAULT_SHEET
+) -> list[TableDef]:
+    """Read table/column definitions from Excel and return grouped TableDef list."""
+    return parse_excel_with_meta(source, sheet_name).tables
+
+
+def parse_excel_with_meta(
+    source: Path | BinaryIO, sheet_name: str | None = DEFAULT_SHEET
+) -> ParseMeta:
+    if isinstance(source, Path):
+        raw = source.read_bytes()
+    else:
+        position = source.tell() if source.seekable() else None
+        if position is not None:
+            source.seek(0)
+        raw = source.read()
+        if position is not None:
+            source.seek(position)
+    if len(raw) <= _MAX_CACHED_WORKBOOK_BYTES:
+        return _parse_excel_cached(raw, sheet_name)
+    return _parse_excel_bytes(raw, sheet_name)
 
 
 def resolve_sheet(wb, sheet_name: str | None) -> str:

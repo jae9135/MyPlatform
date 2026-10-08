@@ -354,9 +354,12 @@ export default function ChkDbStdPage() {
   const [codeFile, setCodeFile] = useState<File | null>(null);
   const [tableSheet, setTableSheet] = useState("");
   const [codeSheet, setCodeSheet] = useState("");
+  const [tableSheets, setTableSheets] = useState<string[]>([]);
+  const [codeSheets, setCodeSheets] = useState<string[]>([]);
   const [designCheck, setDesignCheck] = useState<DesignCheck>(IDLE_TABLE_CHECK);
   const tableSheetRef = useRef(tableSheet);
   const codeSheetRef = useRef(codeSheet);
+  const sheetRequestRef = useRef(0);
   const skipSheetValidateRef = useRef(false);
   const tableCheckCacheRef = useRef<{
     fileKey: string;
@@ -367,6 +370,7 @@ export default function ChkDbStdPage() {
   const tableKind = isTableKind(kind);
   const activeFile = tableKind ? tableFile : codeFile;
   const activeSheet = tableKind ? tableSheet : codeSheet;
+  const activeSheets = tableKind ? tableSheets : codeSheets;
   tableSheetRef.current = tableSheet;
   codeSheetRef.current = codeSheet;
   const [msg, setMsg] = useState("");
@@ -467,29 +471,34 @@ export default function ChkDbStdPage() {
 
   const validateDesignFile = useCallback(
     async (target: File, checkKind: Kind) => {
-      const sheetName = (
-        isTableKind(checkKind) ? tableSheetRef : codeSheetRef
-      ).current.trim();
-
-      if (isTableKind(checkKind)) {
-        const cached = tableCheckCacheRef.current;
-        if (
-          cached &&
-          cached.fileKey === fileKey(target) &&
-          cached.sheet === sheetName &&
-          cached.check.canCheck
-        ) {
-          setDesignCheck(cached.check);
-          return;
-        }
-      }
-
       setDesignCheck({
         checking: true,
         canCheck: false,
-        message: "설계서 형식 확인 중…",
+        message: "선택한 시트 형식 확인 중…",
       });
       try {
+        const sheetName = (
+          isTableKind(checkKind) ? tableSheetRef : codeSheetRef
+        ).current.trim();
+
+        if (isTableKind(checkKind)) {
+          const cached = tableCheckCacheRef.current;
+          if (
+            cached &&
+            cached.fileKey === fileKey(target) &&
+            cached.sheet === sheetName &&
+            cached.check.canCheck
+          ) {
+            setDesignCheck(cached.check);
+            return;
+          }
+        }
+
+        setDesignCheck({
+          checking: true,
+          canCheck: false,
+          message: "선택한 시트 형식 확인 중…",
+        });
         const fd = new FormData();
         fd.append("design", target);
         fd.append("kind", checkKind);
@@ -502,6 +511,9 @@ export default function ChkDbStdPage() {
         } catch {
           // Preserve status and a short response excerpt for proxy/runtime errors.
         }
+        const sheets = Array.isArray(j.sheets) ? j.sheets.map(String) : [];
+        if (isTableKind(checkKind)) setTableSheets(sheets);
+        else setCodeSheets(sheets);
         if (!res.ok && !j.message) {
           const detail = String(j.detail || j.message || "").trim();
           const excerpt = responseText.replace(/\s+/g, " ").trim().slice(0, 180);
@@ -523,7 +535,7 @@ export default function ChkDbStdPage() {
           rows: typeof j.rows === "number" ? j.rows : undefined,
         };
         let cacheSheet = sheetName;
-        if (canCheck && detectedSheet) {
+        if (detectedSheet) {
           const sheetRef = isTableKind(checkKind)
             ? tableSheetRef
             : codeSheetRef;
@@ -554,13 +566,18 @@ export default function ChkDbStdPage() {
   );
 
   const onDesignFileChange = useCallback(
-    (next: File | null, fileKind: "table" | "code") => {
+    async (next: File | null, fileKind: "table" | "code") => {
+      const requestId = ++sheetRequestRef.current;
       if (fileKind === "table") {
         setTableFile(next);
+        setTableSheets([]);
+        setTableSheet("");
         tableCheckCacheRef.current = null;
         resultCacheRef.current.clear();
       } else {
         setCodeFile(next);
+        setCodeSheets([]);
+        setCodeSheet("");
         for (const key of [...resultCacheRef.current.keys()]) {
           if (key.startsWith("code:")) resultCacheRef.current.delete(key);
         }
@@ -569,14 +586,51 @@ export default function ChkDbStdPage() {
       setResult(null);
       skipSheetValidateRef.current = false;
       if (!next) {
-        setDesignCheck(
-          fileKind === "table" ? IDLE_TABLE_CHECK : IDLE_CODE_CHECK
-        );
+        setDesignCheck(fileKind === "table" ? IDLE_TABLE_CHECK : IDLE_CODE_CHECK);
+        return;
+      }
+
+      setDesignCheck({
+        checking: true,
+        canCheck: false,
+        message: "시트 목록 확인 중…",
+      });
+      try {
+        const fd = new FormData();
+        fd.append("design", next);
+        const res = await postChkDbStdMultipart("v1/chk-db-std/sheets", fd);
+        const responseText = await res.text();
+        const j = responseText ? JSON.parse(responseText) : {};
+        if (!res.ok) {
+          throw new Error(String(j.detail || `API 오류 (HTTP ${res.status})`));
+        }
+        if (requestId !== sheetRequestRef.current) return;
+
+        const sheets = Array.isArray(j.sheets) ? j.sheets.map(String) : [];
+        if (fileKind === "table") setTableSheets(sheets);
+        else setCodeSheets(sheets);
+        if (sheets.length === 1) {
+          if (fileKind === "table") setTableSheet(sheets[0]);
+          else setCodeSheet(sheets[0]);
+        } else {
+          setDesignCheck({
+            checking: false,
+            canCheck: false,
+            message: sheets.length ? "시트를 선택하세요." : "선택한 파일에서 시트를 찾지 못했습니다.",
+          });
+        }
+      } catch (e) {
+        if (requestId === sheetRequestRef.current) {
+          setDesignCheck({
+            checking: false,
+            canCheck: false,
+            message: String((e as Error).message || e),
+          });
+        }
       }
     },
     []
   );
-
   const onKindChange = useCallback(
     (next: Kind) => {
       setKind(next);
@@ -636,6 +690,16 @@ export default function ChkDbStdPage() {
       );
       return;
     }
+    if (!activeSheet || !activeSheets.includes(activeSheet)) {
+      setDesignCheck({
+        checking: false,
+        canCheck: false,
+        message: activeSheets.length
+          ? "시트를 선택하세요."
+          : "시트 목록을 불러오는 중…",
+      });
+      return;
+    }
     if (skipSheetValidateRef.current) {
       skipSheetValidateRef.current = false;
       return;
@@ -644,7 +708,7 @@ export default function ChkDbStdPage() {
       void validateDesignFile(activeFile, kind);
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [activeFile, activeSheet, kind, tableKind, validateDesignFile]);
+  }, [activeFile, activeSheet, activeSheets, kind, tableKind, validateDesignFile]);
 
   const appendSheet = useCallback(
     (fd: FormData) => {
@@ -927,18 +991,16 @@ export default function ChkDbStdPage() {
     [filterEngMismatch, resultQuery, tab, tabRowsRaw]
   );
 
-  const sheetPlaceholder =
-    kind === "code" ? "비우면 코드정의서" : "비우면 자동 감지";
   const idleCheck = tableKind ? IDLE_TABLE_CHECK : IDLE_CODE_CHECK;
 
   return (
     <main>
       <PortalNav />
-      <section className="hero">
+      <section className="hero chk-db-std-hero">
         <h1>DB 표준 점검 도구</h1>
         <p>
-          설계서를 올려 점검을 실행하고, 결과를 화면에서 확인하거나 Excel로
-          받을 수 있습니다. 샘플 파일로 먼저 시험해 보세요.
+          설계서를 올려 점검하고, 결과는 화면에서 확인하거나 Excel로 내려받을 수 있습니다.
+          <span className="chk-db-std-hero-note">샘플 파일로 먼저 시험해 보세요.</span>
         </p>
       </section>
 
@@ -998,22 +1060,6 @@ export default function ChkDbStdPage() {
             </select>
           </label>
         </div>
-        <div className="row">
-          <label>
-            시트명{" "}
-            <input
-              type="text"
-              value={activeSheet}
-              onChange={(e) =>
-                tableKind
-                  ? setTableSheet(e.target.value)
-                  : setCodeSheet(e.target.value)
-              }
-              placeholder={sheetPlaceholder}
-              disabled={busy}
-            />
-          </label>
-        </div>
         {tableKind ? (
           <div className="row">
             <label className="file-field">
@@ -1051,6 +1097,29 @@ export default function ChkDbStdPage() {
             <span>{activeFile?.name || "선택된 파일 없음"}</span>
           </div>
         )}
+        <div className="row">
+          <label>
+            정의서 시트{" "}
+            <select
+              value={activeSheet}
+              onChange={(e) =>
+                tableKind
+                  ? setTableSheet(e.target.value)
+                  : setCodeSheet(e.target.value)
+              }
+              disabled={busy || !activeSheets.length}
+            >
+              <option value="">
+                {activeSheets.length ? "시트를 선택하세요" : "파일을 선택하면 시트 목록 표시"}
+              </option>
+              {activeSheets.map((sheet) => (
+                <option key={sheet} value={sheet}>
+                  {sheet}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <p
           className={`msg ${
             designCheck.checking

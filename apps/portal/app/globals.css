@@ -54,6 +54,16 @@ main {
   max-width: 40rem;
 }
 
+.chk-db-std-hero p {
+  max-width: min(100%, 68rem);
+  line-height: 1.7;
+}
+
+.chk-db-std-hero-note {
+  display: block;
+  margin-top: 0.2rem;
+}
+
 .badge-row {
   display: flex;
   flex-wrap: wrap;
