@@ -22,6 +22,7 @@ export default function CustomizePage() {
         양식과 업무 프로세스에 맞춘 커스터마이징을 제공합니다.
       </p>
 
+      <h2 className="sr-only">맞춤 개발 범위</h2>
       <div className="mkt-cards-3" style={{ marginTop: 32 }}>
         {CUSTOMIZE_CARDS.map((c) => (
           <div key={c.title} className="mkt-card-box">

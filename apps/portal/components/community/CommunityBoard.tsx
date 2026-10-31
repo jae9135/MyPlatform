@@ -173,6 +173,7 @@ export function CommunityBoard({
         </div>
       ) : null}
 
+      <h2 className="sr-only">게시글 목록</h2>
       <div className="cm-list">
         {rows.map((p) => (
           <BoardPostCard key={p.id} post={p} showTool={!toolFilter} />

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import re
 import uuid
 from functools import lru_cache
@@ -324,15 +325,24 @@ def portal_login(page, base_url: str, password: str) -> None:
         page.wait_for_load_state("domcontentloaded", timeout=15000)
 
 
+def _portal_public_hosts() -> set[str]:
+    """이 플랫폼 포털의 배포 주소 (쉼표 구분). 기본: project-auto-platform.vercel.app"""
+    raw = os.getenv("PORTAL_PUBLIC_HOSTS") or "project-auto-platform.vercel.app"
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
 def is_portal_like_url(url: str) -> bool:
-    """MyPlatform 포털(localhost·Vercel) — PORTAL_PASSWORD /login 자동 로그인 대상."""
+    """MyPlatform 포털(localhost·배포 주소) — PORTAL_PASSWORD /login 자동 로그인 대상.
+
+    *.vercel.app 전체를 포털로 보면 남의 사이트 /login 에 포털 암호를 보낼 수 있어 배포 주소만 허용.
+    """
     try:
         host = (urlparse((url or "").strip()).hostname or "").lower()
     except Exception:
         return False
     if host in ("127.0.0.1", "localhost", "::1"):
         return True
-    return host.endswith(".vercel.app")
+    return host in _portal_public_hosts()
 
 
 _AUTH_COOKIE_RE = re.compile(r"session|auth|token|login|jsession|sid|sso|remember|portal|trial", re.I)

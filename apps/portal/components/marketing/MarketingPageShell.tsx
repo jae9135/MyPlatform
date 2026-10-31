@@ -5,7 +5,7 @@ export function MarketingPageShell({ children }: { children: React.ReactNode }) 
   return (
     <div className="mkt">
       <MarketingNav />
-      <main className="mkt-page-main">
+      <main id="main" className="mkt-page-main" tabIndex={-1}>
         <div className="mkt-wrap">{children}</div>
       </main>
       <MarketingFooter />

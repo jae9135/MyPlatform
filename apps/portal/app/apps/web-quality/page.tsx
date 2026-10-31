@@ -24,7 +24,7 @@ import {
 } from "@/lib/webQualityFix";
 import { formatUtcIsoToKst } from "@/lib/formatDateTime";
 import { PERF_TEST_PORTAL_URLS } from "@/lib/perfTestPortalUrls";
-import { registeredTargetUrlError, REGISTERED_TARGET_SITE_MESSAGE } from "@/lib/registeredTargetSites";
+import { isOwnPortalHost, registeredTargetUrlError, REGISTERED_TARGET_SITE_MESSAGE } from "@/lib/registeredTargetSites";
 import {
   DEPLOY_PORTAL_AUTO_LOGIN_HINT,
   DEPLOY_SESSION_UPLOAD_HINT,
@@ -176,7 +176,7 @@ function portalOriginFromPageUrl(url: string): string | null {
   try {
     const u = new URL(url.trim());
     const h = u.hostname.toLowerCase();
-    if (h === "localhost" || h === "127.0.0.1" || h.endsWith(".vercel.app")) {
+    if (h === "localhost" || h === "127.0.0.1" || isOwnPortalHost(h)) {
       return u.origin;
     }
   } catch {

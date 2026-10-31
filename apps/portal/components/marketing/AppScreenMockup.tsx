@@ -425,16 +425,17 @@ function DarkRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+/* 화면 모형(그림)이므로 실제 버튼·체크박스가 아닌 모양만 — 키보드 초점·터치 대상에서 제외 */
 function DarkBtn({ children, primary }: { children: React.ReactNode; primary?: boolean }) {
-  return <button type="button" className={`mkt-mock-btn${primary ? " primary" : ""}`}>{children}</button>;
+  return <span className={`mkt-mock-btn${primary ? " primary" : ""}`}>{children}</span>;
 }
 
 function DarkCheck({ label, checked }: { label: string; checked?: boolean }) {
   return (
-    <label className="mkt-mock-check">
-      <input type="checkbox" readOnly checked={checked} />
+    <span className="mkt-mock-check">
+      <span className={`mkt-mock-checkbox${checked ? " is-checked" : ""}`} aria-hidden="true" />
       {label}
-    </label>
+    </span>
   );
 }
 

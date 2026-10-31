@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -38,6 +39,11 @@ def registered_target_site_message() -> str:
     )
 
 
+def _is_cloud_runtime() -> bool:
+    """Render 등 배포 서버 — localhost 는 서버 자신을 가리키므로 local_only 항목을 무시."""
+    return bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"))
+
+
 def is_registered_target_url(url: str) -> bool:
     raw = (url or "").strip()
     if not raw:
@@ -59,6 +65,8 @@ def is_registered_target_url(url: str) -> bool:
     entries = _load_registry().get("entries") or []
     for entry in entries:
         if not isinstance(entry, dict):
+            continue
+        if entry.get("local_only") and _is_cloud_runtime():
             continue
         match = str(entry.get("match") or "").strip()
         value = str(entry.get("value") or "").strip().lower()

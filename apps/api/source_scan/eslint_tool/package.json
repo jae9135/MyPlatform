@@ -1,0 +1,13 @@
+{
+  "name": "myplatform-source-scan-eslint",
+  "private": true,
+  "description": "소스 점검(ZIP 업로드)용 ESLint 실행 도구 — 포털 앱 의존성과 분리. Docker 이미지에서 npm ci 로 설치.",
+  "type": "module",
+  "dependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
+    "eslint-plugin-security": "3.0.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.67.0"
+  }
+}

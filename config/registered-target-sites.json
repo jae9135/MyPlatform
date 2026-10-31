@@ -3,21 +3,23 @@
   "entries": [
     {
       "id": "portal-localhost",
-      "label": "로컬 포털",
+      "label": "로컬 포털 (로컬 개발 전용 — 배포 서버에서는 무시)",
       "match": "host",
-      "value": "localhost"
+      "value": "localhost",
+      "local_only": true
     },
     {
       "id": "portal-127",
-      "label": "로컬 포털",
+      "label": "로컬 포털 (로컬 개발 전용 — 배포 서버에서는 무시)",
       "match": "host",
-      "value": "127.0.0.1"
+      "value": "127.0.0.1",
+      "local_only": true
     },
     {
       "id": "portal-vercel",
-      "label": "Vercel 배포 포털",
-      "match": "host_suffix",
-      "value": ".vercel.app"
+      "label": "Vercel 배포 포털 (이 사이트만)",
+      "match": "host",
+      "value": "project-auto-platform.vercel.app"
     },
     {
       "id": "ipms-online",

@@ -22,6 +22,10 @@ export function MarketingNav() {
   const [open, setOpen] = useState(false);
 
   return (
+    <>
+    <a className="mkt-skip-link" href="#main">
+      본문 바로가기
+    </a>
     <header className="mkt-header">
       <div className="mkt-wrap mkt-navbar">
         <Link className="mkt-brand" href="/">
@@ -92,5 +96,6 @@ export function MarketingNav() {
         </nav>
       ) : null}
     </header>
+    </>
   );
 }

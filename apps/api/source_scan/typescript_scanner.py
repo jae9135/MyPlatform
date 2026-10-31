@@ -45,6 +45,34 @@ def eslint_available(portal_dir: Path) -> tuple[bool, str]:
     return True, ""
 
 
+# 소스 점검 전용 ESLint 도구 폴더 (apps/api/source_scan/eslint_tool — Docker 에서 npm ci)
+_BUNDLED_TOOL_DIR = Path(__file__).resolve().parent / "eslint_tool"
+
+
+def resolve_eslint_tool_dir(repo_root: Path) -> tuple[Path | None, str]:  # noqa: ARG001 — 업로드 폴더는 일부러 쓰지 않음
+    """ESLint 실행 파일·설정이 있는 폴더.
+
+    우선순위: ESLINT_TOOL_DIR 환경변수 → 동봉 도구(eslint_tool, node_modules 설치됨) → 플랫폼 포털(apps/portal).
+    업로드 ZIP 점검에서는 repo_root 가 업로드 폴더라, 도구는 반드시 서버 쪽 폴더에서 찾아야 함.
+    """
+    candidates: list[Path] = []
+    env_dir = (os.getenv("ESLINT_TOOL_DIR") or "").strip()
+    if env_dir:
+        candidates.append(Path(env_dir))
+    candidates.append(_BUNDLED_TOOL_DIR)
+    # 주의: 업로드 폴더(repo_root) 안의 node_modules 는 절대 실행하지 않음 — 업로드한 ZIP 이 실행 파일을 넣을 수 있음
+    from source_scan.manifest import repo_root as platform_root  # 순환 import 방지
+
+    candidates.append(_portal_dir(platform_root()))
+    reason = ""
+    for c in candidates:
+        ok, why = eslint_available(c)
+        if ok:
+            return c, ""
+        reason = reason or why
+    return None, "eslint 도구 없음 — apps/api/source_scan/eslint_tool 에서 npm ci (또는 ESLINT_TOOL_DIR 설정)"
+
+
 def scan_typescript_files(
     paths: list[Path],
     *,
@@ -53,9 +81,8 @@ def scan_typescript_files(
     if not paths:
         return ScanResult(available=True)
 
-    portal = _portal_dir(repo_root)
-    ok, reason = eslint_available(portal)
-    if not ok:
+    portal, reason = resolve_eslint_tool_dir(repo_root)
+    if portal is None:
         return ScanResult(
             available=False,
             error=reason,
@@ -90,7 +117,8 @@ def scan_typescript_files(
             encoding="utf-8",
             errors="replace",
             timeout=180,
-            cwd=str(portal),
+            # ESLint 9 는 실행 폴더 밖의 파일을 무시하므로, 점검 대상 폴더에서 실행 (설정·플러그인은 -c 경로 기준으로 로드)
+            cwd=str(repo_root),
             env=env,
         )
     except subprocess.TimeoutExpired:

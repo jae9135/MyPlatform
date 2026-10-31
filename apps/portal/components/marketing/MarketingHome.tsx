@@ -32,6 +32,7 @@ export function MarketingHome() {
     <div className="mkt">
       <MarketingNav />
 
+      <main id="main" tabIndex={-1}>
       <section className="mkt-hero">
         <div className="mkt-wrap mkt-hero-grid">
           <div className="mkt-hero-copy">
@@ -226,6 +227,7 @@ export function MarketingHome() {
           </div>
         </div>
       </section>
+      </main>
 
       <MarketingFooter />
     </div>

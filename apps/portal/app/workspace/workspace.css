@@ -200,7 +200,8 @@
   color: var(--pl-ok);
 }
 .beta-hub-status.beta {
-  color: var(--pl-warn);
+  /* 명도 대비 4.5:1 이상 (--pl-warn #d97706 은 3.18) */
+  color: #b45309;
 }
 .beta-hub-status.planned {
   color: var(--pl-muted);
@@ -218,7 +219,8 @@
   border: 0;
   border-radius: 10px;
   padding: 10px 14px;
-  background: var(--pl-accent);
+  /* 흰 글씨 대비 4.5:1 이상 (--pl-accent #3b82f6 은 3.67) */
+  background: #2563eb;
   color: #fff;
   font-size: 14px;
   font-weight: 700;
@@ -228,7 +230,7 @@
 }
 
 .beta-hub-btn:hover {
-  background: var(--pl-accent-hover);
+  background: #1d4ed8;
   color: #fff;
 }
 
@@ -281,7 +283,7 @@
 }
 
 .beta-hub-foot a {
-  color: var(--pl-accent);
+  color: #1d4ed8;
   text-decoration: none;
   font-weight: 600;
 }
@@ -319,7 +321,7 @@
 }
 
 .beta-hub-contact .contact-info-list a {
-  color: var(--pl-accent);
+  color: #1d4ed8;
 }
 
 .beta-hub-standalone {

@@ -1,5 +1,6 @@
 import { readJsonResponse } from "@/lib/formUpload";
 import { fetchScanApi, isLocalPortalHost, postScanMultipart } from "@/lib/localScanApi";
+import { isOwnPortalHost } from "@/lib/registeredTargetSites";
 
 /** 배포 API — headed 로그인 창 불가 시 안내 (IPMS · 외부 · Java 배포 URL) */
 export const DEPLOY_SESSION_UPLOAD_HINT =
@@ -43,7 +44,7 @@ export function isPortalLikeBaseUrl(url: string): boolean {
   if (!raw) return false;
   try {
     const host = new URL(raw.includes("://") ? raw : `http://${raw}`).hostname.toLowerCase();
-    return host === "localhost" || host === "127.0.0.1" || host.endsWith(".vercel.app");
+    return host === "localhost" || host === "127.0.0.1" || isOwnPortalHost(host);
   } catch {
     return false;
   }

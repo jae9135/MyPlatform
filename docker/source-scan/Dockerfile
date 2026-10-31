@@ -1,6 +1,13 @@
 # MyPlatform API — PMD, SpotBugs, JDK 11, Maven, Playwright
 # Render: Dockerfile Path = docker/source-scan/Dockerfile, Docker Context = .
 
+# --- 소스 점검 TS/JS 용 ESLint 도구 (apps/api/source_scan/eslint_tool) ---
+# 포털(Next.js) 의존성 전체 대신 ESLint 관련 패키지만 설치해 이미지 크기를 줄임
+FROM node:20-bookworm-slim AS eslint-tool
+WORKDIR /tool
+COPY apps/api/source_scan/eslint_tool/package.json apps/api/source_scan/eslint_tool/package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
+
 FROM eclipse-temurin:11-jdk-jammy
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -50,6 +57,9 @@ RUN pip3 install --no-cache-dir -r /app/apps/api/requirements.txt \
     && python3 -m playwright install chromium
 
 COPY apps/api /app/apps/api
+# Node 실행 파일 + ESLint 도구 (ZIP 업로드 TS/JS 점검)
+COPY --from=eslint-tool /usr/local/bin/node /usr/local/bin/node
+COPY --from=eslint-tool /tool/node_modules /app/apps/api/source_scan/eslint_tool/node_modules
 COPY apps/portal /app/apps/portal
 COPY package.json /app/package.json
 
