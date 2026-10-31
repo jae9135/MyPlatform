@@ -76,6 +76,7 @@ import {
   type ResultCategory,
 } from "@/lib/webQualityFindingFilter";
 import { setRefLinksCatalog, type RefLinksCatalog } from "@/lib/webQualityRefLinks";
+import { DEMO_SAMPLE_LOADED_MSG, demoWebSampleUrl, takeDemoSampleParam } from "@/lib/demoSamples";
 
 const PAGE_SIZE = 80;
 const IPMS_DEFAULT_URL = "http://14.35.194.178:12000/ipms.online/";
@@ -4657,6 +4658,22 @@ export default function WebQualityPage() {
         </ul>
       </div>
     ) : null;
+
+  // 데모 페이지 "이 샘플로 직접 실행" — ?sample=demo-shop → 외부 URL 모드에 샘플 페이지 주소 입력
+  const demoSampleApplied = useRef(false);
+  useEffect(() => {
+    if (demoSampleApplied.current) return;
+    const id = takeDemoSampleParam(["demo-shop"]);
+    if (!id) return;
+    demoSampleApplied.current = true;
+    // 저장된 설정 복원(effect) 이후에 덮어쓰도록 다음 틱에 적용
+    window.setTimeout(() => {
+      switchMode("external", { includeRuntime: true });
+      setPageUrl(demoWebSampleUrl());
+      setMsg(DEMO_SAMPLE_LOADED_MSG);
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <>

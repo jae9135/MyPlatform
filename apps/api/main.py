@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import io
 import os
+import re
 import sys
 import tempfile
 import time
@@ -186,6 +187,19 @@ def _upload_token_valid(token: str, expected_key: str) -> bool:
     return _upload_token_scope(token, expected_key) is not None
 
 
+# ---------- DBManager 운영 DB 접근 (포털 apps/portal/lib/dbGuard.ts 와 같은 규칙) ----------
+# 브라우저가 받는 직접 업로드 토큰(X-Upload-Token)으로는 DB 에 닿는 API 를 쓸 수 없음.
+# DB 기능은 포털 프록시(마스터 키)를 거쳐야 하며, 포털이 DB 잠금 해제(별도 암호)를 확인함.
+_DB_ACCESS_PATH = re.compile(
+    r"^/v1/db-manager/(run-events|schemas|export-design|data-upload|data-row|data-delete|diff|apply-alter|apply)(/|$)"
+)
+DB_LOCKED_DETAIL = "DB 조회·적용·데이터 관리는 포털에서 별도 암호 확인 후 사용할 수 있습니다."
+
+
+def _is_db_access_path(path: str) -> bool:
+    return bool(_DB_ACCESS_PATH.match(path or ""))
+
+
 def _request_access(request: Request, expected: str) -> tuple[bool, bool]:
     """(인증 통과, IPMS 허용). 마스터 키 = 포털 프록시(포털이 IPMS 2차 암호를 이미 확인)."""
     if _api_key_valid(request.headers.get("x-api-key") or "", expected):
@@ -255,6 +269,10 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         authed, ipms_ok = _request_access(request, expected)
         if not authed:
             return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        if _is_db_access_path(path) and not _api_key_valid(
+            request.headers.get("x-api-key") or "", expected
+        ):
+            return JSONResponse({"detail": DB_LOCKED_DETAIL}, status_code=403)
         request.state.ipms_ok = ipms_ok
         # 경로·쿼리만으로 IPMS 요청임이 확실한 경우 여기서 차단 (본문 기반은 각 엔드포인트의 _guard_ipms)
         if not ipms_ok and (

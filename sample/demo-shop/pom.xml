@@ -1,0 +1,11 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>demo-shop</artifactId>
+  <version>1.0.0</version>
+  <description>보안 점검 데모용 샘플 프로젝트 — 일부러 취약점을 넣은 코드입니다. 운영에 사용하지 마세요.</description>
+  <properties>
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
+  </properties>
+</project>

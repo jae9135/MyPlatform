@@ -3,6 +3,7 @@ import { BRAND_NAME } from "@/lib/brand";
 import { HOME_SEO, CONTACT_EMAIL } from "@/lib/marketingCatalog";
 import { absoluteUrl, getSiteUrl } from "@/lib/siteUrl";
 import type { BoardPublicPost, BoardStats } from "@/lib/boardShared";
+import type { ProductFaq } from "@/lib/productGuides";
 
 function organization() {
   return {
@@ -49,6 +50,7 @@ type ProductInput = {
 export function productJsonLd(
   product: ProductInput,
   reviews?: { rows: BoardPublicPost[]; stats: BoardStats | null } | null,
+  faq?: ProductFaq[] | null,
 ): Record<string, unknown> {
   const url = absoluteUrl(`/products/${product.slug}`);
   const app: Record<string, unknown> = {
@@ -88,11 +90,27 @@ export function productJsonLd(
     }
   }
 
+  // 화면의 "자주 묻는 질문" 섹션과 같은 내용
+  const faqPage = faq?.length
+    ? [
+        {
+          "@type": "FAQPage",
+          "@id": `${url}#faq`,
+          mainEntity: faq.map((f) => ({
+            "@type": "Question",
+            name: f.q,
+            acceptedAnswer: { "@type": "Answer", text: f.a },
+          })),
+        },
+      ]
+    : [];
+
   return {
     "@context": "https://schema.org",
     "@graph": [
       organization(),
       app,
+      ...faqPage,
       {
         "@type": "BreadcrumbList",
         itemListElement: [

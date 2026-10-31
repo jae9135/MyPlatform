@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import re
 import uuid
+from functools import lru_cache
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -12,6 +14,8 @@ from web_quality.fix_guides import resolve_finding_fix
 from web_quality.krds_scanner import attach_krds_runtime_findings
 
 AXE_CDN = "https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.2/axe.min.js"
+# 같은 버전을 저장소에 동봉 (vendor/README.md 참고) — CSP·내부망에서도 동작
+AXE_LOCAL = Path(__file__).resolve().parent / "vendor" / "axe.min.js"
 MAX_ELEMENT_CAPTURES_PER_STATE = 3
 
 
@@ -138,8 +142,33 @@ def _finding_from_axe_violation(
     return out
 
 
-def _run_axe_on_page(page) -> list[dict[str, Any]]:
+@lru_cache(maxsize=1)
+def _axe_local_source() -> str | None:
+    try:
+        return AXE_LOCAL.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _inject_axe(page) -> None:
+    """axe 를 페이지에 주입.
+
+    1) 동봉한 axe.min.js 를 DevTools 평가로 실행 — 대상 사이트의 CSP(script-src)에 막히지 않음
+    2) 실패하면 기존 방식(CDN <script> 태그)으로 시도
+    """
+    src = _axe_local_source()
+    if src:
+        try:
+            page.evaluate(src)
+            if page.evaluate("typeof window.axe") == "object":
+                return
+        except Exception:
+            pass
     page.add_script_tag(url=AXE_CDN)
+
+
+def _run_axe_on_page(page) -> list[dict[str, Any]]:
+    _inject_axe(page)
     results = page.evaluate(
         """
         async () => {

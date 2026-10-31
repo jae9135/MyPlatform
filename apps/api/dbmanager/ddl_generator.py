@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .comments import encode_column_comment
 from .excel_parser import TableDef
-from .sample_data import build_sample_data_sql
+from .sample_data import build_sample_data_sql, order_tables_by_fk
 from .type_mapper import format_declared_type, map_type
 
 _CONSTRAINT_LINE = re.compile(r"^(PK|FK|UK|IX)_([^(]+)\(([^)]*)\)$", re.I)
@@ -17,7 +17,7 @@ def generate_all_ddl(tables: list[TableDef], output_dir: Path) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     created: list[Path] = []
-    for table in sorted(tables, key=lambda t: t.name):
+    for table in order_tables_by_fk(tables):
         table_file = output_dir / f"{table.name.upper()}.sql"
         table_file.write_text(build_table_ddl(table), encoding="utf-8")
         created.append(table_file)
@@ -283,7 +283,7 @@ def build_all_tables_ddl(
         schema_name = _resolve_schema(tables[0])
     parts = [
         build_table_ddl(table, declared_types=declared_types, schema=schema_name)
-        for table in sorted(tables, key=lambda t: t.name)
+        for table in order_tables_by_fk(tables)
     ]
     return "\n".join(parts)
 
@@ -318,7 +318,7 @@ def scripts_from_tables(
             ),
         },
     ]
-    for table in sorted(tables, key=lambda t: t.name):
+    for table in order_tables_by_fk(tables):
         scripts.append(
             {
                 "name": f"{table.name.upper()}.sql",

@@ -8,6 +8,8 @@ export const TRIAL_KIND_COOKIE = "mp_trial_kind";
 export const CODE_SESSION_COOKIE = "mp_code_session";
 export const CODE_KIND_COOKIE = "mp_code_kind";
 export const IPMS_UNLOCK_COOKIE = "mp_ipms_unlock";
+/** DBManager DB 접근(조회·적용·데이터 관리) 해제 쿠키 */
+export const DB_UNLOCK_COOKIE = "mp_db_unlock";
 
 export type TrialMode = "day" | "once";
 /** "public" = 공개 모드(NEXT_PUBLIC_PORTAL_AUTH_REQUIRED 꺼짐)에서 로그인 없이 접근한 방문자 */
@@ -56,6 +58,33 @@ export async function resolveIpmsUnlocked(
   const expected = await ipmsUnlockToken();
   const cookie = readCookie(get, IPMS_UNLOCK_COOKIE);
   return { eligible, unlocked: Boolean(expected && cookie && timingSafeEqual(cookie, expected)) };
+}
+
+export function getDbUnlockPassword(): string {
+  return process.env.DB_UNLOCK_PASSWORD?.trim() ?? "";
+}
+
+/** DB 해제 쿠키 값 — 암호에서 파생한 서명값 (IPMS 와 같은 방식, 다른 접두어) */
+export async function dbUnlockToken(): Promise<string> {
+  const pw = getDbUnlockPassword();
+  if (!pw) return "";
+  return tokenFromPassword(`db-unlock:v1:${pw}`);
+}
+
+/**
+ * DBManager 가 운영 DB 에 닿는 기능(스키마 조회·SQL 적용·데이터 관리)을 쓸 수 있는지.
+ * DB_UNLOCK_PASSWORD 가 없으면 항상 잠김(안전한 기본값).
+ */
+export async function resolveDbUnlocked(
+  get: (name: string) => { value?: string } | undefined,
+): Promise<{ eligible: boolean; configured: boolean; unlocked: boolean }> {
+  const auth = await resolvePortalAuth(get);
+  const eligible = auth.ok && isIpmsEligible(auth.kind);
+  const expected = await dbUnlockToken();
+  const configured = Boolean(expected);
+  if (!eligible || !configured) return { eligible, configured, unlocked: false };
+  const cookie = readCookie(get, DB_UNLOCK_COOKIE);
+  return { eligible, configured, unlocked: Boolean(cookie && timingSafeEqual(cookie, expected)) };
 }
 
 const TOKEN_PREFIX = "myplatform.portal.v1:";
@@ -154,6 +183,7 @@ export function clearPortalAuthCookies(res: { cookies: { set: (name: string, val
   res.cookies.set(CODE_SESSION_COOKIE, "", { ...base, maxAge: 0 });
   res.cookies.set(CODE_KIND_COOKIE, "", { ...base, maxAge: 0 });
   res.cookies.set(IPMS_UNLOCK_COOKIE, "", { ...base, maxAge: 0 });
+  res.cookies.set(DB_UNLOCK_COOKIE, "", { ...base, maxAge: 0 });
 }
 
 export function setCodeSessionCookies(

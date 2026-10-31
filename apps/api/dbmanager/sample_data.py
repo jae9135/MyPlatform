@@ -32,13 +32,17 @@ def build_sample_data_sql(
         "",
     ]
     starts = start_by_table or {}
-    for table in sorted(tables, key=lambda t: t.name):
+    # 부모 테이블 → 자식 테이블 순서로 INSERT (FK 위반 방지)
+    first_rows: dict[str, dict] = {}
+    for table in order_tables_by_fk(tables):
         key = table.name
         legacy_key = f"{table.schema}.{table.name}"
         start = int(starts.get(key, starts.get(legacy_key, 1)))
         rows = _sample_rows_for_table(table, start=start)
         if not rows:
             continue
+        _link_fk_values(table, rows, first_rows)
+        first_rows[table.name.lower()] = rows[0]
         lines.append(f"-- Sample data: {table.name} (pk from {start})")
         col_names = [c.name for c in table.columns]
         for row in rows:
@@ -50,6 +54,65 @@ def build_sample_data_sql(
             )
         lines.append("")
     return "\n".join(lines)
+
+
+
+def fk_target(col: ColumnDef) -> tuple[str, str] | None:
+    """``ref_table(ref_col)`` 형식의 FK 참조 → (테이블, 컬럼) 소문자. 없으면 None."""
+    text = (col.fk_ref or "").strip()
+    if not text or "(" not in text or not text.endswith(")"):
+        return None
+    table, rest = text.rsplit("(", 1)
+    ref_col = rest[:-1].strip()
+    table = table.strip()
+    if "." in table:
+        table = table.rsplit(".", 1)[-1]
+    if not table or not ref_col:
+        return None
+    return table.lower(), ref_col.lower()
+
+
+def order_tables_by_fk(tables: list[TableDef]) -> list[TableDef]:
+    """FK 참조 순서(부모 먼저)로 정렬. 같은 단계는 이름순, 순환 참조는 남은 것을 이름순으로 뒤에 붙임."""
+    by_name = {t.name.lower(): t for t in tables}
+    deps: dict[str, set[str]] = {}
+    for t in tables:
+        own = t.name.lower()
+        deps[own] = {
+            ref[0]
+            for c in t.columns
+            if (ref := fk_target(c)) and ref[0] in by_name and ref[0] != own
+        }
+    ordered: list[TableDef] = []
+    done: set[str] = set()
+    remaining = sorted(by_name)
+    while remaining:
+        ready = [n for n in remaining if deps[n] <= done]
+        if not ready:
+            # 순환 참조 — 남은 테이블은 이름순 (DDL 은 FK 를 ALTER 로 붙이므로 생성 자체는 가능)
+            ordered.extend(by_name[n] for n in remaining)
+            break
+        for n in ready:
+            ordered.append(by_name[n])
+            done.add(n)
+        remaining = [n for n in remaining if n not in done]
+    return ordered
+
+
+def _link_fk_values(
+    table: TableDef, rows: list[dict], first_rows: dict[str, dict]
+) -> None:
+    """FK 컬럼 값을 부모 테이블 샘플 행의 값으로 맞춤 (참조 무결성 유지)."""
+    for col in table.columns:
+        ref = fk_target(col)
+        if not ref:
+            continue
+        parent = first_rows.get(ref[0])
+        if not parent or ref[1] not in parent:
+            continue
+        for row in rows:
+            if col.name in row:
+                row[col.name] = parent[ref[1]]
 
 
 def rewrite_sample_sql_with_next_pks(conn: Any, sql: str) -> tuple[str, dict[str, Any]]:

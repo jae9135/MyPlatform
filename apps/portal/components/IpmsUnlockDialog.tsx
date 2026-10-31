@@ -13,12 +13,17 @@ export function IpmsUnlockDialog({
   description,
   onClose,
   onUnlocked,
+  endpoint = "/api/portal/ipms-unlock",
+  notConfiguredText = "서버에 IPMS_UNLOCK_PASSWORD 가 설정되지 않았습니다.",
 }: {
   open: boolean;
   title?: string;
   description?: React.ReactNode;
   onClose: () => void;
   onUnlocked: () => void;
+  /** 같은 모양으로 다른 잠금(DB 등)에도 사용 */
+  endpoint?: string;
+  notConfiguredText?: string;
 }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -31,7 +36,7 @@ export function IpmsUnlockDialog({
     setBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/portal/ipms-unlock", {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: input }),
@@ -40,9 +45,9 @@ export function IpmsUnlockDialog({
       if (!res.ok || !j.ok) {
         setError(
           j.error === "not_configured"
-            ? "서버에 IPMS_UNLOCK_PASSWORD 가 설정되지 않았습니다."
+            ? notConfiguredText
             : j.error === "forbidden"
-              ? "현재 로그인 상태에서는 IPMS를 사용할 수 없습니다. 정식 로그인 후 다시 시도하세요."
+              ? "현재 로그인 상태에서는 이 기능을 사용할 수 없습니다. 정식 로그인 후 다시 시도하세요."
               : "암호가 올바르지 않습니다.",
         );
         return;

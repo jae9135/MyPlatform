@@ -133,7 +133,7 @@ export function MarketingHome() {
             </ul>
             <div className="mkt-receipt-actions">
               <Link className="mkt-btn" href={RECEIPT_STANDALONE.productHref}>
-                자세히 보기
+                영수증 PDF 기능 소개
               </Link>
               <Link className="mkt-btn mkt-btn-primary" href={RECEIPT_STANDALONE.href}>
                 체험하기

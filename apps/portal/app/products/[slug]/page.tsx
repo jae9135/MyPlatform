@@ -5,8 +5,10 @@ import { betaEntryHref } from "@/lib/authMode";
 import { ProductDetailScreens } from "@/components/marketing/AppScreenMockup";
 import { ProductReviews } from "@/components/community/ProductReviews";
 import { MarketingPageShell } from "@/components/marketing/MarketingPageShell";
+import { ProductAudienceSection, ProductFaqSection } from "@/components/marketing/ProductGuideSections";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { loadToolReviews } from "@/lib/board";
+import { getProductGuide } from "@/lib/productGuides";
 import { productJsonLd } from "@/lib/structuredData";
 import {
   getMarketingTool,
@@ -55,10 +57,11 @@ export default async function ProductPage({ params }: Props) {
 
   const isReceipt = product.isStandalone;
   const tool = getMarketingTool(params.slug);
+  const guide = getProductGuide(params.slug);
 
   return (
     <MarketingPageShell>
-      <JsonLd data={productJsonLd(product, reviews)} />
+      <JsonLd data={productJsonLd(product, reviews, guide?.faq)} />
       <div className="mkt-product-hero">
         {isReceipt ? (
           <p className="mkt-eyebrow">STANDALONE · MOBILE</p>
@@ -84,6 +87,8 @@ export default async function ProductPage({ params }: Props) {
         featureDetails={product.featureDetails}
         appHref={product.href}
       />
+
+      {guide ? <ProductAudienceSection guide={guide} /> : null}
 
       <ProductReviews tool={params.slug} toolName={product.name} initial={reviews} />
 
@@ -121,6 +126,8 @@ export default async function ProductPage({ params }: Props) {
           </ul>
         </div>
       ) : null}
+
+      {guide ? <ProductFaqSection guide={guide} productName={product.name} /> : null}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 24 }}>
         {!isReceipt ? (

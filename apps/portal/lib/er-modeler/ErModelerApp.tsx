@@ -106,6 +106,7 @@ import {
 } from "./types";
 import { errorsForColumnSave, errorsTouching, formatErrorReasons, formatValidationReasons, validateErProject, validationForRelation, type ErValidationItem } from "./validation";
 import { enrichExportScripts } from "./scriptExport";
+import { fetchDemoSampleFile, takeDemoSampleParam } from "@/lib/demoSamples";
 
 const nodeTypes = { erTable: ErTableNode };
 const edgeTypes = { erRelation: ErRelationEdge };
@@ -1992,6 +1993,16 @@ function ErModelerInner() {
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   }
+
+  // 데모 페이지 "이 샘플로 직접 실행" — ?sample=table-design
+  useEffect(() => {
+    const id = takeDemoSampleParam(["table-design"]);
+    if (!id) return;
+    void fetchDemoSampleFile(id)
+      .then((f) => handleImport(f, "replace"))
+      .catch((e) => setMsg(String((e as Error).message || e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="er-modeler">

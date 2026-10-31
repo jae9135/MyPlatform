@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isPortalAuthed, resolveIpmsUnlocked } from "@/lib/portal-auth";
+import { isPortalAuthed, resolveDbUnlocked, resolveIpmsUnlocked } from "@/lib/portal-auth";
+import { DB_LOCKED_DETAIL, isDbAccessPath } from "@/lib/dbGuard";
 import { IPMS_LOCKED_DETAIL, isIpmsApiRequest } from "@/lib/ipmsGuard";
 import { checkUpstreamConfig, upstreamBase, upstreamHeaders } from "@/lib/upstreamApi";
 
@@ -61,6 +62,14 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
     const ipms = await resolveIpmsUnlocked((name) => req.cookies.get(name));
     if (!ipms.unlocked) {
       return NextResponse.json({ detail: IPMS_LOCKED_DETAIL, error: "ipms_locked" }, { status: 403 });
+    }
+  }
+
+  // DBManager 가 운영 DB 에 닿는 요청(조회·SQL 적용·데이터 관리)은 DB 잠금 해제자만
+  if (isDbAccessPath(path.join("/"))) {
+    const db = await resolveDbUnlocked((name) => req.cookies.get(name));
+    if (!db.unlocked) {
+      return NextResponse.json({ detail: DB_LOCKED_DETAIL, error: "db_locked" }, { status: 403 });
     }
   }
 

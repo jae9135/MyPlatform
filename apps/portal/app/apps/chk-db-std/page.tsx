@@ -9,6 +9,11 @@ import {
 
 import { API_BASE } from "@/lib/apiBase";
 import { fetchScanApi, postScanMultipart } from "@/lib/localScanApi";
+import {
+  DEMO_SAMPLE_LOADED_MSG,
+  fetchDemoSampleFile,
+  takeDemoSampleParam,
+} from "@/lib/demoSamples";
 
 const PAGE_SIZE = 100;
 
@@ -992,6 +997,19 @@ export default function ChkDbStdPage() {
   );
 
   const idleCheck = tableKind ? IDLE_TABLE_CHECK : IDLE_CODE_CHECK;
+
+  // 데모 페이지 "이 샘플로 직접 실행" — ?sample=table-design
+  useEffect(() => {
+    const id = takeDemoSampleParam(["table-design"]);
+    if (!id) return;
+    void fetchDemoSampleFile(id)
+      .then(async (f) => {
+        await onDesignFileChange(f, "table");
+        setMsg(DEMO_SAMPLE_LOADED_MSG);
+      })
+      .catch((e) => setMsg(String((e as Error).message || e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <main>

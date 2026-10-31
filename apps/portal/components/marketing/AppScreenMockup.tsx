@@ -60,7 +60,7 @@ export function ProductDetailScreens({
           {featureDetails.map((f, i) => (
             <article key={f.title} className="mkt-feature-screen-item">
               <div className="mkt-feature-screen-text">
-                <span className="mkt-feature-num">{String(i + 1).padStart(2, "0")}</span>
+                <span className="mkt-feature-num" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
                 <div>
                   <h3>{f.title}</h3>
                   <p>{f.description}</p>

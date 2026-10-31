@@ -6,6 +6,12 @@ import { PortalNav } from "@/lib/PortalNav";
 import { saveDesignHandoff } from "@/lib/designHandoff";
 
 import { API_BASE } from "@/lib/apiBase";
+import { IpmsUnlockDialog } from "@/components/IpmsUnlockDialog";
+import {
+  DEMO_SAMPLE_LOADED_MSG,
+  fetchDemoSampleFile,
+  takeDemoSampleParam,
+} from "@/lib/demoSamples";
 
 type SampleItem = {
   id: string;
@@ -353,6 +359,20 @@ export default function DbManagerPage() {
     { row: number; message: string }[]
   >([]);
 
+  /** 운영 DB 에 닿는 기능(적용·DB→설계서·데이터 관리·비교)은 별도 암호로 잠금 */
+  const [dbUnlocked, setDbUnlocked] = useState(false);
+  const [dbUnlockConfigured, setDbUnlockConfigured] = useState(true);
+  const [dbDialogTab, setDbDialogTab] = useState<null | "apply" | "reverse" | "data" | "diff">(null);
+  useEffect(() => {
+    void fetch("/api/portal/auth", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: { dbUnlocked?: boolean; dbUnlockConfigured?: boolean }) => {
+        setDbUnlocked(Boolean(j.dbUnlocked));
+        setDbUnlockConfigured(j.dbUnlockConfigured !== false);
+      })
+      .catch(() => setDbUnlocked(false));
+  }, []);
+
   const refreshDbStatus = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/v1/db-manager/db-status`);
@@ -475,16 +495,16 @@ export default function DbManagerPage() {
   }, [dbStatus?.database_name]);
 
   useEffect(() => {
-    if (dbStatus?.ok) {
+    if (dbStatus?.ok && dbUnlocked) {
       loadSyncSchemas();
     }
-  }, [dbStatus?.ok, loadSyncSchemas]);
+  }, [dbStatus?.ok, dbUnlocked, loadSyncSchemas]);
 
   useEffect(() => {
-    if (dbStatus?.ok && syncSchema) {
+    if (dbStatus?.ok && dbUnlocked && syncSchema) {
       loadSyncTables(syncSchema);
     }
-  }, [dbStatus?.ok, syncSchema, loadSyncTables]);
+  }, [dbStatus?.ok, dbUnlocked, syncSchema, loadSyncTables]);
 
   useEffect(() => {
     if (dbStatus?.ok && syncSchemas.length) {
@@ -824,8 +844,8 @@ export default function DbManagerPage() {
   }, [alterSql, includeCaution]);
 
   useEffect(() => {
-    if (dbStatus?.ok) loadRunEvents();
-  }, [dbStatus?.ok, loadRunEvents]);
+    if (dbStatus?.ok && dbUnlocked) loadRunEvents();
+  }, [dbStatus?.ok, dbUnlocked, loadRunEvents]);
 
   useEffect(() => {
     if (!diffResult) return;
@@ -1290,6 +1310,19 @@ export default function DbManagerPage() {
     []
   );
 
+  // 데모 페이지 "이 샘플로 직접 실행" — ?sample=table-design
+  useEffect(() => {
+    const id = takeDemoSampleParam(["table-design"]);
+    if (!id) return;
+    void fetchDemoSampleFile(id)
+      .then((f) => {
+        onDesignFileChange(f);
+        setMsg(DEMO_SAMPLE_LOADED_MSG);
+      })
+      .catch((e) => setMsg(String((e as Error).message || e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <main>
       <PortalNav />
@@ -1311,17 +1344,55 @@ export default function DbManagerPage() {
             ["data", "데이터 관리"],
             ["diff", "설계서 ↔ DB"],
           ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            className={`tab ${uiTab === id ? "active" : ""}`}
-            onClick={() => setUiTab(id)}
-          >
-            {label}
-          </button>
-        ))}
+        ).map(([id, label]) => {
+          const locked = id !== "generate" && !dbUnlocked;
+          return (
+            <button
+              key={id}
+              type="button"
+              className={`tab ${uiTab === id ? "active" : ""}`}
+              title={locked ? "운영 DB를 다루는 기능이라 별도 암호가 필요합니다" : undefined}
+              onClick={() => {
+                if (locked) {
+                  setDbDialogTab(id);
+                  return;
+                }
+                setUiTab(id);
+              }}
+            >
+              {locked ? `🔒 ${label}` : label}
+            </button>
+          );
+        })}
       </div>
+      {!dbUnlocked ? (
+        <p className="hint" style={{ marginTop: 8 }}>
+          설계서 → 스크립트(DDL 생성·다운로드)는 누구나 사용할 수 있습니다. 운영 DB에 적용·조회하는 기능은
+          별도 암호가 필요합니다.
+        </p>
+      ) : null}
+
+      <IpmsUnlockDialog
+        open={dbDialogTab !== null}
+        title="DB 기능 잠금 해제"
+        description={
+          dbUnlockConfigured ? (
+            <>
+              <strong>운영 DB</strong>에 SQL을 적용하거나 데이터를 조회하는 기능입니다. 관리자 암호를 입력하세요.
+            </>
+          ) : (
+            <>서버에 DB 잠금 암호(DB_UNLOCK_PASSWORD)가 설정되지 않아 DB 기능을 사용할 수 없습니다.</>
+          )
+        }
+        endpoint="/api/portal/db-unlock"
+        notConfiguredText="서버에 DB_UNLOCK_PASSWORD 가 설정되지 않아 DB 기능을 사용할 수 없습니다."
+        onClose={() => setDbDialogTab(null)}
+        onUnlocked={() => {
+          setDbUnlocked(true);
+          if (dbDialogTab) setUiTab(dbDialogTab);
+          setDbDialogTab(null);
+        }}
+      />
 
       {uiTab === "generate" ? (
       <>
@@ -1375,6 +1446,7 @@ export default function DbManagerPage() {
             accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             onChange={(e) => onDesignFileChange(e.target.files?.[0] || null)}
           />
+          {file ? <span className="hint">선택됨: {file.name}</span> : null}
         </div>
         <p
           className={`msg ${

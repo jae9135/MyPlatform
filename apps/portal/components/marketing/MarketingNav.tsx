@@ -5,10 +5,15 @@ import { useState } from "react";
 import { BRAND_NAME } from "@/lib/brand";
 import { betaEntryHref } from "@/lib/authMode";
 
+/**
+ * 섹션 링크는 "/#..." 로 둡니다 — "#tools" 만 쓰면 홈이 아닌 페이지(/community, /products/... 등)에서
+ * 그 페이지 안의 없는 앵커를 찾게 되어 아무 이동도 일어나지 않습니다.
+ * 홈에서는 같은 문서 안 이동으로 처리되어 새로고침 없이 스크롤됩니다.
+ */
 const NAV_LINKS: { href: string; label: string; isPage?: boolean }[] = [
-  { href: "#tools", label: "도구" },
-  { href: "#receipt", label: "모바일" },
-  { href: "#workflow", label: "워크플로" },
+  { href: "/#tools", label: "도구" },
+  { href: "/#receipt", label: "모바일" },
+  { href: "/#workflow", label: "워크플로" },
   { href: "/customize", label: "맞춤 개발", isPage: true },
   { href: "/community", label: "후기·Q&A", isPage: true },
 ];

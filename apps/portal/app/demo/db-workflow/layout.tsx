@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "설계서에서 DB까지 — DB 워크플로 데모",
   description:
-    "테이블정의서 업로드 → DB 표준 점검 → ERD 편집 → DDL 생성·DB 적용까지 이어지는 DB 설계 자동화 흐름 데모",
+    "샘플 테이블정의서 하나를 DB 표준 점검 → ERD → PostgreSQL DDL 생성 → DB 적용까지 실제로 실행한 결과를 단계별로 보여주는 데모",
   alternates: { canonical: "/demo/db-workflow" },
   openGraph: { url: "/demo/db-workflow" },
 };

@@ -8,7 +8,7 @@
 }
 
 .cm-intro a {
-  color: var(--pl-accent);
+  color: var(--mkt-accent, var(--pl-accent));
 }
 
 .cm-toolbar {
@@ -140,7 +140,7 @@
 .cm-answer {
   margin-top: 12px;
   padding: 12px 14px;
-  border-left: 3px solid var(--pl-accent);
+  border-left: 3px solid var(--mkt-accent, var(--pl-accent));
   background: var(--pl-accent-soft);
   border-radius: 0 10px 10px 0;
 }
@@ -183,7 +183,7 @@
 }
 
 .cm-star-input button:focus-visible {
-  outline: 2px solid var(--pl-accent);
+  outline: 2px solid var(--mkt-accent, var(--pl-accent));
   border-radius: 4px;
 }
 
@@ -223,7 +223,7 @@
 }
 
 .cm-write-hint a {
-  color: var(--pl-accent);
+  color: var(--mkt-accent, var(--pl-accent));
 }
 
 .cm-write-row {
@@ -253,7 +253,7 @@
 }
 
 .cm-type-pick label:has(input:checked) {
-  border-color: var(--pl-accent);
+  border-color: var(--mkt-accent, var(--pl-accent));
   background: var(--pl-accent-soft);
 }
 
@@ -330,7 +330,7 @@
 
 .cm-hub-head a {
   font-size: 14px;
-  color: var(--pl-accent);
+  color: var(--mkt-accent, var(--pl-accent));
   text-decoration: none;
   font-weight: 600;
 }
@@ -366,7 +366,7 @@
 }
 
 .cm-hub-list a:hover {
-  color: var(--pl-accent);
+  color: var(--mkt-accent, var(--pl-accent));
 }
 
 .cm-hub-list span {

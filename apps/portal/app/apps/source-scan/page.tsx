@@ -34,6 +34,11 @@ import {
   openSourceScanHistoryPopout,
   openSourceScanRulesPopout,
 } from "@/lib/sourceScanPopout";
+import {
+  DEMO_SAMPLE_LOADED_MSG,
+  fetchDemoSampleFile,
+  takeDemoSampleParam,
+} from "@/lib/demoSamples";
 
 const PAGE_SIZE = 80;
 
@@ -848,6 +853,18 @@ export default function SourceScanPage() {
     </div>
   );
 
+  // 데모 페이지 "이 샘플로 직접 실행" — ?sample=demo-shop
+  useEffect(() => {
+    const id = takeDemoSampleParam(["demo-shop"]);
+    if (!id) return;
+    void fetchDemoSampleFile(id)
+      .then((f) => {
+        setZipFile(f);
+        setMsg(DEMO_SAMPLE_LOADED_MSG);
+      })
+      .catch((e) => setMsg(String((e as Error).message || e)));
+  }, []);
+
   return (
     <main>
       <PortalNav />
@@ -943,6 +960,7 @@ export default function SourceScanPage() {
         <label className="file-field">
           소스 ZIP
           <input type="file" accept=".zip,application/zip" onChange={(e) => setZipFile(e.target.files?.[0] ?? null)} />
+          {zipFile ? <span className="hint" style={{ marginLeft: 8 }}>선택됨: {zipFile.name}</span> : null}
         </label>
         <CloudLargeZipHint />
         <ul className="source-scan-option-list">

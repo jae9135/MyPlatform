@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "품질·보안 진단 데모",
+  title: "품질·보안 진단 데모 — 실제 실행 결과",
   description:
-    "소스코드 보안(PMD·FindSecBugs)·웹 품질(KWCAG 2.2·웹표준)·성능 진단 결과를 미리 보는 데모 화면",
+    "데모 샘플 프로젝트·웹 페이지·테이블정의서를 소스코드 보안(PMD·FindSecBugs·Bandit)·웹 품질(KWCAG 2.2)·DB 표준 점검으로 실제 실행한 결과",
   alternates: { canonical: "/demo/quality" },
   openGraph: { url: "/demo/quality" },
 };
