@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { isPortalAuthed } from "@/lib/portal-auth";
 import { isPublicPath } from "@/lib/publicPaths";
+import { isPortalAuthRequired } from "@/lib/authMode";
 
 /** matcher 밖에서 처리 — path-to-regexp negative lookahead 복잡 패턴은 Vercel 빌드 오류 유발 */
 function bypassPortalAuth(pathname: string): boolean {
@@ -21,6 +22,11 @@ export async function middleware(req: NextRequest) {
 
   // /admin 은 서버 컴포넌트·API에서 별도 검증 (Edge에서 env/crypto 이슈 회피)
   if (pathname.startsWith("/admin") || pathname.startsWith("/api/admin")) {
+    return NextResponse.next();
+  }
+
+  // 공개 모드 (NEXT_PUBLIC_PORTAL_AUTH_REQUIRED 꺼짐): 로그인 없이 모든 화면 접근
+  if (!isPortalAuthRequired()) {
     return NextResponse.next();
   }
 

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import io
 import os
 import sys
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -53,7 +56,25 @@ DBMANAGER_SAMPLE_CATALOG = [
     },
 ]
 
-app = FastAPI(title="MyPlatform API", version="0.4.0")
+def _is_cloud_runtime() -> bool:
+    """Render 등 배포 환경 여부 (로컬 개발은 False)."""
+    return bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"))
+
+
+def _env_flag(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# Swagger(/docs)·OpenAPI 는 로컬에서만 기본 공개. 배포 환경에서 보려면 ENABLE_API_DOCS=true
+_API_DOCS_ENABLED = (not _is_cloud_runtime()) or _env_flag("ENABLE_API_DOCS")
+
+app = FastAPI(
+    title="MyPlatform API",
+    version="0.4.0",
+    docs_url="/docs" if _API_DOCS_ENABLED else None,
+    redoc_url="/redoc" if _API_DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if _API_DOCS_ENABLED else None,
+)
 
 
 class ApplySqlBody(BaseModel):
@@ -111,28 +132,140 @@ origins = [
 ]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins or ["*"],
+    # 목록이 비면 와일드카드로 열지 않음 (credentials 와 "*" 조합은 브라우저도 거부)
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+# 키 없이 열어 두는 경로 — /health 는 Render 헬스체크용. /health/detail(서버 경로 노출)은 키 필요
+_PUBLIC_API_PATHS = frozenset(
+    {"/health"} | ({"/docs", "/openapi.json", "/redoc"} if _API_DOCS_ENABLED else set())
+)
+
+# 포털(apps/portal/app/api/backend/direct-api)이 발급하는 단기 업로드 토큰 최대 수명
+UPLOAD_TOKEN_MAX_TTL = 60 * 60
+
+
+def _api_key_valid(got: str, expected: str) -> bool:
+    return bool(got) and hmac.compare_digest(got.encode(), expected.encode())
+
+
+_UPLOAD_TOKEN_SCOPES = ("std", "ipms")
+
+
+def _upload_token_scope(token: str, expected_key: str) -> str | None:
+    """"<만료epoch>.<scope>.<hex HMAC-SHA256(API_ACCESS_KEY, 'upload:v2:<만료>:<scope>')>" 검증.
+
+    유효하면 scope("std" | "ipms"), 아니면 None. 포털 direct-api 라우트와 같은 규칙.
+    """
+    if not token or not expected_key:
+        return None
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    exp_raw, scope, sig = parts
+    if scope not in _UPLOAD_TOKEN_SCOPES:
+        return None
+    try:
+        exp = int(exp_raw)
+    except ValueError:
+        return None
+    now = int(time.time())
+    if exp < now or exp > now + UPLOAD_TOKEN_MAX_TTL:
+        return None
+    want = hmac.new(
+        expected_key.encode(), f"upload:v2:{exp}:{scope}".encode(), hashlib.sha256
+    ).hexdigest()
+    return scope if hmac.compare_digest(sig.encode(), want.encode()) else None
+
+
+def _upload_token_valid(token: str, expected_key: str) -> bool:
+    return _upload_token_scope(token, expected_key) is not None
+
+
+def _request_access(request: Request, expected: str) -> tuple[bool, bool]:
+    """(인증 통과, IPMS 허용). 마스터 키 = 포털 프록시(포털이 IPMS 2차 암호를 이미 확인)."""
+    if _api_key_valid(request.headers.get("x-api-key") or "", expected):
+        return True, True
+    scope = _upload_token_scope(request.headers.get("x-upload-token") or "", expected)
+    if scope is None:
+        return False, False
+    return True, scope == "ipms"
+
+
+def _request_authorized(request: Request, expected: str) -> bool:
+    return _request_access(request, expected)[0]
+
+
+# ---------- IPMS 2차 암호 확인 (포털 apps/portal/lib/ipmsGuard.ts 와 같은 규칙) ----------
+
+IPMS_LOCKED_DETAIL = "IPMS 진단은 2차 암호 확인이 필요합니다. 화면에서 IPMS 메뉴를 눌러 암호를 입력하세요."
+
+
+def _is_ipms_value(field: str, raw: str | None) -> bool:
+    v = (raw or "").strip().lower()
+    if not v:
+        return False
+    if field == "target":
+        return v == "ipms-online"
+    if field == "mode":
+        return v.startswith("ipms")
+    if field == "detect":
+        return v == "ipms"
+    return "ipms.online" in v  # base_url / page_url
+
+
+def _is_ipms_request(**fields: str | None) -> bool:
+    return any(_is_ipms_value(k, v) for k, v in fields.items())
+
+
+def _ipms_allowed(request: Request) -> bool:
+    return bool(getattr(request.state, "ipms_ok", False))
+
+
+def _guard_ipms(request: Request, **fields: str | None) -> None:
+    """IPMS 대상 요청인데 2차 암호 권한이 없으면 403."""
+    if _is_ipms_request(**fields) and not _ipms_allowed(request):
+        raise HTTPException(status_code=403, detail=IPMS_LOCKED_DETAIL)
+
+
 class ApiKeyMiddleware(BaseHTTPMiddleware):
-    """When API_ACCESS_KEY is set, require X-Api-Key (portal proxy sends it)."""
+    """When API_ACCESS_KEY is set, require X-Api-Key (portal proxy) or X-Upload-Token (direct upload)."""
 
     async def dispatch(self, request: Request, call_next):
         if request.method == "OPTIONS":
             return await call_next(request)
         path = request.url.path
-        if path in ("/health", "/health/detail", "/docs", "/openapi.json", "/redoc"):
+        if path in _PUBLIC_API_PATHS:
             return await call_next(request)
         expected = (os.getenv("API_ACCESS_KEY") or "").strip()
         if not expected:
+            if _is_cloud_runtime() and not _env_flag("ALLOW_OPEN_API"):
+                # 배포 환경에서 키 미설정 = 전체 개방 → 차단 (의도적으로 열려면 ALLOW_OPEN_API=true)
+                return JSONResponse(
+                    {"detail": "API_ACCESS_KEY is not configured on the server."},
+                    status_code=503,
+                )
+            # 로컬 개발(키 없음): IPMS 확인은 포털 프록시가 담당
+            request.state.ipms_ok = True
             return await call_next(request)
-        got = request.headers.get("x-api-key") or ""
-        if got != expected:
+        authed, ipms_ok = _request_access(request, expected)
+        if not authed:
             return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        request.state.ipms_ok = ipms_ok
+        # 경로·쿼리만으로 IPMS 요청임이 확실한 경우 여기서 차단 (본문 기반은 각 엔드포인트의 _guard_ipms)
+        if not ipms_ok and (
+            "/ipms/" in path
+            or _is_ipms_request(
+                target=request.query_params.get("target"),
+                page_url=request.query_params.get("page_url"),
+                base_url=request.query_params.get("base_url"),
+            )
+        ):
+            return JSONResponse({"detail": IPMS_LOCKED_DETAIL}, status_code=403)
         return await call_next(request)
 
 
@@ -142,7 +275,7 @@ app.add_middleware(ApiKeyMiddleware)
 class DirectUploadCorsMiddleware(BaseHTTPMiddleware):
     """Browser direct upload (Vercel → Render): reflect Origin on preflight + valid API key."""
 
-    _PUBLIC_PATHS = frozenset({"/health", "/health/detail", "/docs", "/openapi.json", "/redoc"})
+    _PUBLIC_PATHS = _PUBLIC_API_PATHS
 
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("origin")
@@ -161,11 +294,10 @@ class DirectUploadCorsMiddleware(BaseHTTPMiddleware):
         if origin:
             path = request.url.path
             expected = (os.getenv("API_ACCESS_KEY") or "").strip()
-            got = request.headers.get("x-api-key") or ""
             allowed = (
                 origin in origins
                 or path in self._PUBLIC_PATHS
-                or (expected and got == expected)
+                or (bool(expected) and _request_authorized(request, expected))
             )
             if allowed:
                 response.headers["Access-Control-Allow-Origin"] = origin
@@ -1419,6 +1551,7 @@ def web_quality_scenarios(
 
 @app.post("/v1/web-quality/scenarios/discover")
 async def web_quality_scenarios_discover(
+    request: Request,
     page_url: str = Form(""),
     need_login: str = Form("false"),
     login_url: str = Form(""),
@@ -1433,6 +1566,7 @@ async def web_quality_scenarios_discover(
     include_urls: str = Form(""),
     session_storage: UploadFile | None = File(None),
 ) -> dict:
+    _guard_ipms(request, page_url=page_url)
     _ensure_api_path()
     wq = _load_web_quality()
     session_bytes: bytes | None = None
@@ -1490,6 +1624,7 @@ async def web_quality_scenarios_discover(
 
 @app.post("/v1/web-quality/scenarios/link-preview")
 async def web_quality_scenarios_link_preview(
+    request: Request,
     page_url: str = Form(""),
     need_login: str = Form("false"),
     login_url: str = Form(""),
@@ -1503,6 +1638,7 @@ async def web_quality_scenarios_link_preview(
     async_progress: str = Form("true"),
     session_storage: UploadFile | None = File(None),
 ) -> dict:
+    _guard_ipms(request, page_url=page_url)
     _ensure_api_path()
     wq = _load_web_quality()
     session_bytes: bytes | None = None
@@ -1562,6 +1698,7 @@ async def web_quality_scenarios_upload(
 
 @app.post("/v1/web-quality/scenarios/resolve")
 async def web_quality_scenarios_resolve(
+    request: Request,
     extractor: str = Form("auto"),
     target: str = Form(""),
     base_url: str = Form(""),
@@ -1580,6 +1717,7 @@ async def web_quality_scenarios_resolve(
     file: UploadFile | None = File(None),
     session_storage: UploadFile | None = File(None),
 ) -> dict:
+    _guard_ipms(request, target=target, base_url=base_url, page_url=page_url)
     _ensure_api_path()
     wq = _load_web_quality()
     zip_bytes: bytes | None = None
@@ -1651,9 +1789,11 @@ async def web_quality_ipms_session_validate(
 
 @app.post("/v1/web-quality/session/validate")
 async def web_quality_external_session_validate(
+    request: Request,
     base_url: str = Form(""),
     session_storage: UploadFile | None = File(None),
 ) -> dict:
+    _guard_ipms(request, base_url=base_url)
     _ensure_api_path()
     wq = _load_web_quality()
     session_bytes: bytes | None = None
@@ -1666,9 +1806,11 @@ async def web_quality_external_session_validate(
 
 @app.post("/v1/web-quality/session")
 async def web_quality_browser_session(
+    request: Request,
     page_url: str = Form(""),
     detect: str = Form("generic"),
 ) -> dict:
+    _guard_ipms(request, page_url=page_url, detect=detect)
     _ensure_api_path()
     wq = _load_web_quality()
     kind = (detect or "generic").strip().lower()
@@ -1700,6 +1842,7 @@ def web_quality_ipms_session_status(job_id: str) -> dict:
 
 @app.post("/v1/web-quality/validate")
 async def web_quality_validate(
+    request: Request,
     mode: str = Form("portal"),
     target: str = Form("er-modeler"),
     base_url: str = Form("http://127.0.0.1:3000"),
@@ -1709,6 +1852,7 @@ async def web_quality_validate(
     include_krds: str = Form("true"),
     ipms_access: str = Form("public"),
 ) -> dict:
+    _guard_ipms(request, mode=mode, target=target, base_url=base_url, page_url=page_url)
     wq = _load_web_quality()
     include_rt = (include_runtime or "true").lower() not in ("0", "false", "no")
     include_kr = (include_krds or "true").lower() not in ("0", "false", "no")
@@ -1727,6 +1871,7 @@ async def web_quality_validate(
 
 @app.post("/v1/web-quality/run")
 async def web_quality_run(
+    request: Request,
     mode: str = Form("portal"),
     target: str = Form("er-modeler"),
     base_url: str = Form("http://127.0.0.1:3000"),
@@ -1749,6 +1894,7 @@ async def web_quality_run(
     file: UploadFile | None = File(None),
     session_storage: UploadFile | None = File(None),
 ):
+    _guard_ipms(request, mode=mode, target=target, base_url=base_url, page_url=page_url)
     fmt = (format or "json").lower().strip()
     if fmt not in ("json", "xlsx", "html", "zip"):
         raise HTTPException(400, detail="format must be json|xlsx|html|zip")
@@ -1882,6 +2028,7 @@ def web_quality_ref_links() -> dict:
 
 @app.post("/v1/web-quality/scenarios/preview")
 async def web_quality_scenarios_preview(
+    request: Request,
     mode: str = Form("ipms-public"),
     page_url: str = Form(""),
     state_ids: str = Form(""),
@@ -1898,6 +2045,7 @@ async def web_quality_scenarios_preview(
     candidates_json: str = Form(""),
     session_storage: UploadFile | None = File(None),
 ) -> dict:
+    _guard_ipms(request, mode=mode, page_url=page_url)
     _ensure_api_path()
     from web_quality.scenario_preview import parse_candidates_json, preview_wq_scenarios  # type: ignore
 
@@ -2350,6 +2498,7 @@ def perf_test_portal_urls() -> dict:
 
 @app.post("/v1/perf-test/validate")
 async def perf_test_validate(
+    request: Request,
     target: str = Form(""),
     base_url: str = Form(""),
     state_ids: str = Form(""),
@@ -2363,6 +2512,7 @@ async def perf_test_validate(
     session_job_id: str = Form(""),
     session_storage: UploadFile | None = File(None),
 ) -> dict:
+    _guard_ipms(request, target=target, base_url=base_url)
     pt = _load_perf_test()
     from perf_test.options import PerfTestOptions  # type: ignore
 
@@ -2399,10 +2549,12 @@ async def perf_test_session_validate(
 
 @app.post("/v1/perf-test/session/validate")
 async def perf_test_session_validate_upload(
+    request: Request,
     base_url: str = Form(""),
     session_job_id: str = Form(""),
     session_storage: UploadFile | None = File(None),
 ) -> dict:
+    _guard_ipms(request, base_url=base_url)
     pt = _load_perf_test()
     session_bytes: bytes | None = None
     if session_storage is not None:
@@ -2418,6 +2570,7 @@ async def perf_test_session_validate_upload(
 
 @app.post("/v1/perf-test/scenarios/preview")
 async def perf_test_scenarios_preview(
+    request: Request,
     target: str = Form(""),
     base_url: str = Form(""),
     state_ids: str = Form(""),
@@ -2425,6 +2578,7 @@ async def perf_test_scenarios_preview(
     session_job_id: str = Form(""),
     session_storage: UploadFile | None = File(None),
 ) -> dict:
+    _guard_ipms(request, target=target, base_url=base_url)
     pt = _load_perf_test()
     from perf_test.options import PerfTestOptions  # type: ignore
 
@@ -2455,6 +2609,7 @@ async def perf_test_scenarios_preview(
 
 @app.post("/v1/perf-test/run")
 async def perf_test_run(
+    request: Request,
     target: str = Form(""),
     base_url: str = Form(""),
     state_ids: str = Form(""),
@@ -2469,6 +2624,7 @@ async def perf_test_run(
     async_progress: str = Form("true"),
     session_storage: UploadFile | None = File(None),
 ) -> dict:
+    _guard_ipms(request, target=target, base_url=base_url)
     pt = _load_perf_test()
     from perf_test.options import PerfTestOptions  # type: ignore
 

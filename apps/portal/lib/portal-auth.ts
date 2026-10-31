@@ -1,4 +1,5 @@
 import { isSupabaseAdminConfigured } from "@/lib/supabaseAdmin";
+import { isPortalAuthRequired } from "@/lib/authMode";
 
 export const PORTAL_COOKIE = "mp_portal";
 export const TRIAL_COOKIE = "mp_trial";
@@ -9,7 +10,16 @@ export const CODE_KIND_COOKIE = "mp_code_kind";
 export const IPMS_UNLOCK_COOKIE = "mp_ipms_unlock";
 
 export type TrialMode = "day" | "once";
-export type PortalAuthKind = "full" | "trial-day" | "trial-once" | "code-full" | "code-day" | "code-once" | null;
+/** "public" = 공개 모드(NEXT_PUBLIC_PORTAL_AUTH_REQUIRED 꺼짐)에서 로그인 없이 접근한 방문자 */
+export type PortalAuthKind =
+  | "full"
+  | "trial-day"
+  | "trial-once"
+  | "code-full"
+  | "code-day"
+  | "code-once"
+  | "public"
+  | null;
 
 /** 정식(30일) 포털 암호 또는 MP-F 전체 코드 — IPMS 등 제한 기능 */
 export function isFullPortalAuth(kind: PortalAuthKind | null | undefined): boolean {
@@ -18,6 +28,34 @@ export function isFullPortalAuth(kind: PortalAuthKind | null | undefined): boole
 
 export function getIpmsUnlockPassword(): string {
   return process.env.IPMS_UNLOCK_PASSWORD?.trim() ?? "";
+}
+
+/**
+ * IPMS 메뉴를 열 수 있는 사용자 — 정식 로그인(암호·MP-F 코드) 또는 공개 모드 방문자.
+ * 체험(1일·1회) 로그인은 보호 모드에서 기존처럼 제외.
+ * 실제 사용은 IPMS_UNLOCK_PASSWORD(2차 암호) 확인 후에만 가능.
+ */
+export function isIpmsEligible(kind: PortalAuthKind | null | undefined): boolean {
+  return isFullPortalAuth(kind) || kind === "public";
+}
+
+/** IPMS 해제 쿠키 값 — 암호에서 파생한 서명값이라 브라우저에서 임의로 만들 수 없음 */
+export async function ipmsUnlockToken(): Promise<string> {
+  const pw = getIpmsUnlockPassword();
+  if (!pw) return "";
+  return tokenFromPassword(`ipms-unlock:v1:${pw}`);
+}
+
+/** 이 요청이 IPMS 2차 암호를 통과했는지 (쿠키 서명 + 사용자 자격) */
+export async function resolveIpmsUnlocked(
+  get: (name: string) => { value?: string } | undefined,
+): Promise<{ eligible: boolean; unlocked: boolean }> {
+  const auth = await resolvePortalAuth(get);
+  const eligible = auth.ok && isIpmsEligible(auth.kind);
+  if (!eligible) return { eligible: false, unlocked: false };
+  const expected = await ipmsUnlockToken();
+  const cookie = readCookie(get, IPMS_UNLOCK_COOKIE);
+  return { eligible, unlocked: Boolean(expected && cookie && timingSafeEqual(cookie, expected)) };
 }
 
 const TOKEN_PREFIX = "myplatform.portal.v1:";
@@ -188,6 +226,9 @@ export async function resolvePortalAuth(
 
   const codeAuth = await resolveCodeSessionAuth(get);
   if (codeAuth.ok) return codeAuth;
+
+  // 공개 모드: 로그인 쿠키가 없어도 접근 허용 (정식 로그인 사용자는 위에서 먼저 판별되어 IPMS 등 유지)
+  if (!isPortalAuthRequired()) return { ok: true, kind: "public" };
 
   return { ok: false, kind: null };
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PortalNav } from "@/lib/PortalNav";
+import { IpmsUnlockDialog } from "@/components/IpmsUnlockDialog";
 import {
   fetchScanApi,
   fetchScanEnvWithRetry,
@@ -570,6 +571,10 @@ export default function PerfTestPage() {
   const [envErr, setEnvErr] = useState("");
   const [target, setTarget] = useState("ipms-online");
   const targetRef = useRef(target);
+  /** IPMS 메뉴 표시 여부(null=확인 중) · 2차 암호 통과 여부 — /api/portal/auth */
+  const [ipmsEnabled, setIpmsEnabled] = useState<boolean | null>(null);
+  const [ipmsUnlocked, setIpmsUnlocked] = useState(false);
+  const [ipmsDialogOpen, setIpmsDialogOpen] = useState(false);
   const [baseUrlInput, setBaseUrlInput] = useState(IPMS_DEFAULT_URL);
   const [appliedBaseUrl, setAppliedBaseUrl] = useState(IPMS_DEFAULT_URL);
   const [accessPublic, setAccessPublic] = useState(true);
@@ -1061,6 +1066,10 @@ export default function PerfTestPage() {
   }, [target, appliedBaseUrl, accessPublic, accessAuth]);
 
   function applyBaseUrl() {
+    if (target === "ipms-online" && !ipmsUnlocked) {
+      setIpmsDialogOpen(true);
+      return;
+    }
     const trimmed = baseUrlInput.trim();
     setBaseUrlApplyError("");
     if (!trimmed) {
@@ -1604,6 +1613,47 @@ export default function PerfTestPage() {
     setTarget(nextTarget);
   }
 
+  const switchTargetRef = useRef(switchTarget);
+  switchTargetRef.current = switchTarget;
+
+  // IPMS 잠금 상태 확인 — 잠겨 있으면 기본 탭(IPMS) 대신 「외부 URL」로 시작
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      let enabled = false;
+      let unlocked = false;
+      try {
+        const res = await fetch("/api/portal/auth", { cache: "no-store" });
+        const j = (await res.json()) as { ipmsEnabled?: boolean; ipmsUnlocked?: boolean };
+        enabled = Boolean(j.ipmsEnabled);
+        unlocked = Boolean(j.ipmsUnlocked);
+      } catch {
+        /* 확인 실패 = 잠금 */
+      }
+      if (!alive) return;
+      setIpmsEnabled(enabled);
+      setIpmsUnlocked(unlocked);
+      if (!unlocked && targetRef.current === "ipms-online") {
+        switchTargetRef.current("manual");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function onTargetTabClick(id: string) {
+    if (id === "ipms-online" && !ipmsUnlocked) {
+      if (ipmsEnabled === false) {
+        setError("IPMS는 정식 로그인(30일 암호·MP-F 코드) 후 사용할 수 있습니다.");
+        return;
+      }
+      setIpmsDialogOpen(true);
+      return;
+    }
+    switchTarget(id);
+  }
+
   function buildForm(opts?: { includeSession?: boolean }): FormData {
     const fd = new FormData();
     fd.set("target", isUrlTarget ? "" : target);
@@ -1680,6 +1730,10 @@ export default function PerfTestPage() {
   }
 
   async function previewScenarios() {
+    if (target === "ipms-online" && !ipmsUnlocked) {
+      setIpmsDialogOpen(true);
+      return;
+    }
     setError("");
     setPreviewResult(null);
     setPreviewMsg("");
@@ -1759,6 +1813,10 @@ export default function PerfTestPage() {
 
   async function runTest() {
     const runTarget = target;
+    if (runTarget === "ipms-online" && !ipmsUnlocked) {
+      setIpmsDialogOpen(true);
+      return;
+    }
     if (Object.values(busyByTargetRef.current).some(Boolean)) {
       if (targetRef.current === runTarget) {
         setError("다른 탭 성능검사가 진행 중입니다. 완료 후 다시 시도하세요.");
@@ -2328,9 +2386,13 @@ export default function PerfTestPage() {
                 role="tab"
                 className={`tab ${target === o.id ? "active" : ""}`}
                 aria-selected={target === o.id}
-                onClick={() => switchTarget(o.id)}
+                onClick={() => onTargetTabClick(o.id)}
+                title={
+                  o.id === "ipms-online" && !ipmsUnlocked ? "IPMS는 2차 암호 입력 후 사용할 수 있습니다" : undefined
+                }
               >
                 {o.label}
+                {o.id === "ipms-online" && !ipmsUnlocked ? " 🔒" : ""}
               </button>
             ))}
           </div>
@@ -3059,6 +3121,23 @@ export default function PerfTestPage() {
             )}
           </section>
         )}
+      <IpmsUnlockDialog
+        open={ipmsDialogOpen}
+        title="IPMS 성능 진단 2차 암호"
+        description={
+          <>
+            <strong>IPMS</strong>(전기사업정보시스템) 부하 테스트는 실제 운영 서버에 요청을 보냅니다.
+            사용하려면 추가 암호를 입력하세요.
+          </>
+        }
+        onClose={() => setIpmsDialogOpen(false)}
+        onUnlocked={() => {
+          setIpmsUnlocked(true);
+          setIpmsDialogOpen(false);
+          setError("");
+          if (targetRef.current !== "ipms-online") switchTarget("ipms-online");
+        }}
+      />
     </main>
   );
 }

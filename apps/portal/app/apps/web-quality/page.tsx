@@ -12,6 +12,7 @@ import {
   fetchScanJobApi,
   isLocalPortalHost,
   postScanMultipart,
+  resetDirectScanApiConfig,
   wrapScanFetchError,
 } from "@/lib/localScanApi";
 import {
@@ -1408,6 +1409,8 @@ export default function WebQualityPage() {
         );
         return;
       }
+      // Render 직접 호출 토큰을 IPMS 권한으로 다시 받도록 초기화
+      resetDirectScanApiConfig();
       setIpmsUnlocked(true);
       setIpmsUnlockOpen(false);
       if (ipmsUnlockPending) {
@@ -1481,11 +1484,12 @@ export default function WebQualityPage() {
     })();
   }, []);
 
+  // IPMS가 잠겨 있으면(자격 없음 또는 2차 암호 전) 기본 탭 대신 「외부 URL」로 시작
   useEffect(() => {
-    if (ipmsEnabled === false && isIpmsMode(mode)) {
+    if (ipmsEnabled !== null && !ipmsUnlocked && isIpmsMode(mode)) {
       switchMode("external", { includeRuntime: true });
     }
-  }, [ipmsEnabled, mode, switchMode]);
+  }, [ipmsEnabled, ipmsUnlocked, mode, switchMode]);
 
   useEffect(() => {
     const url =
@@ -4687,6 +4691,10 @@ export default function WebQualityPage() {
             <strong>정식 암호(30일)</strong> 또는 <code>MP-F-</code> 발급 코드로 로그인한 경우에만
             표시됩니다. 정적(소스) · 외부 URL(화면)은 체험 암호에서도 이용할 수 있습니다.
           </p>
+        ) : ipmsEnabled && !ipmsUnlocked ? (
+          <p className="hint">
+            <strong>IPMS(화면)</strong> 메뉴는 누르면 <strong>2차 암호</strong>를 확인합니다.
+          </p>
         ) : null}
         <div className="tabs wq-mode-tabs" role="tablist">
           {ipmsEnabled ? (
@@ -4697,8 +4705,9 @@ export default function WebQualityPage() {
                 className={`tab ${mode === "ipms-online" ? "active" : ""}`}
                 aria-selected={mode === "ipms-online"}
                 onClick={() => requestIpmsOnline()}
+                title={ipmsUnlocked ? undefined : "2차 암호 입력 후 사용할 수 있습니다"}
               >
-                IPMS(화면)
+                IPMS(화면){ipmsUnlocked ? "" : " 🔒"}
               </button>
             </>
           ) : null}

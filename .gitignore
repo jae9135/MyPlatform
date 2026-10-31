@@ -29,6 +29,10 @@ build/
 # keep bundled code index for Render (apps/api/chkdbstd)
 !**/.std_code_index.pkl
 
+# local backups · runtime session (never commit)
+_backup/
+apps/api/ipms-session.json
+
 # OS / IDE
 .DS_Store
 Thumbs.db

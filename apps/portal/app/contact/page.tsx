@@ -4,7 +4,15 @@ import { ContactInfo } from "@/components/ContactInfo";
 import { MarketingPageShell } from "@/components/marketing/MarketingPageShell";
 import { ContactForm } from "@/components/marketing/ContactForm";
 import { BRAND_NAME } from "@/lib/brand";
+import type { Metadata } from "next";
 import "../marketing.css";
+
+export const metadata: Metadata = {
+  title: "문의하기",
+  description: "맞춤 개발·신규 기능·견적 상담 문의 — 프로젝트 산출물 자동화 도구 도입을 도와드립니다.",
+  alternates: { canonical: "/contact" },
+  openGraph: { url: "/contact" },
+};
 
 export default function ContactPage() {
   return (

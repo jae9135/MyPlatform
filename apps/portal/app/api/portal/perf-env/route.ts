@@ -6,8 +6,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function portalAuthed(req: NextRequest): Promise<boolean> {
-  const password = process.env.PORTAL_PASSWORD?.trim();
-  if (!password) return true;
   return isPortalAuthed((name) => req.cookies.get(name));
 }
 

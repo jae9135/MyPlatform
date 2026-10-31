@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Fragment } from "react";
 import { getInfraLinks } from "@/lib/portalInfraLinks";
+import { betaEntryHref } from "@/lib/authMode";
 import {
   CUSTOMIZE_CARDS,
   CONTACT_EMAIL,
@@ -44,7 +45,7 @@ export function MarketingHome() {
               <Link className="mkt-btn" href="/customize">
                 맞춤 개발 문의
               </Link>
-              <Link className="mkt-btn mkt-btn-ghost" href="/login">
+              <Link className="mkt-btn mkt-btn-ghost" href={betaEntryHref()}>
                 베타 프로그램
               </Link>
             </div>

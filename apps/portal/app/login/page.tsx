@@ -1,13 +1,20 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ContactInfo } from "@/components/ContactInfo";
 import { PortalNav } from "@/lib/PortalNav";
 import { BRAND_NAME } from "@/lib/brand";
+import { isPortalAuthRequired } from "@/lib/authMode";
 import {
   FULL_SESSION_MAX_AGE,
   TRIAL_DAY_MAX_AGE,
   isLoginConfigured,
   safeNextPath,
 } from "@/lib/portal-auth";
+
+export const metadata: Metadata = {
+  title: "로그인",
+  robots: { index: false, follow: false },
+};
 
 export default function LoginPage({
   searchParams,
@@ -17,6 +24,7 @@ export default function LoginPage({
   const next = safeNextPath(searchParams.next);
   const configured = isLoginConfigured();
   const error = searchParams.error;
+  const authRequired = isPortalAuthRequired();
 
   return (
     <main>
@@ -31,6 +39,14 @@ export default function LoginPage({
       <ContactInfo compact />
 
       <section className="panel login-panel">
+        {!authRequired && (
+          <p className="msg ok">
+            현재 <b>공개 모드</b>입니다. 로그인 없이 모든 도구를 사용할 수 있습니다 —{" "}
+            <Link href={next}>바로 시작하기 →</Link>
+            <br />
+            <small>정식 암호 로그인은 IPMS 진단 등 제한 기능을 쓸 때만 필요합니다.</small>
+          </p>
+        )}
         {!configured && (
           <p className="msg err">
             서버에 로그인 설정이 없습니다. 환경 암호(<code>PORTAL_PASSWORD</code> 등) 또는 Supabase 발급

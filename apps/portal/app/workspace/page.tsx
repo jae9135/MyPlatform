@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { ContactInfo } from "@/components/ContactInfo";
@@ -5,6 +6,10 @@ import { PLATFORM_APPS, STANDALONE_APPS } from "@/lib/apps";
 import { BRAND_NAME } from "@/lib/brand";
 import { getInfraLinks } from "@/lib/portalInfraLinks";
 import { resolvePortalAuth } from "@/lib/portal-auth";
+import { isPortalAuthRequired } from "@/lib/authMode";
+import { isBoardConfigured, listPublishedPosts } from "@/lib/board";
+import { BOARD_TYPE_LABEL, formatBoardDate, type BoardPublicPost } from "@/lib/boardShared";
+import "@/components/community/community.css";
 import "./workspace.css";
 
 const CATEGORY_TAG: Record<string, string> = {
@@ -13,8 +18,24 @@ const CATEGORY_TAG: Record<string, string> = {
   pm: "BUSINESS",
 };
 
+export const metadata: Metadata = {
+  title: "베타 프로그램 허브",
+  description: "소스코드·웹품질·성능·DB 표준·ERD·산출물·일정 관리 도구를 바로 실행해 볼 수 있는 베타 프로그램 허브",
+  alternates: { canonical: "/workspace" },
+};
+
+async function recentBoardPosts(): Promise<BoardPublicPost[] | null> {
+  if (!isBoardConfigured()) return null;
+  try {
+    return (await listPublishedPosts({ limit: 5 })).rows;
+  } catch {
+    return null;
+  }
+}
+
 export default async function WorkspacePage() {
   const infraLinks = getInfraLinks();
+  const recentPosts = await recentBoardPosts();
   const jar = cookies();
   const auth = await resolvePortalAuth((name) => jar.get(name));
 
@@ -39,12 +60,15 @@ export default async function WorkspacePage() {
           </Link>
           <div className="beta-hub-header-actions">
             <span>베타 프로그램</span>
+            <Link href="/community">후기·Q&amp;A</Link>
             <Link href="/">공개 홈</Link>
-            <form action="/api/logout" method="post">
-              <button className="beta-hub-logout" type="submit">
-                로그아웃
-              </button>
-            </form>
+            {isPortalAuthRequired() || (auth.kind && auth.kind !== "public") ? (
+              <form action="/api/logout" method="post">
+                <button className="beta-hub-logout" type="submit">
+                  로그아웃
+                </button>
+              </form>
+            ) : null}
           </div>
         </div>
       </header>
@@ -130,6 +154,33 @@ export default async function WorkspacePage() {
             </div>
           </div>
         ) : null}
+
+        <section className="cm-hub" aria-label="최근 후기·Q&A">
+          <div className="cm-hub-head">
+            <p className="beta-hub-section-title">최근 후기 · Q&amp;A</p>
+            <Link href="/community">전체 보기 · 글쓰기 →</Link>
+          </div>
+          {recentPosts && recentPosts.length > 0 ? (
+            <ul className="cm-hub-list">
+              {recentPosts.map((p) => (
+                <li key={p.id}>
+                  <Link href={`/community?tool=${encodeURIComponent(p.tool ?? "")}#post-${p.id}`}>
+                    [{BOARD_TYPE_LABEL[p.post_type]}] {p.title}
+                  </Link>
+                  <span>
+                    {p.tool_label} · {formatBoardDate(p.created_at)}
+                    {p.post_type === "qna" && p.answer ? " · 답변 완료" : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="cm-empty">
+              아직 게시된 글이 없습니다. 도구를 써 보셨다면 <Link href="/community?write=1">첫 후기</Link>를
+              남겨 주세요.
+            </div>
+          )}
+        </section>
 
         <div className="beta-hub-cta">
           <div>

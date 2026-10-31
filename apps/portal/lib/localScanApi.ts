@@ -19,9 +19,23 @@ function isTimeoutError(e: unknown): boolean {
   return msg.includes("aborted") || msg.includes("timeout");
 }
 
-type DirectApiConfig = { apiBase: string; apiKey: string };
+/** Render 직접 호출 설정 — 마스터 API 키 대신 포털이 발급한 단기 업로드 토큰 사용 */
+type DirectApiConfig = { apiBase: string; uploadToken: string; expiresAt: number };
 
 let directConfigPromise: Promise<DirectApiConfig | null> | null = null;
+let directConfigCache: DirectApiConfig | null = null;
+/** direct-api 미설정(503 등)일 때 매 요청마다 다시 묻지 않도록 잠시 프록시 경로로 고정 */
+let directConfigUnavailableUntil = 0;
+
+/** 만료 60초 전부터는 새 토큰을 받습니다. */
+const TOKEN_REFRESH_MARGIN_SEC = 60;
+
+/** IPMS 2차 암호 통과 직후 호출 — 다음 요청부터 IPMS 권한이 들어간 새 토큰을 받음 */
+export function resetDirectScanApiConfig(): void {
+  directConfigCache = null;
+  directConfigPromise = null;
+  directConfigUnavailableUntil = 0;
+}
 
 export function isLocalPortalHost(): boolean {
   if (typeof window === "undefined") return false;
@@ -31,16 +45,29 @@ export function isLocalPortalHost(): boolean {
 
 export async function getDirectScanApiConfig(): Promise<DirectApiConfig | null> {
   if (isLocalPortalHost()) return null;
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (directConfigCache && directConfigCache.expiresAt - TOKEN_REFRESH_MARGIN_SEC > nowSec) {
+    return directConfigCache;
+  }
+  if (!directConfigCache && directConfigUnavailableUntil > nowSec) return null;
   if (!directConfigPromise) {
     directConfigPromise = (async () => {
-      const res = await fetch("/api/backend/direct-api");
+      const res = await fetch("/api/backend/direct-api", { cache: "no-store" });
       if (!res.ok) return null;
-      const j = (await res.json()) as { apiBase?: string; apiKey?: string };
+      const j = (await res.json()) as { apiBase?: string; uploadToken?: string; expiresAt?: number };
       const apiBase = String(j.apiBase || "").trim().replace(/\/$/, "");
-      const apiKey = String(j.apiKey || "").trim();
-      if (!apiBase || !apiKey) return null;
-      return { apiBase, apiKey };
-    })().catch(() => null);
+      const uploadToken = String(j.uploadToken || "").trim();
+      const expiresAt = Number(j.expiresAt || 0);
+      if (!apiBase || !uploadToken || !expiresAt) return null;
+      return { apiBase, uploadToken, expiresAt };
+    })()
+      .catch(() => null)
+      .then((cfg) => {
+        directConfigCache = cfg;
+        directConfigPromise = null;
+        if (!cfg) directConfigUnavailableUntil = Math.floor(Date.now() / 1000) + 300;
+        return cfg;
+      });
   }
   return directConfigPromise;
 }
@@ -65,7 +92,7 @@ async function resolveScanApiUrl(
     const direct = await getDirectScanApiConfig();
     if (direct) {
       const headers = new Headers(init?.headers);
-      headers.set("X-Api-Key", direct.apiKey);
+      headers.set("X-Upload-Token", direct.uploadToken);
       return {
         url: `${direct.apiBase}/${path}`,
         init: { ...init, headers, mode: "cors" },
@@ -146,7 +173,7 @@ export function wrapScanFetchError(e: unknown, opts?: { scanBusy?: boolean; envP
     return new Error(
       timedOut
         ? "Render API 응답 시간 초과 — cold start·진단 중일 수 있습니다. 1~2분 후 재시도하거나 localhost:3000 로컬 포털을 사용하세요."
-        : "Render API 연결 실패 — Vercel에 NEXT_PUBLIC_API_BASE_URL·API_ACCESS_KEY 설정 후 재배포했는지 확인하세요. (로컬: start-local-scan.bat)"
+        : "Render API 연결 실패 — Vercel에 NEXT_PUBLIC_API_BASE_URL·API_ACCESS_KEY 설정, Render API 재배포(업로드 토큰 지원) 여부를 확인하세요. (로컬: start-local-scan.bat)"
     );
   }
   return e instanceof Error ? e : new Error(msg);

@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useState } from "react";
 import { BRAND_NAME } from "@/lib/brand";
+import { betaEntryHref } from "@/lib/authMode";
 
 const NAV_LINKS: { href: string; label: string; isPage?: boolean }[] = [
   { href: "#tools", label: "도구" },
   { href: "#receipt", label: "모바일" },
   { href: "#workflow", label: "워크플로" },
   { href: "/customize", label: "맞춤 개발", isPage: true },
+  { href: "/community", label: "후기·Q&A", isPage: true },
 ];
 
 export function MarketingNav() {
@@ -38,7 +40,7 @@ export function MarketingNav() {
         </nav>
 
         <div className="mkt-nav-actions">
-          <Link className="mkt-btn mkt-btn-ghost mkt-nav-desktop-only" href="/login">
+          <Link className="mkt-btn mkt-btn-ghost mkt-nav-desktop-only" href={betaEntryHref()}>
             베타 프로그램
           </Link>
           <Link className="mkt-btn mkt-btn-primary mkt-nav-desktop-only" href="/contact">
@@ -74,7 +76,7 @@ export function MarketingNav() {
               )
             )}
             <div className="mkt-mobile-nav-actions">
-              <Link className="mkt-btn" href="/login" onClick={() => setOpen(false)}>
+              <Link className="mkt-btn" href={betaEntryHref()} onClick={() => setOpen(false)}>
                 베타 프로그램
               </Link>
               <Link className="mkt-btn mkt-btn-primary" href="/contact" onClick={() => setOpen(false)}>

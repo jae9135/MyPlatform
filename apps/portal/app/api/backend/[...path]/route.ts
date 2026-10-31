@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isPortalAuthed } from "@/lib/portal-auth";
+import { isPortalAuthed, resolveIpmsUnlocked } from "@/lib/portal-auth";
+import { IPMS_LOCKED_DETAIL, isIpmsApiRequest } from "@/lib/ipmsGuard";
 import { checkUpstreamConfig, upstreamBase, upstreamHeaders } from "@/lib/upstreamApi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** 공개 모드면 항상 true, 보호 모드면 암호·체험·발급 코드 세션 확인 (portal-auth.resolvePortalAuth) */
 async function isAuthed(req: NextRequest): Promise<boolean> {
-  const password = process.env.PORTAL_PASSWORD?.trim();
-  if (!password) return true;
   return isPortalAuthed((name) => req.cookies.get(name));
 }
 
@@ -44,8 +44,24 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
     headers,
     redirect: "manual",
   };
+  let bodyBuf: ArrayBuffer | null = null;
   if (req.method !== "GET" && req.method !== "HEAD") {
-    init.body = await req.arrayBuffer();
+    bodyBuf = await req.arrayBuffer();
+    init.body = bodyBuf;
+  }
+
+  // IPMS 대상 요청은 2차 암호(서명 쿠키) 통과자만 — 화면 잠금만으로는 우회 가능하므로 서버에서 확인
+  const ipmsRequest = await isIpmsApiRequest(
+    path.join("/"),
+    req.nextUrl.searchParams,
+    req.headers.get("content-type") ?? "",
+    bodyBuf,
+  );
+  if (ipmsRequest) {
+    const ipms = await resolveIpmsUnlocked((name) => req.cookies.get(name));
+    if (!ipms.unlocked) {
+      return NextResponse.json({ detail: IPMS_LOCKED_DETAIL, error: "ipms_locked" }, { status: 403 });
+    }
   }
 
   let res: Response;

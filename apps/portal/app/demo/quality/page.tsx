@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { betaEntryHref } from "@/lib/authMode";
 import { MarketingPageShell } from "@/components/marketing/MarketingPageShell";
 import "../../marketing.css";
 
@@ -108,7 +109,7 @@ export default function DemoQualityPage() {
       ) : null}
 
       <p style={{ marginTop: 24 }}>
-        <Link className="mkt-btn" href="/login?next=/apps/source-scan">
+        <Link className="mkt-btn" href={betaEntryHref("/apps/source-scan")}>
           베타 프로그램에서 실행
         </Link>
         <Link className="mkt-btn mkt-btn-ghost" href="/contact?tool=web-quality" style={{ marginLeft: 8 }}>
