@@ -1,4 +1,4 @@
-"use client";
+/** 화면 목업 — 상호작용 없음, 서버 컴포넌트 */
 
 import type { ProductFeatureDetail, ProductScreenId } from "@/lib/marketingCatalog";
 import { ReceiptGlassMockup } from "./ReceiptGlassMockup";

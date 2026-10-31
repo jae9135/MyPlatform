@@ -1,5 +1,4 @@
-"use client";
-
+/** 도구 카드 목록 — 상호작용 없음, 서버 컴포넌트 */
 import Image from "next/image";
 import Link from "next/link";
 import { getToolThumb, type ToolCategoryGroup } from "@/lib/marketingAssets";

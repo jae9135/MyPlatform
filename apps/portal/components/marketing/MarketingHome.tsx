@@ -1,5 +1,8 @@
-"use client";
-
+/**
+ * 공개 홈 — 서버 컴포넌트 (정적 HTML 로 전송).
+ * 상호작용이 있는 부분(MarketingNav 메뉴, ReceiptPhoneDemo)만 각자 "use client" 로 브라우저에서 동작.
+ * 예전엔 홈 전체가 클라이언트 컴포넌트라 모바일에서 화면 계산(hydration)에 1~2초가 걸렸음.
+ */
 import Image from "next/image";
 import Link from "next/link";
 import { Fragment } from "react";
@@ -72,7 +75,7 @@ export function MarketingHome() {
               alt=""
               fill
               priority
-              quality={95}
+              quality={80}
               className="mkt-hero-bg-image"
               sizes="(max-width: 940px) 100vw, 55vw"
             />

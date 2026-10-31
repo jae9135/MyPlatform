@@ -10,7 +10,11 @@ import "../marketing.css";
 export const metadata: Metadata = {
   title: "후기 · Q&A",
   description: `${BRAND_NAME} 소스코드·웹품질·DB 표준·ERD·성능 진단 도구의 실제 사용 후기와 질문·운영자 답변`,
-  alternates: { canonical: "/community" },
+  alternates: {
+    canonical: "/community",
+    // RSS 자동 탐지 (네이버·피드 리더)
+    types: { "application/rss+xml": [{ url: "/community/rss.xml", title: `${BRAND_NAME} 후기 · Q&A` }] },
+  },
   openGraph: {
     title: `후기 · Q&A | ${BRAND_NAME}`,
     description: `${BRAND_NAME} 도구 사용 후기와 질문·답변`,
