@@ -6,12 +6,13 @@ import { ContactForm } from "@/components/marketing/ContactForm";
 import { BRAND_NAME } from "@/lib/brand";
 import type { Metadata } from "next";
 import "../marketing.css";
+import { ogImages } from "@/lib/ogImage";
 
 export const metadata: Metadata = {
   title: "문의하기",
   description: "맞춤 개발·신규 기능·견적 상담 문의 — 프로젝트 산출물 자동화 도구 도입을 도와드립니다.",
   alternates: { canonical: "/contact" },
-  openGraph: { url: "/contact" },
+  openGraph: { url: "/contact", images: ogImages(BRAND_NAME) },
 };
 
 export default function ContactPage() {

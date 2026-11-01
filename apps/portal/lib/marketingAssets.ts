@@ -12,7 +12,7 @@ export const MARKETING_IMAGES = {
 export const TOOL_THUMB: Record<string, string> = {
   "source-scan": `${CAPTURES}/source-scan.jpg`,
   "web-quality": `${CAPTURES}/web-quality.jpg`,
-  "perf-test": `${CAPTURES}/perf-test.jpg`,
+  "perf-test": "/marketing/screens/perf-test-current.png",
   "chk-db-std": `${CAPTURES}/chk-db-std.jpg`,
   "db-manager": `${CAPTURES}/db-manager.jpg`,
   "er-modeler": `${CAPTURES}/er-modeler.jpg`,

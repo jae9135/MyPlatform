@@ -5,6 +5,7 @@ import { JsonLd } from "@/components/seo/JsonLd";
 import { HOME_SEO } from "@/lib/marketingCatalog";
 import { homeJsonLd } from "@/lib/structuredData";
 import "./marketing.css";
+import { OG_IMAGE_URL } from "@/lib/ogImage";
 
 export const metadata: Metadata = {
   title: HOME_SEO.title,
@@ -16,7 +17,7 @@ export const metadata: Metadata = {
     description: HOME_SEO.ogDescription,
     images: [
       {
-        url: "/marketing/og-image.jpg",
+        url: OG_IMAGE_URL,
         width: 1200,
         height: 630,
         alt: HOME_SEO.title,
@@ -27,7 +28,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: HOME_SEO.title,
     description: HOME_SEO.ogDescription,
-    images: ["/marketing/og-image.jpg"],
+    images: [OG_IMAGE_URL],
   },
 };
 

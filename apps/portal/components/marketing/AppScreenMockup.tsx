@@ -8,7 +8,7 @@ import { ReceiptGlassMockup } from "./ReceiptGlassMockup";
 type Props = {
   screen: ProductScreenId;
   label?: string;
-  /** home: "프로그램 첫 화면" 영역 — 부분 캡처는 쓰지 않고 목업 유지 */
+  /** 제품 상세에는 현재 프로그램 화면 캡처를 사용합니다. */
   context?: "home" | "feature";
 };
 
@@ -39,7 +39,7 @@ export function AppScreenMockup({ screen, label, context = "feature" }: Props) {
             />
           </div>
         </div>
-        <figcaption className="mkt-shot-caption">실제 화면 · 데모 샘플 실행 결과</figcaption>
+        <figcaption className="mkt-shot-caption">현재 프로그램 화면 캡처</figcaption>
       </figure>
     );
   }
@@ -81,16 +81,16 @@ export function ProductDetailScreens({
   return (
     <div className="mkt-product-screens">
       <section className="mkt-product-screen-block">
-        <h2>프로그램 첫 화면</h2>
+        <h2>현재 프로그램 화면</h2>
         <p className="mkt-product-screen-desc">
-          베타 프로그램에서 실행하면 아래와 같은 시작 화면으로 진입합니다.
+          현재 공개된 프로그램 화면입니다. 기능과 사용 방법은 아래 설명을 참고하세요.
         </p>
         <AppScreenMockup screen={homeScreen} label={appHref} context="home" />
       </section>
 
       <section className="mkt-product-screen-block">
-        <h2>기능별 설명 · 화면</h2>
-        <p className="mkt-product-screen-desc">주요 기능마다 실제 화면 구성을 함께 확인할 수 있습니다.</p>
+        <h2>화면 기준 기능 설명</h2>
+        <p className="mkt-product-screen-desc">아래 설명은 위 현재 화면에서 제공되는 기능을 기준으로 정리했습니다.</p>
         <div className="mkt-feature-screens">
           {featureDetails.map((f, i) => (
             <article key={f.title} className="mkt-feature-screen-item">
@@ -101,7 +101,6 @@ export function ProductDetailScreens({
                   <p>{f.description}</p>
                 </div>
               </div>
-              <AppScreenMockup screen={f.screen} />
             </article>
           ))}
         </div>

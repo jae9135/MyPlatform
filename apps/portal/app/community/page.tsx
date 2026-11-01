@@ -6,6 +6,7 @@ import { BRAND_NAME } from "@/lib/brand";
 import { loadInitialBoard } from "@/lib/board";
 import { isBoardPostType, isBoardTool } from "@/lib/boardShared";
 import "../marketing.css";
+import { ogImages } from "@/lib/ogImage";
 
 export const metadata: Metadata = {
   title: "후기 · Q&A",
@@ -19,6 +20,7 @@ export const metadata: Metadata = {
     title: `후기 · Q&A | ${BRAND_NAME}`,
     description: `${BRAND_NAME} 도구 사용 후기와 질문·답변`,
     url: "/community",
+    images: ogImages(BRAND_NAME),
   },
 };
 

@@ -18,6 +18,7 @@ import {
   RECEIPT_STANDALONE,
 } from "@/lib/marketingCatalog";
 import "../../marketing.css";
+import { ogImages } from "@/lib/ogImage";
 
 type Props = { params: { slug: string } };
 
@@ -44,7 +45,7 @@ export function generateMetadata({ params }: Props): Metadata {
       title: seo.seoTitle,
       description: seo.seoDescription,
       url: path,
-      images: [{ url: "/marketing/og-image.jpg", width: 1200, height: 630, alt: product.name }],
+      images: ogImages(product.name),
     },
   };
 }

@@ -9,6 +9,8 @@
 | **목적** | 영수증 **촬영·갤러리** 이미지를 A4 PDF로 묶기 |
 | **특징** | **100% 클라이언트** — 서버 업로드 없음, PWA 지원 |
 
+![현재 ReceiptToPDF 화면](./images/manual-receipt-to-pdf-ui.png)
+
 ---
 
 ## 2. 화면 구성

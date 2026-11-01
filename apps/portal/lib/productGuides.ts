@@ -58,11 +58,11 @@ const GUIDES: Record<string, ProductGuide> = {
     faq: [
       {
         q: "어떤 언어를 점검할 수 있나요?",
-        a: "Java(PMD, SpotBugs + FindSecBugs), Python(Bandit), JavaScript/TypeScript(ESLint)를 지원합니다. 프로젝트 ZIP을 올리고 스택을 선택하면 해당 스캐너가 순서대로 실행됩니다.",
+        a: "현재 진단 화면에서 ZIP 입력과 실행 설정을 확인할 수 있습니다. 실제 실행 분석기와 지원 범위는 API 서버에 설치·설정된 도구와 프로젝트 파일에 따라 달라집니다.",
       },
       {
         q: "업로드할 수 있는 ZIP 크기는 얼마인가요?",
-        a: "ZIP 파일 하나당 최대 200MB까지 업로드할 수 있습니다. node_modules, build 같은 폴더는 빼고 압축하면 더 빠르게 점검됩니다.",
+        a: "허용 크기는 현재 배포 환경의 서버 설정을 따릅니다. 불필요한 의존성·빌드 산출물을 제외하면 업로드와 분석 시간을 줄일 수 있습니다.",
       },
       {
         q: "업로드한 소스는 서버에 남나요?",
@@ -89,7 +89,7 @@ const GUIDES: Record<string, ProductGuide> = {
       {
         title: "로그인 이후 화면까지 점검",
         description:
-          "Java ZIP에서 추출한 화면 시나리오나 등록된 업무 시스템 URL로, 메인 페이지뿐 아니라 내부 화면까지 순서대로 점검합니다.",
+          "정적(소스) 모드에서는 Java/WAR ZIP의 JSP·HTML을 검사하고, 외부 URL 모드에서는 등록된 사이트의 화면 시나리오를 점검합니다.",
       },
       {
         title: "수정 후 재점검",
@@ -224,7 +224,7 @@ const GUIDES: Record<string, ProductGuide> = {
       },
       {
         q: "기존 DB에서 설계서를 만들 수도 있나요?",
-        a: "네. 설계서 ↔ DB 역동기화 기능으로 DB 스키마와 설계서의 차이를 비교하고, 병합된 설계서를 Excel로 내려받을 수 있습니다.",
+        a: "역동기화 탭은 현재 추가 암호로 잠겨 있습니다. 권한이 해제된 환경에서 해당 기능을 사용할 수 있습니다.",
       },
     ],
   },
@@ -279,7 +279,7 @@ const GUIDES: Record<string, ProductGuide> = {
       },
       {
         title: "양식 · 참고 문서 바로 보기",
-        description: "카탈로그에 연결된 양식과 참고 파일을 내려받지 않고 브라우저에서 확인합니다.",
+        description: "목록의 산출물·양식·참고 항목을 열어 연결된 자료를 확인합니다. 공개 데모의 문서 본문은 placeholder 자료입니다.",
       },
       {
         title: "작성 현황 체크",

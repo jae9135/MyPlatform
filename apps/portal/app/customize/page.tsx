@@ -4,13 +4,14 @@ import { BRAND_NAME } from "@/lib/brand";
 import { CUSTOMIZE_CARDS, PROCESS_STEPS } from "@/lib/marketingCatalog";
 import type { Metadata } from "next";
 import "../marketing.css";
+import { ogImages } from "@/lib/ogImage";
 
 export const metadata: Metadata = {
   title: "맞춤 개발 · 운영 구축",
   description:
     "소스코드·웹품질·DB 표준·ERD·성능 진단 도구를 기관·회사 업무에 맞게 커스터마이징하고 운영 환경에 구축합니다.",
   alternates: { canonical: "/customize" },
-  openGraph: { url: "/customize" },
+  openGraph: { url: "/customize", images: ogImages(BRAND_NAME) },
 };
 
 export default function CustomizePage() {

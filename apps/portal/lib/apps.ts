@@ -28,7 +28,7 @@ export const APPS: PlatformApp[] = [
   {
     id: "web-quality",
     name: "웹 품질 진단",
-    description: "KWCAG 2.2 · 웹표준/호환/접근성 — ER Modeler 진단·보고서",
+    description: "IPMS(잠금)·정적 소스(Java ZIP)·등록된 외부 URL 화면 진단",
     status: "beta",
     href: "/apps/web-quality",
     category: "quality",
@@ -58,7 +58,7 @@ export const APPS: PlatformApp[] = [
   {
     id: "db-manager",
     name: "DBManager",
-    description: "테이블정의서 → PostgreSQL DDL / 데이터 관리",
+    description: "DDL 생성 화면 · DB 적용/데이터/역동기화 탭은 암호 잠금",
     status: "beta",
     href: "/apps/db-manager",
     category: "db-std",
@@ -78,7 +78,7 @@ export const APPS: PlatformApp[] = [
   {
     id: "deliverable-manager",
     name: "DeliverableManager",
-    description: "산출물 목록 조회 (공개 테스트 껍데기)",
+    description: "산출물 목록과 검색·필터 화면",
     status: "beta",
     href: "/apps/deliverable-manager",
     category: "pm",

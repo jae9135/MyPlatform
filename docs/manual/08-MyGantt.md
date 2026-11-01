@@ -9,6 +9,8 @@
 | **목적** | WBS 기반 **일정·간트** 관리, 공정율, 휴일, 공유 링크, 인쇄 |
 | **저장** | localStorage (프로젝트 라이브러리) + Supabase (공유 링크) |
 
+![현재 MyGantt 화면](./images/manual-my-gantt-ui.png)
+
 ---
 
 ## 2. 화면 구성

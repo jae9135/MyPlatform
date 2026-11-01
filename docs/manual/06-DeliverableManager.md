@@ -9,6 +9,8 @@
 | **목적** | SI/PMO **산출물 목록** 조회 — 단계·활동별 산출물·양식·참고자료 카탈로그 |
 | **상태** | 공개 테스트용 — 실제 문서 본문은 회사 PC·Storage placeholder |
 
+![현재 DeliverableManager 화면](./images/manual-deliverable-manager-ui.png)
+
 ---
 
 ## 2. 화면 구성

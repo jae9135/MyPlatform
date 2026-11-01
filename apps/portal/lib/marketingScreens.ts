@@ -1,8 +1,4 @@
-/**
- * 상품 상세의 실제 프로그램 캡처 (데모 샘플로 실제 실행한 화면).
- * 여기에 없는 화면 ID는 기존 목업(AppScreenMockup)으로 표시됩니다.
- * homeOk=false: 일부 영역만 잘라낸 캡처라 "프로그램 첫 화면"에는 쓰지 않음.
- */
+/** 제품 상세 페이지에 표시할 현재 프로그램 화면 캡처. */
 import type { ProductScreenId } from "./marketingCatalog";
 
 export type ScreenShot = {
@@ -10,25 +6,61 @@ export type ScreenShot = {
   width: number;
   height: number;
   alt: string;
-  /** 브라우저 주소창에 표시할 경로 */
   path: string;
   homeOk?: boolean;
 };
 
-export const SCREEN_SHOTS: Partial<Record<ProductScreenId, ScreenShot>> = {
-  "std-check": { path: "/apps/chk-db-std", src: "/marketing/screens/std-check.webp", width: 1400, height: 613, alt: "DB 표준 점검 — 테이블정의서 샘플 불러오기 화면" },
-  "std-home": { path: "/apps/chk-db-std", src: "/marketing/screens/std-home.webp", width: 1400, height: 988, alt: "DB 표준 점검 결과 — 일치·검토·미매칭 분류 표" },
-  "std-termgen": { path: "/apps/chk-db-std", src: "/marketing/screens/std-termgen.webp", width: 1400, height: 772, alt: "표준용어 생성 화면" },
-  "web-quality-run": { path: "/apps/web-quality", src: "/marketing/screens/web-quality-run.webp", width: 1400, height: 879, alt: "웹 품질 진단 — 대상 URL·시나리오 설정 화면" },
-  "web-quality-home": { path: "/apps/web-quality", src: "/marketing/screens/web-quality-home.webp", width: 1400, height: 924, alt: "웹 품질 진단 결과 — 웹표준·호환성·접근성 항목별 결과" },
-  "erd-home": { path: "/apps/er-modeler", src: "/marketing/screens/erd-home.webp", width: 720, height: 417, alt: "ERD 모델러 — 테이블정의서 가져오기 미리보기", homeOk: false },
-  "erd-canvas": { path: "/apps/er-modeler", src: "/marketing/screens/erd-canvas.webp", width: 1400, height: 875, alt: "ERD 모델러 — 가져온 테이블 자동 배치 캔버스" },
-  "dbmgr-ddl": { path: "/apps/db-manager", src: "/marketing/screens/dbmgr-ddl.webp", width: 1400, height: 1231, alt: "DB Manager — 테이블정의서로 DDL 생성 결과" },
+const capture = (src: string, path: string, alt: string, height = 1000): ScreenShot => ({
+  src: `/marketing/screens/${src}`,
+  path,
+  alt,
+  width: 1440,
+  height,
+});
+
+const current = {
+  source: capture("source-scan-current.png", "/apps/source-scan", "소스코드 진단 현재 설정 화면", 510),
+  web: capture("web-quality-current.png", "/apps/web-quality", "웹 품질 진단의 현재 모드 및 설정 화면"),
+  perf: capture("perf-test-current.png", "/apps/perf-test", "성능 진단의 현재 실행 설정 화면"),
+  std: capture("std-current.png", "/apps/chk-db-std", "DB 표준 점검의 현재 업로드 및 점검 설정 화면"),
+  db: capture("db-manager-current.png", "/apps/db-manager", "DBManager의 현재 탭과 DDL 생성 화면"),
+  erd: capture("er-modeler-current.png", "/apps/er-modeler", "ER Modeler의 현재 빈 프로젝트 화면"),
+  deliverable: capture("deliverable-manager-current.png", "/apps/deliverable-manager", "산출물 관리의 현재 목록과 필터 화면"),
+  receipt: capture("receipt-to-pdf-current.png", "/apps/receipt-to-pdf", "ReceiptToPDF의 현재 도구 화면"),
+  gantt: capture("my-gantt-current.png", "/apps/my-gantt", "MyGantt의 현재 빈 일정 화면"),
 };
 
-export function getScreenShot(id: ProductScreenId, context: "home" | "feature" = "feature"): ScreenShot | null {
-  const s = SCREEN_SHOTS[id];
-  if (!s) return null;
-  if (context === "home" && s.homeOk === false) return null;
-  return s;
+export const SCREEN_SHOTS: Partial<Record<ProductScreenId, ScreenShot>> = {
+  "source-scan-home": current.source,
+  "source-scan-upload": current.source,
+  "source-scan-diff": current.source,
+  "source-scan-export": current.source,
+  "web-quality-home": current.web,
+  "web-quality-run": current.web,
+  "web-quality-capture": current.web,
+  "perf-test-home": current.perf,
+  "perf-test-run": current.perf,
+  "perf-test-results": current.perf,
+  "std-home": current.std,
+  "std-check": current.std,
+  "std-termgen": current.std,
+  "dbmgr-home": current.db,
+  "dbmgr-ddl": current.db,
+  "dbmgr-sync": current.db,
+  "erd-home": current.erd,
+  "erd-canvas": current.erd,
+  "erd-export": current.erd,
+  "deliv-home": current.deliverable,
+  "deliv-catalog": current.deliverable,
+  "deliv-status": current.deliverable,
+  "gantt-home": current.gantt,
+  "gantt-split": current.gantt,
+  "gantt-export": current.gantt,
+  "receipt-home": current.receipt,
+  "receipt-capture": current.receipt,
+  "receipt-pdf": current.receipt,
+};
+
+export function getScreenShot(id: ProductScreenId, _context: "home" | "feature" = "feature"): ScreenShot | null {
+  return SCREEN_SHOTS[id] ?? null;
 }

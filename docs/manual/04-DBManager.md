@@ -9,6 +9,8 @@
 | **목적** | 테이블정의서(Excel) → PostgreSQL DDL 생성, Supabase/Postgres 적용, 데이터 관리, 설계서↔DB 동기화 |
 | **DB** | PostgreSQL (Supabase 연결 권장) |
 
+![현재 DBManager 화면](./images/manual-db-manager-ui.png)
+
 ---
 
 ## 2. 화면 구성 — 5개 메인 탭
@@ -21,7 +23,7 @@
 | 4 | **데이터 관리** | 테이블 데이터 조회·수정·업로드 |
 | 5 | **설계서 ↔ DB** | diff 비교 + ALTER 실행 |
 
-상단 **PortalNav**, Hero, **DB 연결 상태** 배지가 공통으로 표시됩니다.
+상단에는 허브로 돌아가는 링크와 DBManager 소개가 표시됩니다. 선택된 탭 외에 운영 DB를 조회·변경하는 탭에는 자물쇠가 표시됩니다. 잠긴 기능은 별도 DB 암호로 해제해야 하며, 서버에 암호가 설정되지 않으면 열리지 않습니다.
 
 ---
 
@@ -40,7 +42,7 @@
 | **ZIP 다운로드** | 전체 DDL 스크립트 묶음 |
 | **DB 표준 점검으로** | chk-db-std handoff (IndexedDB) |
 
-**작동 방식:** Excel 파싱 → 테이블·컬럼 메타 추출 → PostgreSQL dialect DDL + INSERT 샘플.
+**작동 방식:** Excel 파싱 → 테이블·컬럼 메타 추출 → PostgreSQL DDL + 샘플 INSERT 생성. 설계서 변환과 스크립트 다운로드는 잠금 없이 이용할 수 있습니다.
 
 **주의:** Database/스키마 생성 DDL은 **포함하지 않음** — 테이블 + 샘플 INSERT만.
 
@@ -48,7 +50,7 @@
 
 | UI / 기능 | 설명 |
 |-----------|------|
-| **DB 연결 상태** | `DATABASE_URL` 설정 여부 |
+| **DB 연결 상태** | 잠금 해제 뒤 연결된 DB 확인 |
 | **Database명** | 연결된 DB 이름 표시 |
 | **적용 스키마** | dropdown — SQL이 이 스키마로 rewrite |
 | **Step 1: 테이블 생성** | CREATE TABLE 일괄 실행 |
@@ -151,8 +153,9 @@ Portal UI → /api/backend/v1/db-manager/*
 
 ---
 
-## 8. 주의사항
+## 8. 접근 제어와 주의사항
 
+- **스크립트 → 적용**, **DB → 설계서**, **데이터 관리**, **설계서 ↔ DB**는 운영 데이터에 접근할 수 있어 별도 잠금 암호가 필요합니다. `DB_UNLOCK_PASSWORD`가 서버에 설정되지 않으면 사용할 수 없습니다.
 - **caution_sql**은 데이터 손실 가능 — dry_run 먼저
 - production DB에 직접 ALTER 전 백업 권장
 - handoff로 넘긴 설계서는 브라우저 IndexedDB — 다른 기기에서는 재업로드 필요

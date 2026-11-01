@@ -1,113 +1,137 @@
 #!/usr/bin/env python3
 """
-Open Graph 이미지 생성 스크립트
-1200×630px, 브랜드 컬러 그라데이션 + 도구 아이콘 + 핵심 문구
+Open Graph(공유 미리보기) 이미지 생성 — 1200×630 JPG
+네이버 블로그·카카오톡·페이스북 등에 링크를 붙였을 때 보이는 썸네일입니다.
+
+한글 폰트가 없으면 글자가 □□□ 로 깨지므로, 한글 폰트를 찾지 못하면 실패로 끝냅니다.
+  Windows: 맑은 고딕 (C:\\Windows\\Fonts\\malgunbd.ttf)
+  macOS:   Apple SD Gothic Neo
+  Linux:   Noto Sans CJK (fonts-noto-cjk)
+직접 지정: OG_FONT_BOLD=경로 OG_FONT_REGULAR=경로
+
+사용: python scripts/generate_og_image.py
+     (도메인 변경 시 OG_SITE_HOST=example.com)
 """
 
-from PIL import Image, ImageDraw, ImageFont
 import os
+import sys
 
-# 설정
-WIDTH = 1200
-HEIGHT = 630
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+WIDTH, HEIGHT = 1200, 630
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-OUTPUT_PATH = os.path.join(PROJECT_ROOT, "apps", "portal", "public", "marketing", "og-image.jpg")
+PUBLIC_DIR = os.path.join(PROJECT_ROOT, "apps", "portal", "public")
+OUTPUT_PATH = os.path.join(PUBLIC_DIR, "marketing", "og-image-v2.jpg")
+SHOT_PATH = os.path.join(PUBLIC_DIR, "marketing", "screens", "std-home.webp")
+SITE_HOST = os.environ.get("OG_SITE_HOST", "project-auto-platform.vercel.app")
 
-# 컬러
-BG_START = (37, 99, 235)  # #2563eb
-BG_END = (29, 78, 216)    # #1d4ed8
-TEXT_WHITE = (255, 255, 255)
-TEXT_LIGHT = (239, 246, 255)  # #eff6ff
+BG_TOP = (30, 64, 175)  # #1e40af
+BG_BOTTOM = (15, 23, 42)  # #0f172a
+WHITE = (255, 255, 255)
+LIGHT = (203, 213, 225)  # #cbd5e1
 ACCENT = (96, 165, 250)  # #60a5fa
 
-def create_og_image():
-    # 캔버스 생성
-    img = Image.new('RGB', (WIDTH, HEIGHT), BG_END)
+BOLD_CANDIDATES = [
+    os.environ.get("OG_FONT_BOLD", ""),
+    r"C:\Windows\Fonts\malgunbd.ttf",
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+]
+REGULAR_CANDIDATES = [
+    os.environ.get("OG_FONT_REGULAR", ""),
+    r"C:\Windows\Fonts\malgun.ttf",
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+]
+
+
+def load_font(candidates: list[str], size: int) -> ImageFont.FreeTypeFont:
+    for path in candidates:
+        if not path or not os.path.exists(path):
+            continue
+        # .ttc 는 index 1 이 KR 인 경우가 많음 (Noto CJK: 0=JP,1=KR)
+        indices = [1, 0] if path.endswith(".ttc") and "Noto" in path else [0]
+        for idx in indices:
+            try:
+                return ImageFont.truetype(path, size, index=idx)
+            except OSError:
+                continue
+    sys.exit("한글 폰트를 찾지 못했습니다. OG_FONT_BOLD / OG_FONT_REGULAR 로 경로를 지정하세요.")
+
+
+def check_korean(font: ImageFont.FreeTypeFont) -> None:
+    """'가'와 미지원 문자(□)의 모양이 같으면 한글 미지원 폰트"""
+    a = font.getmask("가").getbbox()
+    b = font.getmask("\uffff").getbbox()
+    if a is None or a == b:
+        sys.exit(f"선택된 폰트가 한글을 지원하지 않습니다: {font.path}")
+
+
+def rounded(img: Image.Image, radius: int) -> Image.Image:
+    mask = Image.new("L", img.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, img.width - 1, img.height - 1], radius=radius, fill=255)
+    out = Image.new("RGBA", img.size)
+    out.paste(img.convert("RGBA"), (0, 0), mask)
+    return out
+
+
+def create_og_image() -> str:
+    img = Image.new("RGB", (WIDTH, HEIGHT), BG_BOTTOM)
     draw = ImageDraw.Draw(img)
-    
-    # 그라데이션 배경 (상단 → 하단)
     for y in range(HEIGHT):
-        ratio = y / HEIGHT
-        r = int(BG_START[0] + (BG_END[0] - BG_START[0]) * ratio)
-        g = int(BG_START[1] + (BG_END[1] - BG_START[1]) * ratio)
-        b = int(BG_START[2] + (BG_END[2] - BG_START[2]) * ratio)
-        draw.rectangle([(0, y), (WIDTH, y+1)], fill=(r, g, b))
-    
-    # 장식 요소 (좌상단 원형)
-    draw.ellipse([(-100, -100), (250, 250)], fill=(*ACCENT, 30))
-    draw.ellipse([(WIDTH-200, HEIGHT-200), (WIDTH+100, HEIGHT+100)], fill=(*ACCENT, 30))
-    
-    try:
-        # 폰트 (시스템 폰트 또는 기본)
-        try:
-            font_title = ImageFont.truetype("arial.ttf", 72)
-            font_sub = ImageFont.truetype("arial.ttf", 36)
-            font_tools = ImageFont.truetype("arial.ttf", 28)
-        except:
-            font_title = ImageFont.load_default()
-            font_sub = ImageFont.load_default()
-            font_tools = ImageFont.load_default()
-        
-        # 메인 문구
-        title_text = "프로젝트 자동화 Platform"
-        title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
-        title_w = title_bbox[2] - title_bbox[0]
-        title_x = (WIDTH - title_w) // 2
-        title_y = 180
-        
-        # 그림자 효과
-        draw.text((title_x+3, title_y+3), title_text, font=font_title, fill=(0, 0, 0, 128))
-        draw.text((title_x, title_y), title_text, font=font_title, fill=TEXT_WHITE)
-        
-        # 부제
-        subtitle = "웹 품질·소스코드·DB·ERD 자동 진단"
-        sub_bbox = draw.textbbox((0, 0), subtitle, font=font_sub)
-        sub_w = sub_bbox[2] - sub_bbox[0]
-        sub_x = (WIDTH - sub_w) // 2
-        sub_y = title_y + 90
-        draw.text((sub_x, sub_y), subtitle, font=font_sub, fill=TEXT_LIGHT)
-        
-        # 도구 개수
-        tools_text = "8가지 도구 · 무료 베타 체험"
-        tools_bbox = draw.textbbox((0, 0), tools_text, font=font_tools)
-        tools_w = tools_bbox[2] - tools_bbox[0]
-        tools_x = (WIDTH - tools_w) // 2
-        tools_y = sub_y + 70
-        
-        # 배지 스타일 배경
-        badge_padding = 20
-        badge_rect = [
-            tools_x - badge_padding,
-            tools_y - 12,
-            tools_x + tools_w + badge_padding,
-            tools_y + 40
-        ]
-        draw.rounded_rectangle(badge_rect, radius=8, fill=(*TEXT_WHITE, 40))
-        draw.text((tools_x, tools_y), tools_text, font=font_tools, fill=TEXT_WHITE)
-        
-        # 하단 URL
-        url = "myplatform-demo.vercel.app"
-        url_bbox = draw.textbbox((0, 0), url, font=font_tools)
-        url_w = url_bbox[2] - url_bbox[0]
-        url_x = (WIDTH - url_w) // 2
-        url_y = HEIGHT - 80
-        draw.text((url_x, url_y), url, font=font_tools, fill=TEXT_LIGHT)
-        
-    except Exception as e:
-        print(f"폰트 렌더링 오류 (기본 폰트 사용): {e}")
-        # 기본 폰트로 단순 텍스트
-        draw.text((100, 250), "프로젝트 자동화 Platform", fill=TEXT_WHITE)
-        draw.text((100, 320), "8가지 도구 · 무료 베타 체험", fill=TEXT_LIGHT)
-    
-    # 저장
-    output_dir = os.path.dirname(OUTPUT_PATH)
-    os.makedirs(output_dir, exist_ok=True)
-    img.save(OUTPUT_PATH, quality=90, optimize=True)
-    print(f"[OK] OG image created: {OUTPUT_PATH}")
-    print(f"     Size: {WIDTH}x{HEIGHT}px")
-    
+        t = y / HEIGHT
+        c = tuple(int(BG_TOP[i] + (BG_BOTTOM[i] - BG_TOP[i]) * t) for i in range(3))
+        draw.line([(0, y), (WIDTH, y)], fill=c)
+
+    f_eyebrow = load_font(BOLD_CANDIDATES, 22)
+    f_title = load_font(BOLD_CANDIDATES, 58)
+    f_sub = load_font(REGULAR_CANDIDATES, 28)
+    f_badge = load_font(BOLD_CANDIDATES, 24)
+    f_url = load_font(REGULAR_CANDIDATES, 22)
+    for f in (f_title, f_sub):
+        check_korean(f)
+
+    # 오른쪽: 실제 프로그램 화면 (DB 표준 점검 결과)
+    if os.path.exists(SHOT_PATH):
+        shot = Image.open(SHOT_PATH).convert("RGB")
+        sw = 560
+        shot = shot.resize((sw, round(shot.height * sw / shot.width)), Image.LANCZOS)
+        shot = shot.crop((0, 0, sw, min(shot.height, 400)))
+        card = rounded(shot, 14)
+        sx, sy = WIDTH - sw - 50, 120
+        shadow = Image.new("RGBA", (card.width + 60, card.height + 60), (0, 0, 0, 0))
+        ImageDraw.Draw(shadow).rounded_rectangle([30, 36, card.width + 30, card.height + 36], 18, fill=(0, 0, 0, 120))
+        shadow = shadow.filter(ImageFilter.GaussianBlur(16))
+        img.paste(shadow, (sx - 30, sy - 30), shadow)
+        img.paste(card, (sx, sy), card)
+
+    # 왼쪽: 문구
+    x = 64
+    draw.text((x, 120), "PROJECT AUTOMATION", font=f_eyebrow, fill=ACCENT)
+    draw.text((x, 165), "프로젝트 자동화", font=f_title, fill=WHITE)
+    draw.text((x, 238), "Platform", font=f_title, fill=WHITE)
+    draw.text((x, 335), "소스코드 · 웹 품질 · DB 표준", font=f_sub, fill=LIGHT)
+    draw.text((x, 377), "ERD · 성능 진단 도구", font=f_sub, fill=LIGHT)
+
+    badge = "8가지 도구 · 무료 베타"
+    bb = draw.textbbox((0, 0), badge, font=f_badge)
+    bw, bh = bb[2] - bb[0], bb[3] - bb[1]
+    by = 450
+    draw.rounded_rectangle([x, by, x + bw + 40, by + bh + 28], radius=24, fill=(37, 99, 235))
+    draw.text((x + 20, by + 14 - bb[1]), badge, font=f_badge, fill=WHITE)
+
+    draw.text((x, HEIGHT - 62), SITE_HOST, font=f_url, fill=LIGHT)
+
+    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+    img.save(OUTPUT_PATH, "JPEG", quality=88, optimize=True, progressive=True)
+    print(f"[OK] {OUTPUT_PATH} ({WIDTH}x{HEIGHT}, {os.path.getsize(OUTPUT_PATH) // 1024} KB)")
     return OUTPUT_PATH
+
 
 if __name__ == "__main__":
     create_og_image()

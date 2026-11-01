@@ -114,18 +114,18 @@ const TOOL_META: Record<
       {
         title: "ZIP 업로드 · 다중 스캐너 실행",
         description:
-          "Java/Python/TS 프로젝트 ZIP을 업로드하고 스택을 선택하면 PMD, FindSecBugs, Bandit, ESLint가 순차 실행됩니다.",
+          "현재 화면에서 소스 ZIP을 등록하고 진단 실행 설정을 확인합니다. 지원 분석기는 서버 환경과 프로젝트 파일 구성에 따라 실행됩니다.",
         screen: "source-scan-upload",
       },
       {
         title: "이전 진단 대비 Diff 비교",
         description:
-          "심각도·스캐너별 탭으로 결함을 필터링하고, 이전 실행 대비 신규·해소 건을 비교합니다.",
+          "진단 실행 후 결과와 이전 실행 비교 기능을 확인할 수 있습니다. 결과 목록은 실제 실행 결과에 따라 표시됩니다.",
         screen: "source-scan-diff",
       },
       {
         title: "보고서 내보내기",
-        description: "Excel, HTML, SARIF 형식으로 진단 결과를 다운로드해 감리·CI/CD에 활용합니다.",
+        description: "진단 결과에서 제공되는 내보내기 기능으로 결과를 내려받아 검토 자료로 활용합니다.",
         screen: "source-scan-export",
       },
     ],
@@ -145,7 +145,7 @@ const TOOL_META: Record<
     tagline: "KWCAG 2.2 · 웹표준/호환/접근성 — Playwright + axe 런타임",
     homeScreen: "web-quality-home",
     features: [
-      "IPMS·외부 URL·Java ZIP 시나리오 기반 화면 진단",
+      "IPMS(잠금)·정적 소스·외부 URL 진단 모드",
       "웹표준·웹호환·웹접근성 카테고리별 결과",
       "위반 요소 스크린샷 캡처",
     ],
@@ -153,17 +153,17 @@ const TOOL_META: Record<
       {
         title: "URL·시나리오 기반 진단 실행",
         description:
-          "IPMS URL, 외부 사이트, Java ZIP 시나리오를 선택해 Playwright + axe로 화면별 진단을 실행합니다.",
+          "현재 화면은 IPMS(추가 암호), 정적(소스), 외부 URL(화면) 세 모드를 제공합니다. 정적 모드에서 Java ZIP을 입력할 수 있습니다.",
         screen: "web-quality-run",
       },
       {
         title: "카테고리별 결과 확인",
-        description: "웹표준·웹호환·웹접근성(KWCAG 2.2) 탭으로 pass/fail과 심각도를 확인합니다.",
+        description: "선택한 진단 모드와 실행 결과에 따라 웹 품질 점검 내용을 확인합니다.",
         screen: "web-quality-home",
       },
       {
         title: "위반 요소 스크린샷",
-        description: "접근성·표준 위반 요소를 캡처해 Excel/ZIP 보고서에 포함합니다.",
+        description: "실행 결과가 생성되면 화면별 결과와 제공되는 보고서를 확인합니다.",
         screen: "web-quality-capture",
       },
     ],
@@ -188,7 +188,7 @@ const TOOL_META: Record<
       {
         title: "시나리오 · URL 선택",
         description:
-          "MyGantt·ER Modeler·IPMS 등 웹 품질과 같은 후보 URL을 고르거나 직접 입력해 부하 대상을 지정합니다.",
+          "대상 탭에서 로컬 API 또는 Locust 설정을 확인하고, 등록된 대상이나 입력한 URL을 기준으로 실행을 준비합니다.",
         screen: "perf-test-run",
       },
       {
@@ -200,7 +200,7 @@ const TOOL_META: Record<
       {
         title: "결과 · 이력",
         description:
-          "TPS, 평균·p95 응답시간, 오류율, 엔드포인트별 통계와 실행 이력을 확인합니다.",
+          "실행 뒤 제공되는 TPS, 응답시간, 오류율 및 엔드포인트 통계와 이력을 확인합니다.",
         screen: "perf-test-results",
       },
     ],
@@ -228,17 +228,17 @@ const TOOL_META: Record<
       {
         title: "Excel 업로드 · 표준 점검",
         description:
-          "테이블정의서 Excel을 업로드하고 단어·용어·도메인·코드 종류를 선택해 MOIS 표준과 자동 대조합니다.",
+          "샘플 또는 Excel 파일을 준비하고 점검 종류를 선택해 행안부 공통표준과 대조합니다. CSV 입력은 선택 사항입니다.",
         screen: "std-check",
       },
       {
         title: "일치·검토·미매칭 분류",
-        description: "점검 결과를 일치, 검토 필요, 미매칭으로 분류해 Excel로 내보냅니다.",
+        description: "파일 점검 결과가 만들어지면 일치·검토·미매칭 항목을 표에서 확인합니다.",
         screen: "std-home",
       },
       {
         title: "표준용어 생성",
-        description: "한글 항목명을 입력하면 공통표준용어·영문약어를 자동 생성합니다.",
+        description: "화면 하단의 표준용어 생성 영역에서 항목명을 입력해 표준용어 후보를 만듭니다.",
         screen: "std-termgen",
       },
     ],
@@ -252,23 +252,23 @@ const TOOL_META: Record<
     homeScreen: "dbmgr-home",
     features: [
       "Excel → CREATE TABLE + sample INSERT",
-      "스키마 적용·데이터 CSV 업로드",
-      "설계서 ↔ DB diff 및 ALTER",
+      "DB 적용·데이터 관리·역동기화 탭 (암호 잠금)",
+      "열려 있는 DDL 생성 화면에서 결과 확인·내보내기",
     ],
     featureDetails: [
       {
         title: "DDL 생성",
-        description: "테이블정의서 Excel에서 PostgreSQL CREATE TABLE과 sample INSERT를 생성합니다.",
+        description: "현재 기본 화면에서 테이블정의서 파일을 불러와 DDL 생성 기능을 사용합니다.",
         screen: "dbmgr-ddl",
       },
       {
         title: "DB 적용 · 데이터 관리",
-        description: "생성된 DDL을 DB에 적용하고 CSV로 샘플·운영 데이터를 업로드합니다.",
+        description: "DB 적용, 데이터 관리, 역동기화는 각각 암호로 잠겨 있으며 권한이 있을 때 사용할 수 있습니다.",
         screen: "dbmgr-home",
       },
       {
         title: "설계서 ↔ DB 역동기화",
-        description: "DB 스키마와 설계서 Excel 간 diff를 확인하고 ALTER·병합 export를 수행합니다.",
+        description: "역동기화 탭은 잠금 상태이며, 권한을 해제한 뒤 설계서와 DB 비교 기능을 사용할 수 있습니다.",
         screen: "dbmgr-sync",
       },
     ],
@@ -284,17 +284,17 @@ const TOOL_META: Record<
     featureDetails: [
       {
         title: "Excel/SQL → ERD import",
-        description: "테이블정의서 Excel이나 SQL DDL을 가져와 ERD 캔버스에 배치합니다.",
+        description: "현재 화면은 새 ER Modeler 프로젝트의 빈 작업 공간입니다. 먼저 프로젝트에서 테이블을 추가하거나 가져와야 합니다.",
         screen: "erd-home",
       },
       {
         title: "관계 편집 · 검증",
-        description: "ReactFlow로 FK 관계를 시각 편집하고 테이블·컬럼 검증을 실행합니다.",
+        description: "테이블을 추가한 뒤 캔버스에서 모델을 구성할 수 있습니다.",
         screen: "erd-canvas",
       },
       {
         title: "설계서·다이어그램 export",
-        description: "Excel 설계서, DDL, PNG/SVG/PDF 다이어그램으로 내보냅니다.",
+        description: "현재 작업 화면에 표시된 프로젝트 기능을 기준으로 사용하며, 가져오기·검증·내보내기는 구현 상태를 확인해 안내합니다.",
         screen: "erd-export",
       },
     ],
@@ -310,17 +310,17 @@ const TOOL_META: Record<
     featureDetails: [
       {
         title: "산출물 카탈로그 검색",
-        description: "단계·유형별로 SI/PMO 산출물 목록을 검색하고 양식·참고 문서를 미리봅니다.",
+        description: "현재 목록에서 산출물을 검색하고 화면의 필터로 항목을 좁혀 볼 수 있습니다.",
         screen: "deliv-catalog",
       },
       {
         title: "작성 상태 관리",
-        description: "미착수·작성중·완료 상태를 클릭해 로컬로 관리합니다.",
+        description: "목록에서 제공되는 상태 표시를 확인합니다. 현재 화면은 산출물 목록·필터 중심입니다.",
         screen: "deliv-status",
       },
       {
         title: "문서 미리보기",
-        description: "카탈로그에 연결된 양식·참고 파일을 브라우저에서 바로 확인합니다.",
+        description: "현재 화면에 보이는 산출물 항목과 정보를 확인합니다.",
         screen: "deliv-home",
       },
     ],
@@ -336,17 +336,17 @@ const TOOL_META: Record<
     featureDetails: [
       {
         title: "WBS · 간트 split 뷰",
-        description: "표와 간트 차트를 나란히 보며 일정·공정율을 조정합니다.",
+        description: "현재 화면은 WBS 표와 간트 영역으로 구성된 빈 일정 작업 화면입니다. 작업을 추가해 일정을 구성합니다.",
         screen: "gantt-split",
       },
       {
         title: "휴일 · Excel import/export",
-        description: "조직 휴일을 반영하고 Excel로 WBS를 가져오거나 내보냅니다.",
+        description: "일정 화면에서 작업을 작성하고 제공되는 일정·가져오기 기능을 사용합니다.",
         screen: "gantt-home",
       },
       {
         title: "공유 링크",
-        description: "Supabase에 저장해 팀원과 일정표 링크를 공유합니다.",
+        description: "공유·내보내기 기능은 현재 앱에서 제공되는 메뉴와 저장 설정을 확인한 뒤 사용합니다.",
         screen: "gantt-export",
       },
     ],
@@ -468,28 +468,24 @@ const PRODUCT_SEO: Record<string, ProductSeo> = {
     seoTitle: "소스코드 품질·보안 진단 도구 | PMD·FindSecBugs·ESLint·Bandit",
     heroHeadline: "소스코드 품질과 보안 취약점을 자동으로 진단하세요",
     seoDescription:
-      "Java, JavaScript, Python 등 다양한 소스코드의 품질과 보안 취약점을 자동으로 분석합니다. PMD, FindSecBugs, ESLint, Bandit 등의 정적 분석 도구를 활용하여 코드 오류, 코드 품질 문제, 보안 취약점을 빠르게 확인할 수 있습니다.",
+      "소스 ZIP을 등록해 현재 서버에 설정된 분석기를 실행하고 결과를 확인하는 도구입니다. 지원 언어와 분석기는 배포 환경 및 프로젝트 파일 구성에 따라 달라집니다.",
     seoFeatures: [
-      "Java 소스코드 품질 분석",
-      "Java 보안 취약점 분석",
-      "JavaScript 코드 품질 검사",
-      "Python 코드 보안 검사",
-      "정적 분석 결과 및 상세 리포트 제공",
-      "발견된 문제점과 개선 방향 확인",
+      "소스 ZIP 등록 및 진단 실행",
+      "진단 결과 확인",
+      "이전 실행 결과 비교",
+      "제공되는 결과 내보내기 기능",
     ],
   },
   "web-quality": {
     seoTitle: "웹 품질 진단 도구 | 웹표준·웹접근성·KWCAG 2.2 자동 점검",
     heroHeadline: "웹사이트의 품질과 접근성을 한 번에 점검하세요",
     seoDescription:
-      "웹사이트의 웹표준, 웹접근성, 사용성 및 호환성 문제를 자동으로 점검합니다. KWCAG 2.2와 axe 기반의 접근성 검사를 통해 웹페이지의 접근성 문제를 확인하고 개선할 수 있습니다.",
+      "웹 품질 진단 화면에서 IPMS(추가 암호 필요), 정적 소스, 외부 URL 화면 진단 모드 중 하나를 선택합니다. 정적 모드는 Java ZIP을 입력으로 받으며, 외부 URL은 등록된 대상에 한해 점검할 수 있습니다.",
     seoFeatures: [
-      "웹표준 검사",
-      "웹접근성 검사",
-      "KWCAG 2.2 기준 점검",
-      "axe 기반 접근성 검사",
-      "HTML 및 페이지 구조 분석",
-      "진단 결과 리포트 제공",
+      "IPMS 화면 진단 (암호 필요)",
+      "정적 소스 진단 (Java ZIP)",
+      "등록된 외부 URL 화면 진단",
+      "실행 결과와 제공되는 보고서 확인",
     ],
   },
   "perf-test": {
@@ -503,49 +499,43 @@ const PRODUCT_SEO: Record<string, ProductSeo> = {
       "VU·duration 부하 설정",
       "웹 품질 시나리오 URL 재사용",
       "반복 테스트 및 실행 이력",
-      "성능 진단 결과 HTML·Excel·JSON 보고서",
+      "결과 요약과 실행 이력 확인",
     ],
   },
   "chk-db-std": {
     seoTitle: "DB 표준 점검 도구 | 테이블·컬럼·데이터베이스 표준 자동 검사",
     heroHeadline: "데이터베이스 설계와 표준 준수 여부를 자동으로 점검하세요",
     seoDescription:
-      "데이터베이스의 테이블명, 컬럼명, 데이터 타입, 길이, PK, FK, 인덱스 등의 설계 정보를 분석하여 DB 표준 준수 여부를 점검합니다. 프로젝트별 데이터베이스 표준을 일관되게 관리하고 설계 품질을 높일 수 있습니다.",
+      "샘플 또는 테이블정의서 Excel을 불러와 단어·용어·도메인·코드 표준을 점검합니다. 선택 입력 CSV를 활용할 수 있으며, 표준용어 생성 기능도 화면에서 제공합니다.",
     seoFeatures: [
-      "테이블명 표준 검사",
-      "컬럼명 표준 검사",
-      "데이터 타입 및 길이 검사",
-      "PK/FK 검사",
-      "인덱스 검사",
-      "DB 표준 점검 결과 제공",
+      "샘플 또는 Excel 파일 입력",
+      "단어·용어·도메인·코드 점검 종류 선택",
+      "점검 결과 표 확인",
+      "표준용어 생성",
     ],
   },
   "er-modeler": {
-    seoTitle: "ERD 설계 도구 | 데이터베이스 ERD·테이블 설계 및 DDL 생성",
-    heroHeadline: "복잡한 데이터베이스 구조를 ERD로 쉽게 설계하세요",
+    seoTitle: "ER Modeler | 브라우저 기반 ERD 작업 화면",
+    heroHeadline: "ER Modeler에서 데이터 모델 작업을 시작하세요",
     seoDescription:
-      "데이터베이스 테이블과 컬럼, PK, FK 및 엔티티 간의 관계를 시각적으로 설계할 수 있는 ERD 도구입니다. 데이터베이스 구조를 쉽게 파악하고 설계 결과를 SQL 및 문서로 활용할 수 있습니다.",
+      "현재 ER Modeler 화면은 새 프로젝트의 빈 캔버스로 시작합니다. 프로젝트를 연 뒤 제공되는 모델링 도구로 데이터 구조를 구성할 수 있습니다.",
     seoFeatures: [
-      "ERD 작성 및 편집",
-      "테이블 및 컬럼 관리",
-      "PK/FK 관계 설정",
-      "식별관계·비식별관계 표현",
-      "관계 카디널리티 설정",
-      "SQL/DDL 및 설계서 export",
+      "새 프로젝트 빈 캔버스에서 시작",
+      "프로젝트 내 테이블 모델 구성",
+      "현재 화면에서 제공되는 모델링 도구 사용",
     ],
   },
   "db-manager": {
     seoTitle: "DB 관리 도구 | 데이터베이스 테이블·컬럼·SQL 관리",
     heroHeadline: "데이터베이스 구조를 한눈에 확인하고 관리하세요",
     seoDescription:
-      "테이블정의서 Excel에서 PostgreSQL DDL을 생성하고, DB 적용·데이터 관리·설계서 ↔ DB diff를 웹에서 수행하는 DB 관리 도구입니다. 테이블 구조와 데이터베이스 객체를 효율적으로 확인하여 개발 및 설계 업무를 지원합니다.",
+      "DBManager는 DDL 생성 화면을 제공하며, DB 적용·데이터 관리·역동기화 탭은 추가 암호로 잠겨 있습니다. 권한이 있는 경우 각 탭의 기능을 사용할 수 있습니다.",
     seoFeatures: [
       "테이블·DDL 생성",
-      "컬럼 정보 조회",
-      "PK/FK 확인",
-      "데이터 타입 확인",
-      "DB 적용 및 CSV 데이터 관리",
-      "설계서 ↔ DB 역동기화",
+      "DDL 생성 화면",
+      "DB 적용 탭 (암호 잠금)",
+      "데이터 관리 탭 (암호 잠금)",
+      "역동기화 탭 (암호 잠금)",
     ],
   },
   "deliverable-manager": {
