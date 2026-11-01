@@ -10,7 +10,9 @@ import {
   listPublishedPosts,
   parseNewPost,
 } from "@/lib/board";
-import { isBoardPostType, isBoardTool } from "@/lib/boardShared";
+import { BOARD_TYPE_LABEL, boardToolLabel, isBoardPostType, isBoardTool } from "@/lib/boardShared";
+import { notifyAdmin, previewText } from "@/lib/notify";
+import { absoluteUrl } from "@/lib/siteUrl";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +24,7 @@ const ERROR_MESSAGE: Record<string, string> = {
   invalid_rating: "별점(1~5)을 선택하세요.",
   required_fields: "닉네임·제목·내용을 모두 입력하세요.",
   body_too_short: "내용을 5자 이상 입력하세요.",
+  reserved_nickname: "'운영자'·'관리자' 같은 닉네임은 사용할 수 없습니다.",
   too_fast: "잠시 후 다시 작성해 주세요. (1분에 1건)",
   daily_limit: "오늘 작성 가능한 글 수를 넘었습니다. 내일 다시 이용해 주세요.",
 };
@@ -109,6 +112,21 @@ export async function POST(req: Request) {
       );
     }
     const saved = await createPost(parsed.value, ipHash);
+    const p = parsed.value;
+    await notifyAdmin({
+      subject: `${saved.status === "pending" ? "[승인 필요] " : ""}새 ${BOARD_TYPE_LABEL[p.post_type]}: ${p.title}`,
+      lines: [
+        `프로그램: ${boardToolLabel(p.tool)}${p.rating ? ` · 별점 ${p.rating}/5` : ""}`,
+        `작성자: ${p.nickname}`,
+        `상태: ${saved.status === "published" ? "바로 게시됨" : "승인 대기 (링크 포함 등)"}`,
+        "",
+        previewText(p.body),
+      ],
+      links: [
+        { label: "게시판에서 보기", url: `${absoluteUrl("/community")}?tool=${p.tool ?? "general"}#post-${saved.id}` },
+        { label: "관리 화면 (답변·숨김)", url: absoluteUrl("/admin") },
+      ],
+    });
     return NextResponse.json({
       ok: true,
       id: saved.id,

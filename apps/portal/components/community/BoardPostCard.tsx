@@ -1,5 +1,6 @@
 "use client";
 
+import { BoardComments } from "./BoardComments";
 import { Stars } from "./StarRating";
 import { BOARD_TYPE_LABEL, formatBoardDate, type BoardPublicPost } from "@/lib/boardShared";
 
@@ -29,6 +30,7 @@ export function BoardPostCard({ post, showTool = true }: { post: BoardPublicPost
           <p className="cm-post-body">{post.answer}</p>
         </div>
       ) : null}
+      <BoardComments postId={post.id} initialCount={post.comment_count ?? 0} />
     </article>
   );
 }

@@ -11,7 +11,7 @@ export function isPublicPath(pathname: string): boolean {
   if (pathname === "/customize") return true;
   if (pathname === "/contact") return true;
   if (pathname === "/community" || pathname === "/community/rss.xml") return true;
-  if (pathname === "/api/board") return true;
+  if (pathname === "/api/board" || pathname === "/api/board/comments") return true;
   if (pathname === "/api/contact") return true;
   if (pathname === "/api/visit") return true;
   if (pathname.startsWith("/receipt-to-pdf")) return true;

@@ -6,7 +6,10 @@ import {
   boardToolLabel,
   isBoardPostType,
   isBoardTool,
+  isReservedNickname,
+  type BoardAdminComment,
   type BoardAdminPost,
+  type BoardPublicComment,
   type BoardPostType,
   type BoardPublicPost,
   type BoardStats,
@@ -14,6 +17,8 @@ import {
 } from "@/lib/boardShared";
 
 const TABLE = "board_posts";
+const COMMENT_TABLE = "board_comments";
+const COMMENT_PUBLIC_COLUMNS = "id, post_id, body, nickname, is_admin, created_at";
 const PUBLIC_COLUMNS =
   "id, post_type, tool, rating, title, body, nickname, answer, answered_at, created_at";
 const ADMIN_COLUMNS = `${PUBLIC_COLUMNS}, status, updated_at`;
@@ -97,7 +102,30 @@ export async function listPublishedPosts(
   if (opts.tool) q = q.eq("tool", opts.tool);
   const { data, error, count } = await q;
   if (error) throw new Error(error.message);
-  return { rows: ((data ?? []) as Row[]).map(toPublic), total: count ?? 0 };
+  const rows = ((data ?? []) as Row[]).map(toPublic);
+  await attachCommentCounts(rows);
+  return { rows, total: count ?? 0 };
+}
+
+/** 글 목록에 게시된 댓글 수를 붙임. 댓글 테이블이 아직 없으면(마이그레이션 전) 조용히 건너뜀. */
+async function attachCommentCounts(rows: BoardPublicPost[]): Promise<void> {
+  if (!rows.length) return;
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from(COMMENT_TABLE)
+    .select("post_id")
+    .eq("status", "published")
+    .in(
+      "post_id",
+      rows.map((r) => r.id),
+    )
+    .limit(5000);
+  if (error) return;
+  const counts = new Map<string, number>();
+  for (const c of (data ?? []) as { post_id: string }[]) {
+    counts.set(c.post_id, (counts.get(c.post_id) ?? 0) + 1);
+  }
+  for (const r of rows) r.comment_count = counts.get(r.id) ?? 0;
 }
 
 /** 도구별 게시된 후기 개수·평균 별점 */
@@ -195,6 +223,7 @@ export function parseNewPost(body: unknown): ParseResult {
   const nickname = clean(b.nickname, BOARD_LIMITS.nickname);
   if (!title || !text || !nickname) return { ok: false, error: "required_fields" };
   if (text.length < 5) return { ok: false, error: "body_too_short" };
+  if (isReservedNickname(nickname)) return { ok: false, error: "reserved_nickname" };
 
   return { ok: true, value: { post_type: type, tool, rating, title, body: text, nickname } };
 }
@@ -299,5 +328,155 @@ export async function updateAdminPost(
 export async function deleteAdminPost(id: string): Promise<void> {
   const sb = getSupabaseAdmin();
   const { error } = await sb.from(TABLE).delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+
+// ---------- 댓글 ----------
+
+/** 같은 작성자의 연속 댓글 간격 / 하루 최대 댓글 수 */
+const MIN_COMMENT_INTERVAL_SEC = 30;
+const MAX_COMMENTS_PER_DAY = 30;
+
+type CommentRow = BoardPublicComment & { status?: BoardStatus };
+
+function toPublicComment(r: CommentRow): BoardPublicComment {
+  return {
+    id: r.id,
+    post_id: r.post_id,
+    body: r.body,
+    nickname: r.nickname,
+    is_admin: Boolean(r.is_admin),
+    created_at: r.created_at,
+  };
+}
+
+export async function listPublishedComments(postId: string): Promise<BoardPublicComment[]> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from(COMMENT_TABLE)
+    .select(COMMENT_PUBLIC_COLUMNS)
+    .eq("post_id", postId)
+    .eq("status", "published")
+    .order("created_at", { ascending: true })
+    .limit(200);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as CommentRow[]).map(toPublicComment);
+}
+
+/** 댓글을 달 수 있는 글인지 (게시된 글만). 있으면 알림용 정보 반환 */
+export async function getPublishedPostBrief(
+  postId: string,
+): Promise<{ id: string; title: string; tool: string | null; post_type: BoardPostType } | null> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from(TABLE)
+    .select("id, title, tool, post_type")
+    .eq("id", postId)
+    .eq("status", "published")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as { id: string; title: string; tool: string | null; post_type: BoardPostType } | null) ?? null;
+}
+
+export type NewCommentInput = { post_id: string; body: string; nickname: string };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function parseNewComment(
+  body: unknown,
+): { ok: true; value: NewCommentInput } | { ok: false; error: string } {
+  if (!body || typeof body !== "object") return { ok: false, error: "invalid_body" };
+  const b = body as Record<string, unknown>;
+  const postId = String(b.post_id ?? "");
+  if (!UUID_RE.test(postId)) return { ok: false, error: "invalid_post" };
+  const text = clean(b.body, BOARD_LIMITS.comment);
+  const nickname = clean(b.nickname, BOARD_LIMITS.nickname);
+  if (!text || !nickname) return { ok: false, error: "required_comment_fields" };
+  if (text.length < 2) return { ok: false, error: "comment_too_short" };
+  if (isReservedNickname(nickname)) return { ok: false, error: "reserved_nickname" };
+  return { ok: true, value: { post_id: postId, body: text, nickname } };
+}
+
+export function commentContainsLink(c: NewCommentInput): boolean {
+  return LINK_RE.test(`${c.body}\n${c.nickname}`);
+}
+
+export async function checkCommentRateLimit(ipHash: string): Promise<string | null> {
+  const sb = getSupabaseAdmin();
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await sb
+    .from(COMMENT_TABLE)
+    .select("created_at")
+    .eq("ip_hash", ipHash)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(MAX_COMMENTS_PER_DAY);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as { created_at: string }[];
+  if (rows.length >= MAX_COMMENTS_PER_DAY) return "comment_daily_limit";
+  const last = rows[0]?.created_at;
+  if (last && Date.now() - new Date(last).getTime() < MIN_COMMENT_INTERVAL_SEC * 1000) {
+    return "comment_too_fast";
+  }
+  return null;
+}
+
+export async function createComment(
+  input: NewCommentInput,
+  ipHash: string,
+): Promise<{ id: string; status: BoardStatus }> {
+  const sb = getSupabaseAdmin();
+  const status: BoardStatus = commentContainsLink(input) ? "pending" : "published";
+  const { data, error } = await sb
+    .from(COMMENT_TABLE)
+    .insert({ ...input, status, ip_hash: ipHash, is_admin: false })
+    .select("id, status")
+    .single();
+  if (error) throw new Error(error.message);
+  return data as { id: string; status: BoardStatus };
+}
+
+// 관리자
+
+export async function listAdminComments(postIds?: string[]): Promise<BoardAdminComment[]> {
+  const sb = getSupabaseAdmin();
+  let q = sb
+    .from(COMMENT_TABLE)
+    .select(`${COMMENT_PUBLIC_COLUMNS}, status`)
+    .order("created_at", { ascending: true })
+    .limit(2000);
+  if (postIds?.length) q = q.in("post_id", postIds);
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as CommentRow[]).map((r) => ({
+    ...toPublicComment(r),
+    status: (r.status ?? "published") as BoardStatus,
+  }));
+}
+
+export async function createAdminComment(postId: string, body: string): Promise<BoardAdminComment> {
+  const sb = getSupabaseAdmin();
+  const text = clean(body, BOARD_LIMITS.comment);
+  if (!text) throw new Error("empty_comment");
+  const { data, error } = await sb
+    .from(COMMENT_TABLE)
+    .insert({ post_id: postId, body: text, nickname: "운영자", is_admin: true, status: "published" })
+    .select(`${COMMENT_PUBLIC_COLUMNS}, status`)
+    .single();
+  if (error) throw new Error(error.message);
+  const r = data as CommentRow;
+  return { ...toPublicComment(r), status: (r.status ?? "published") as BoardStatus };
+}
+
+export async function updateAdminComment(id: string, status: BoardStatus): Promise<void> {
+  const sb = getSupabaseAdmin();
+  const { error } = await sb.from(COMMENT_TABLE).update({ status }).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteAdminComment(id: string): Promise<void> {
+  const sb = getSupabaseAdmin();
+  const { error } = await sb.from(COMMENT_TABLE).delete().eq("id", id);
   if (error) throw new Error(error.message);
 }

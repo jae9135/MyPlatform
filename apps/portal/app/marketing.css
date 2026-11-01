@@ -1706,6 +1706,31 @@
   min-height: 220px;
 }
 
+.mkt-shot-body {
+  background: #fff;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.mkt-shot-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+
+.mkt-screen-shot {
+  margin: 0;
+}
+
+.mkt-shot-caption {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--mkt-text-dimmer, #64748b);
+  text-align: right;
+}
+
 .mkt-feature-screens {
   display: flex;
   flex-direction: column;

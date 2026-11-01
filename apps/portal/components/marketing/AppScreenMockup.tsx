@@ -1,14 +1,49 @@
 /** 화면 목업 — 상호작용 없음, 서버 컴포넌트 */
 
 import type { ProductFeatureDetail, ProductScreenId } from "@/lib/marketingCatalog";
+import Image from "next/image";
+import { getScreenShot } from "@/lib/marketingScreens";
 import { ReceiptGlassMockup } from "./ReceiptGlassMockup";
 
 type Props = {
   screen: ProductScreenId;
   label?: string;
+  /** home: "프로그램 첫 화면" 영역 — 부분 캡처는 쓰지 않고 목업 유지 */
+  context?: "home" | "feature";
 };
 
-export function AppScreenMockup({ screen, label }: Props) {
+export function AppScreenMockup({ screen, label, context = "feature" }: Props) {
+  const shot = getScreenShot(screen, context);
+  if (shot) {
+    return (
+      <figure className="mkt-screen-wrap mkt-screen-shot">
+        <div className="mkt-browser">
+          <div className="mkt-browser-bar">
+            <span className="mkt-browser-dots" aria-hidden>
+              <i />
+              <i />
+              <i />
+            </span>
+            <span className="mkt-browser-url">{shot.path}</span>
+          </div>
+          <div className="mkt-browser-body mkt-shot-body">
+            <Image
+              src={shot.src}
+              alt={shot.alt}
+              width={shot.width}
+              height={shot.height}
+              sizes="(max-width: 900px) 100vw, 860px"
+              loading="lazy"
+              className="mkt-shot-img"
+              style={{ maxWidth: shot.width }}
+            />
+          </div>
+        </div>
+        <figcaption className="mkt-shot-caption">실제 화면 · 데모 샘플 실행 결과</figcaption>
+      </figure>
+    );
+  }
+
   if (screen.startsWith("receipt-")) {
     return (
       <div className="mkt-screen-wrap mkt-receipt-screen-wrap">
@@ -50,7 +85,7 @@ export function ProductDetailScreens({
         <p className="mkt-product-screen-desc">
           베타 프로그램에서 실행하면 아래와 같은 시작 화면으로 진입합니다.
         </p>
-        <AppScreenMockup screen={homeScreen} label={appHref} />
+        <AppScreenMockup screen={homeScreen} label={appHref} context="home" />
       </section>
 
       <section className="mkt-product-screen-block">

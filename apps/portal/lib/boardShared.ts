@@ -16,7 +16,20 @@ export type BoardPublicPost = {
   answer: string | null;
   answered_at: string | null;
   created_at: string;
+  /** 게시된 댓글 수 */
+  comment_count?: number;
 };
+
+export type BoardPublicComment = {
+  id: string;
+  post_id: string;
+  body: string;
+  nickname: string;
+  is_admin: boolean;
+  created_at: string;
+};
+
+export type BoardAdminComment = BoardPublicComment & { status: BoardStatus };
 
 export type BoardAdminPost = BoardPublicPost & {
   status: BoardStatus;
@@ -30,7 +43,13 @@ export const BOARD_LIMITS = {
   body: 3000,
   nickname: 30,
   answer: 3000,
+  comment: 1000,
 } as const;
+
+/** 일반 사용자가 쓸 수 없는 닉네임 (운영자 사칭 방지) */
+export function isReservedNickname(nickname: string): boolean {
+  return /운영자|관리자|admin|administrator|staff/i.test(nickname.replace(/\s+/g, ""));
+}
 
 export const BOARD_TYPE_LABEL: Record<BoardPostType, string> = {
   review: "후기",
