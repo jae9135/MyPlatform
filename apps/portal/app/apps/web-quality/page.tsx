@@ -4671,9 +4671,18 @@ export default function WebQualityPage() {
       switchMode("external", { includeRuntime: true });
       setPageUrl(demoWebSampleUrl());
       setMsg(DEMO_SAMPLE_LOADED_MSG);
+      demoAutoApplyRef.current = true;
     }, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 샘플 주소가 입력되면 「적용」(화면 시나리오 가져오기)까지 자동으로 — 사용자는 「화면 진단 실행」만 누르면 됨
+  const demoAutoApplyRef = useRef(false);
+  useEffect(() => {
+    if (!demoAutoApplyRef.current) return;
+    if (mode !== "external" || pageUrl !== demoWebSampleUrl()) return;
+    demoAutoApplyRef.current = false;
+    void loadExternalScenarios();
+  }, [mode, pageUrl, loadExternalScenarios]);
 
   return (
     <>

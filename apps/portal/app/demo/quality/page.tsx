@@ -104,7 +104,7 @@ function WebPanel() {
     <section className="mkt-panel mkt-demo-section" aria-labelledby="web-title">
       <h2 id="web-title">웹 품질 진단 — 데모 샘플 페이지</h2>
       <p>
-        이미지 대체 텍스트 누락, 낮은 명도 대비, 이름 없는 버튼, 라벨 없는 입력칸, 사용 중단된 태그를 일부러 넣은{" "}
+        이미지 대체 텍스트 누락, 낮은 명도 대비, 이름 없는 버튼, 언어 지정 누락, 사용 중단된 태그를 일부러 넣은{" "}
         <a href={W.samplePath} target="_blank" rel="noopener noreferrer">
           샘플 페이지
         </a>
@@ -121,7 +121,7 @@ function WebPanel() {
           src={W.pageImage.src}
           width={W.pageImage.width}
           height={W.pageImage.height}
-          alt="진단 대상 샘플 페이지 화면 — 데모 쇼핑몰 (특가 안내, 로그인 입력칸, 상품 표)"
+          alt="진단 대상 샘플 페이지 화면 — 데모 쇼핑몰 (특가 안내, 뉴스레터 구독 입력칸, 상품 표)"
           sizes="(max-width: 1100px) 100vw, 1060px"
         />
         <figcaption>진단 도구가 저장한 샘플 페이지 화면</figcaption>

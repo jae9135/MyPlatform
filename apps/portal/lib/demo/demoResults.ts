@@ -506,16 +506,16 @@ export const WEB_QUALITY_DEMO = {
   "generatedAt": "2026-11-01",
   "samplePath": "/samples/demo-shop/index.html",
   "stats": {
-    "total": 22,
+    "total": 21,
     "pass": 2,
-    "fail": 10,
+    "fail": 9,
     "review": 7,
     "manual": 3,
     "not_scanned": 0,
     "na": 0,
     "by_category": {
       "a11y": {
-        "fail": 9,
+        "fail": 8,
         "pass": 0,
         "not_scanned": 0
       },
@@ -563,14 +563,6 @@ export const WEB_QUALITY_DEMO = {
       "kwcag": "5.1.1",
       "severity": "error",
       "message": "Images must have alternative text"
-    },
-    {
-      "status": "fail",
-      "category": "a11y",
-      "rule": "WA-3.4.1",
-      "kwcag": "7.3.1",
-      "severity": "error",
-      "message": "Form elements must have labels"
     },
     {
       "status": "fail",
@@ -673,11 +665,6 @@ export const WEB_QUALITY_DEMO = {
     "src": "/marketing/demo/web-sample-page.webp",
     "width": 1280,
     "height": 900
-  },
-  "contrastImage": {
-    "src": "/marketing/demo/web-sample-contrast.webp",
-    "width": 359,
-    "height": 14
   }
 } as const;
 
