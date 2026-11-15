@@ -31,6 +31,7 @@ build/
 
 # local backups · runtime session (never commit)
 _backup/
+backup/
 apps/api/ipms-session.json
 
 # OS / IDE
